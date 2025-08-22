@@ -18,13 +18,13 @@ OBJECTS=$(patsubst $(SRCDIR)/%.cpp,$(BINARIES)/%.o,$(CPPFILES))
 DEBUGOBJECTS=$(patsubst $(SRCDIR)/%.cpp,$(DEBUGBINARIES)/%.o,$(CPPFILES))
 
 all:
-	$(info Usage: make [options])
-	$(info options:)
-	$(info build-release -> release build without debug flags)
-	$(info build-debug -> debug build)
-	$(info clean -> remove executable and objects)
-	$(info run-debug -> run debug build)
-	$(info run -> run release build)
+	@echo "Usage: make [options]"
+	@echo "options:"
+	@echo "build-release -> release build without debug flags"
+	@echo "build-debug -> debug build"
+	@echo "clean -> remove executable and objects"
+	@echo "run-debug -> run debug build"
+	@echo "run -> run release build"
 
 build-release: $(OBJECTS)
 	@mkdir -p $(BUILDDIR)
