@@ -2,6 +2,7 @@ CXX=g++
 STD=-std=c++17
 OPTFLAGS=-O3
 CXXFLAGS=-Wall -Wextra
+LDFLAGS=-lcpr -lcurl -lssl -lcrypto -pthread
 DEBUG_FLAGS=-g
 INCLUDE_DIRS=./include
 SRCDIR=./src
@@ -28,7 +29,7 @@ all:
 
 build-release: $(OBJECTS)
 	@mkdir -p $(BUILDDIR)
-	@$(CXX) -o $(BUILDDIR)/quiver $^
+	@$(CXX) -o $(BUILDDIR)/quiver $^ $(LDFLAGS)
 
 $(BINARIES)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(BINARIES)
@@ -37,7 +38,7 @@ $(BINARIES)/%.o: $(SRCDIR)/%.cpp
 
 build-debug: $(DEBUG_OBJECTS)
 	@mkdir -p $(DEBUG_BUILDDIR)
-	@$(CXX) -o $(DEBUG_BUILDDIR)quiver $^
+	@$(CXX) -o $(DEBUG_BUILDDIR)/quiver $^ $(LDFLAGS)
 
 $(DEBUG_BINARIES)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(DEBUG_BINARIES)
@@ -52,4 +53,4 @@ run: build-release
 	@$(BUILDDIR)/quiver
 
 run-debug: build-debug
-	@$(BUILDDIR)/quiver
+	@$(DEBUG_BUILDDIR)/quiver
