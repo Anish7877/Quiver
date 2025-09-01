@@ -1,6 +1,4 @@
 #include "../include/tty_proxy_server.hpp"
-#include <libgen.h> // For dirname
-#include <vector>   // For a cleaner ensure_dirs
 
 // static variables
 bool TTYProxyServer::m_running { false };

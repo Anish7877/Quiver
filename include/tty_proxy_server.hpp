@@ -1,5 +1,7 @@
 #pragma once
 
+#include <libgen.h>
+#include <vector>
 #include <sched.h>
 #include <string>
 #include <string_view>
