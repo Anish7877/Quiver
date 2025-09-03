@@ -184,11 +184,17 @@ std::string ImageManager::parse_auth_header(const std::string& header, const std
 }
 
 std::future<std::string> ImageManager::download_layer_async(const std::string& url, const std::string& token, const std::string& destination_path) {
-    return std::async(std::launch::async, [url, token, destination_path]() -> std::string {
+    return std::async(std::launch::async, [this, url, token, destination_path, digest]() -> std::string {
         std::ofstream out_file(destination_path, std::ios::binary);
         if (!out_file) return "Failed to open file for writing: " + destination_path;
 
-        cpr::Response r = cpr::Download(out_file, cpr::Url{url}, cpr::Header{{"Authorization", "Bearer " + token}});
+        auto progress_callback = [&](cpr::cpr_off_t downloadTotal, cpr::cpr_off_t downloadNow, cpr::cpr_off_t uploadTotal, cpr::cpr_off_t uploadNow, intptr_t userdata) -> bool {
+            std::lock_guard<std::mutex> lock(m_progress_mutex);
+            m_download_progress[digest] = {downloadTotal, downloadNow};
+            return true;
+        };
+
+        cpr::Response r = cpr::Download(out_file, cpr::Url{url}, cpr::Header{{"Authorization", "Bearer " + token}}, cpr::Progress(progress_callback));
         out_file.close();
 
         if (r.status_code != 200 && r.status_code != 307) {
@@ -197,6 +203,49 @@ std::future<std::string> ImageManager::download_layer_async(const std::string& u
         return "";
     });
 }
+
+void ImageManager::print_progress() {
+    std::cout << "\n";
+    while (true) {
+        long long total_downloaded = 0;
+        long long total_size = 0;
+        int completed_layers = 0;
+        int total_layers = 0;
+
+        {
+            std::lock_guard<std::mutex> lock(m_progress_mutex);
+            total_layers = m_download_progress.size();
+            for (const auto& pair : m_download_progress) {
+                total_downloaded += pair.second.downloaded;
+                total_size += pair.second.total;
+                if (pair.second.downloaded == pair.second.total && pair.second.total > 0) {
+                    completed_layers++;
+                }
+            }
+        }
+
+        if (total_layers > 0) {
+            float percentage = (total_size > 0) ? (static_cast<float>(total_downloaded) / total_size) * 100.0f : 0.0f;
+            int bar_width = 50;
+            int pos = bar_width * (percentage / 100.0f);
+
+            std::cout << "\rDownloading: [";
+            for (int i=0; i < bar_width; ++i) {
+                if (i < pos) std::cout << "=";
+                else if (i == pos) std::cout << ">";
+                else std::cout << " ";
+            }
+            std::cout << "]" << std::fixed << std::setprecision(2) << percentage << "%";
+            std::cout << "(" << completed_layers << "/" << total_layers << " layers)";
+            std::cout << "(" << (total_downloaded / 1024 / 1024) << "MB / " << (total_size / 1024 / 1024) << "MB";
+            std::cout.flush();  
+        }
+
+        if (completed_layers == total_layers && total_layers > 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    std::cout << "\n\n";
+} 
 
 bool ImageManager::extract_layer(const std::string& tarball_path, const std::string& destination_path, std::string& error) {
     std::string command = "tar -xzf " + tarball_path + " -C " + destination_path;
@@ -216,7 +265,10 @@ bool ImageManager::download_and_extract_layers(const json& manifest, const std::
     }
 
     std::vector<std::string> digests;
-    for (const auto& layer : manifest["layers"]) digests.push_back(layer["digest"]);
+    for (const auto& layer : manifest["layers"]) {
+        digests.push_back(layer["digest"]);
+        m_download_progress[layer["digest"]] = {0, 0};
+    }
 
     std::vector<std::future<std::string>> download_futures;
     std::vector<std::string> tarball_paths;
@@ -226,24 +278,32 @@ bool ImageManager::download_and_extract_layers(const json& manifest, const std::
         std::string url = "https://registry-1.docker.io/v2/" + repo + "/blobs/" + digest;
         std::string path = destination_path + "/" + digest.substr(7) + ".tar.gz";
         tarball_paths.push_back(path);
-        download_futures.push_back(download_layer_async(url, token, path));
+        download_futures.push_back(download_layer_async(url, token, path, digest));
     }
+
+    std::thread progress_thread(&ImageManager::print_progress, this);
 
     std::cout << "Waiting for downloads to complete and extracting layers sequentially..." << std::endl;
     for (size_t i = 0; i < digests.size(); ++i) {
-        std::cout << "Waiting for layer " << i + 1 << "/" << digests.size() << " (" << digests[i].substr(0, 20) << ")..." << std::endl;
-
+        std::cout << "  -> Waiting for layer " << i + 1 << "/" << digests.size() << " (" << digests[i].substr(0, 20) << ")..." << std::endl;
         std::string download_error = download_futures[i].get();
         if (!download_error.empty()) {
             error = download_error;
+            progress_thread.join();
             return false;
         }
+    }
 
-        std::cout << "  Download complete. Extracting layer " << i + 1 << "..." << std::endl;
+    progress_thread.join();
+
+    std::cout << "Download complete. Extracting layers..." << std::endl;
+    for (size_t i = 0; i < digests.size(); ++i) {
+        std::cout << "  -> Extracting layer " << i+1 << "/" << digests.size() << "(" << digests.substr(0, 12) << ")" << std::endl;
         if (!extract_layer(tarball_paths[i], destination_path, error)) {
             return false;
         }
         std::remove(tarball_paths[i].c_str());
     }
+    std::cout << "Image pull and extraction complete." << std::endl;
     return true;
 }

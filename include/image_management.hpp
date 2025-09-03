@@ -34,5 +34,14 @@ private:
     std::future<std::string> download_layer_async(const std::string& url, const std::string& token, const std::string& destination_path);
     bool extract_layer(const std::string& tarball_path, const std::string& destination_path, std::string& error);
     bool download_and_extract_layers(const json& manifest, const std::string& repo, const std::string& token, const std::string& destinationPath, std::string& error);
+
+    // Download Bar Stuff
+    std::map<std::string, DownloadProgress> m_download_progress;
+    std::mutex m_progress_mutex;
+    void print_progress();
 };
 
+struct DownloadProgress {
+    long long total = 0;
+    long long downloaded = 0;
+};
