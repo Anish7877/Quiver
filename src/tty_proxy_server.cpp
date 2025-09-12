@@ -3,6 +3,8 @@
 bool TTYProxyServer::m_running { false };
 pid_t TTYProxyServer::m_server_pid { -1 };
 
+// attach -> use quiver -a <container_id or container name>
+// detach -> inside container ctrl-p then ctrl-q
 int TTYProxyServer::handle_error(std::string_view err) {
     perror(err.data());
     return -1;
@@ -16,13 +18,13 @@ std::string TTYProxyServer::get_sock_path(pid_t pid) {
 }
 
 void TTYProxyServer::ensure_dirs(const std::string& path) {
-    std::string path_copy = path;
-    char* dir_path = dirname(&path_copy[0]);
-    std::string path_to_create = dir_path;
+    std::string path_copy { path };
+    char* dir_path { dirname(&path_copy[0]) };
+    std::string path_to_create { dir_path };
 
     size_t pos = 1;
     while ((pos = path_to_create.find('/', pos)) != std::string::npos) {
-        std::string prefix = path_to_create.substr(0, pos);
+        std::string prefix { path_to_create.substr(0, pos) };
         if (mkdir(prefix.c_str(), 0755) != 0) {
             if (errno != EEXIST) {
                 perror("mkdir");
@@ -99,7 +101,7 @@ int TTYProxyServer::run(int master_fd, pid_t monitor_pid, const std::string& soc
             break;
         }
 
-        bool client_connected = true;
+        bool client_connected { true };
         while (client_connected) {
             pid_t rr{ waitpid(monitor_pid, &status, WNOHANG) };
             if (rr == monitor_pid) {
@@ -158,7 +160,6 @@ int TTYProxyServer::run(int master_fd, pid_t monitor_pid, const std::string& soc
             break;
         }
     }
-
     return proxy_cleanup(sfd, master_fd, sock_path);
 }
 
@@ -169,20 +170,14 @@ int TTYProxyServer::client_cleanup(const termios& oldt, int sfd) {
 }
 
 int TTYProxyServer::proxy_cleanup(int sfd, int master_fd, const std::string& sock_path) {
+
     if (sfd >= 0) close(sfd);
-    unlink(sock_path.c_str());
-
-    std::string path_copy = sock_path;
-    char* dir_path = dirname(&path_copy[0]);
-    if (dir_path) {
-        rmdir(dir_path);
-    }
-
     if (master_fd >= 0) close(master_fd);
+    if(!sock_path.empty()){
+    }
     m_running = false;
     return 0;
 }
-
 int TTYProxyServer::reattach_to_socket(std::string_view sock_path) {
     int sfd{ socket(AF_UNIX, SOCK_STREAM, 0) };
     if (sfd == -1) return handle_error("Attach Socket failed");
@@ -202,12 +197,13 @@ int TTYProxyServer::reattach_to_socket(std::string_view sock_path) {
         return handle_error("Attach tcgetattr failed");
     }
 
-    termios newt = oldt;
+    termios newt { oldt };
     cfmakeraw(&newt);
     tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
     bool saw_ctrlp { false };
     bool should_run { true };
+    bool user_detached { false };
 
     while (should_run) {
         pollfd fds[2]{};
@@ -240,9 +236,10 @@ int TTYProxyServer::reattach_to_socket(std::string_view sock_path) {
                 if (saw_ctrlp) {
                     if (c == 0x11) {
                         should_run = false;
+                        user_detached = true;
                         break;
                     }
-                    unsigned char seq[2] = { 0x10, c };
+                    unsigned char seq[2] { 0x10, c };
                     if (write(sfd, seq, 2) <= 0) {
                         should_run = false;
                         break;
@@ -263,7 +260,7 @@ int TTYProxyServer::reattach_to_socket(std::string_view sock_path) {
 
         if (fds[1].revents & POLLIN) {
             char buf[4096];
-            ssize_t n = read(sfd, buf, sizeof(buf));
+            ssize_t n { read(sfd, buf, sizeof(buf)) };
             if (n <= 0) {
                 should_run = false;
                 break;
@@ -277,10 +274,12 @@ int TTYProxyServer::reattach_to_socket(std::string_view sock_path) {
 
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
     close(sfd);
-    if (!m_running) {
-        fprintf(stderr, "\r\n[session terminated by server]\r\n");
-    } else {
+
+    if (user_detached) {
         fprintf(stderr, "\r\n[detached from container]\r\n");
+    }
+    else {
+        fprintf(stderr, "\r\n[session terminated by server]\r\n");
     }
     return 0;
 }

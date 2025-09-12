@@ -1,7 +1,7 @@
 #include "../include/image_management.hpp"
 
 ImageManager::ImageManager() {
-    const char* home_dir = std::getenv("HOME");
+    const char* home_dir { getenv("HOME") };
     if (home_dir != nullptr) {
         this->base_cache_path = std::string(home_dir) + "/.quiver/images";
     }
@@ -20,14 +20,14 @@ bool ImageManager::remove(const std::string& image_name, std::string& error) {
         error = "CRITICAL: HOME environment variable is not set.";
         return false;
     }
-    std::string image_path = get_image_path(image_name);
+    std::string image_path { get_image_path(image_name) };
     if (!path_exists(image_path)) {
         error = "Image not found locally: " + image_name;
         return false;
     }
 
     std::cout << "Removing image at " << image_path << std::endl;
-    std::string rm_command = "rm -rf " + image_path;
+    std::string rm_command { "rm -rf " + image_path };
     if (system(rm_command.c_str()) != 0) {
         error = "Error removing image.";
         return false;
@@ -41,12 +41,12 @@ void ImageManager::handle_error(const std::string& message) {
 }
 
 bool ImageManager::path_exists(const std::string& path) const {
-    struct stat buffer;
+    struct stat buffer{};
     return (stat(path.c_str(), &buffer) == 0);
 }
 
 std::string ImageManager::get_image_path(const std::string& image_name) const {
-    std::string safe_image_name = image_name;
+    std::string safe_image_name { image_name };
     std::replace(safe_image_name.begin(), safe_image_name.end(), ':', '_');
     std::replace(safe_image_name.begin(), safe_image_name.end(), '/', '_');
     return this->base_cache_path + "/" + safe_image_name;
@@ -55,14 +55,14 @@ std::string ImageManager::get_image_path(const std::string& image_name) const {
 bool ImageManager::get_image(const std::string& image_name, std::string& out_path, std::string& error) {
     out_path = get_image_path(image_name);
     if (path_exists(out_path)) {
-        std::cout << "Image found in local cache." << std::endl;
+        std::cout << "Image found in local storage." << std::endl;
         return true;
     }
 
-    std::cout << "Image not in cache. Pulling from registry..." << std::endl;
+    std::cout << "Image not in local storage. Pulling from registry..." << std::endl;
     if (!pull_image_from_registry(image_name, out_path, error)) {
         if (path_exists(out_path)) {
-            std::string rm_command = "rm -rf " + out_path;
+            std::string rm_command { "rm -rf " + out_path };
             system(rm_command.c_str());
         }
         error = "Failed to pull image. Reason: " + error;
@@ -74,18 +74,18 @@ bool ImageManager::get_image(const std::string& image_name, std::string& out_pat
 }
 
 bool ImageManager::pull_image_from_registry(const std::string& image_name, const std::string& image_path, std::string& error) {
-    std::string repo, tag;
-    size_t colon_pos = image_name.find(':');
+    std::string repo{}, tag{};
+    size_t colon_pos { image_name.find(':') };
     repo = (colon_pos != std::string::npos) ? image_name.substr(0, colon_pos) : image_name;
     tag = (colon_pos != std::string::npos) ? image_name.substr(colon_pos + 1) : "latest";
     if (repo.find('/') == std::string::npos) repo = "library/" + repo;
 
     std::cout << "Authenticating..." << std::endl;
-    std::string token;
+    std::string token{};
     if (!get_auth_token(image_name, token, error)) return false;
 
     std::cout << "Fetching manifest for '" << tag << "'..." << std::endl;
-    json manifest;
+    json manifest{};
     if (!get_manifest(image_name, token, manifest, error)) return false;
 
     if (manifest.contains("manifests")) {
@@ -199,7 +199,7 @@ std::future<std::string> ImageManager::download_layer_async(const std::string& u
 }
 
 bool ImageManager::extract_layer(const std::string& tarball_path, const std::string& destination_path, std::string& error) {
-    std::string command = "tar -xzf " + tarball_path + " -C " + destination_path;
+    std::string command { "tar -xzf " + tarball_path + " -C " + destination_path };
     if (system(command.c_str()) != 0) {
         error = "Failed to extract layer " + tarball_path;
         return false;
@@ -215,11 +215,11 @@ bool ImageManager::download_and_extract_layers(const json& manifest, const std::
         return false;
     }
 
-    std::vector<std::string> digests;
+    std::vector<std::string> digests{};
     for (const auto& layer : manifest["layers"]) digests.push_back(layer["digest"]);
 
-    std::vector<std::future<std::string>> download_futures;
-    std::vector<std::string> tarball_paths;
+    std::vector<std::future<std::string>> download_futures{};
+    std::vector<std::string> tarball_paths{};
 
     std::cout << "Launching " << digests.size() << " layer downloads in parallel..." << std::endl;
     for (const auto& digest : digests) {

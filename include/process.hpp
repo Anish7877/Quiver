@@ -42,10 +42,8 @@ class Process {
         static int run(std::string_view path);
         static int write_file(const std::string& path,const std::string& str);
         static int pivot_root();
-        static std::string get_directory(pid_t pid);
-        static void ensure_directory(const std::string& dir);
-        static int tty_proxy(int master_fd,pid_t pid,const std::string& sock_path);
-        static void tty_proxy_cleanup();
+        static std::string get_filesystem_dir(pid_t pid);
+        static void ensure_dirs(const std::string& dir);
         static pid_t m_child_pid;
         static uid_t m_uid;
         static std::string m_new_hostname;
