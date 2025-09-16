@@ -22,7 +22,7 @@ struct DownloadProgress {
 
 class ImageManager {
     public:
-        ImageManager()=default;
+        ImageManager();
         bool pull(const std::string& imageName, std::string& outPath, std::string& error);
         bool remove(const std::string& imageName, std::string& error);
         static void handle_error(const std::string& message);
