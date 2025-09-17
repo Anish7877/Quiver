@@ -1,6 +1,7 @@
 #include "../include/process.hpp"
 #include "../include/tty_proxy_server.hpp"
 #include "../include/network.hpp"
+#include <cstdlib>
 
 // static variables
 pid_t Process::m_child_pid{-1};
@@ -141,11 +142,11 @@ int Process::run_container(ContainerArgs* args) {
     rmdir("/old_root");
 
     std::cerr << "DEBUG: Pivot completed successfully!" << '\n';
-
-    // Wait for network setup from parent
-    std::cerr << "Waiting for network setup..." << '\n';
-    sleep(3);
-
+    // In run_container(), after pivot_root but before exec
+    // Create /etc/resolv.conf
+    std::ofstream resolv("/etc/resolv.conf");
+    resolv << "nameserver 10.0.2.3\n";  // slirp4netns default DNS
+    resolv.close();
     // Configure network interface inside container
     std::cerr << "Starting program: " << args->program_path << '\n';
     execl(args->program_path.c_str(), args->program_path.c_str(), (char*)NULL);
@@ -217,9 +218,9 @@ int Process::run(const std::string& path){
 
         // Wait for container
         int status;
-        waitpid(m_child_pid, &status, 0);
+        waitpid(m_child_pid, &status, WNOHANG);
 
-        std::string sock = tty.get_sock_path(m_child_pid);
+        std::string sock { tty.get_sock_path(m_child_pid) };
         std::cerr << "Container started. attach socket: " << sock << '\n';
         return 0;
     }
