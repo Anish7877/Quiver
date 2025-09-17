@@ -2,7 +2,7 @@ CXX=g++
 STD=-std=c++17
 OPTFLAGS=-O3
 CXXFLAGS=-Wall -Wextra
-LDFLAGS=-lcpr -lcurl -lssl -lcrypto -pthread
+LDFLAGS=-lcpr -lcurl -lssl -lcrypto -pthread -lsqlite3 
 DEBUG_FLAGS=-g
 INCLUDE_DIRS=./include
 SRCDIR=./src
@@ -54,3 +54,4 @@ run: build-release
 
 run-debug: build-debug
 	@$(DEBUG_BUILDDIR)/quiver
+
