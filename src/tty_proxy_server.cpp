@@ -1,16 +1,17 @@
 #include "../include/tty_proxy_server.hpp"
+#include "../include/network.hpp"
 
 bool TTYProxyServer::m_running { false };
 pid_t TTYProxyServer::m_server_pid { -1 };
 
 // attach -> use quiver -a <container_id or container name>
 // detach -> inside container ctrl-p then ctrl-q
-int TTYProxyServer::handle_error(std::string_view err) {
+int TTYProxyServer::handle_error(const std::string& err) {
     perror(err.data());
     return -1;
 }
 
-std::string TTYProxyServer::get_sock_path(pid_t pid) {
+std::string TTYProxyServer::get_sock_path(const pid_t pid) {
     const char* home{ getenv("HOME") };
     std::string base{ home ? std::string(home) : "/tmp" };
     std::string path{ base + "/.quiver/containers/" + std::to_string(static_cast<long long>(pid)) + "/attach.sock" };
@@ -19,10 +20,9 @@ std::string TTYProxyServer::get_sock_path(pid_t pid) {
 
 void TTYProxyServer::ensure_dirs(const std::string& path) {
     std::string path_copy { path };
-    char* dir_path { dirname(&path_copy[0]) };
-    std::string path_to_create { dir_path };
-
+    std::string path_to_create { dirname(&path_copy[0]) };
     size_t pos = 1;
+
     while ((pos = path_to_create.find('/', pos)) != std::string::npos) {
         std::string prefix { path_to_create.substr(0, pos) };
         if (mkdir(prefix.c_str(), 0755) != 0) {
@@ -41,14 +41,14 @@ void TTYProxyServer::ensure_dirs(const std::string& path) {
     }
 }
 
-int TTYProxyServer::start(int master_fd, pid_t monitor_pid, const std::string& sock_path) {
+int TTYProxyServer::start(const int master_fd, const pid_t monitor_pid, const std::string& sock_path) {
     if (!m_running) {
         return run(master_fd, monitor_pid, sock_path);
     }
     return 0;
 }
 
-int TTYProxyServer::run(int master_fd, pid_t monitor_pid, const std::string& sock_path) {
+int TTYProxyServer::run(const int master_fd, const pid_t monitor_pid, const std::string& sock_path) {
     ensure_dirs(sock_path);
 
     unlink(sock_path.c_str());
@@ -163,22 +163,21 @@ int TTYProxyServer::run(int master_fd, pid_t monitor_pid, const std::string& soc
     return proxy_cleanup(sfd, master_fd, sock_path);
 }
 
-int TTYProxyServer::client_cleanup(const termios& oldt, int sfd) {
+int TTYProxyServer::client_cleanup(const termios& oldt, const int sfd) {
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
     if (sfd >= 0) close(sfd);
     return -1;
 }
 
-int TTYProxyServer::proxy_cleanup(int sfd, int master_fd, const std::string& sock_path) {
+int TTYProxyServer::proxy_cleanup(const int sfd, const int master_fd, const std::string& sock_path) {
 
     if (sfd >= 0) close(sfd);
     if (master_fd >= 0) close(master_fd);
-    if(!sock_path.empty()){
-    }
     m_running = false;
+    kill(Network::get_net_pid(),SIGTERM);
     return 0;
 }
-int TTYProxyServer::reattach_to_socket(std::string_view sock_path) {
+int TTYProxyServer::reattach_to_socket(const std::string& sock_path) {
     int sfd{ socket(AF_UNIX, SOCK_STREAM, 0) };
     if (sfd == -1) return handle_error("Attach Socket failed");
 
@@ -281,11 +280,6 @@ int TTYProxyServer::reattach_to_socket(std::string_view sock_path) {
     else {
         fprintf(stderr, "\r\n[session terminated by server]\r\n");
     }
-    return 0;
-}
-
-int TTYProxyServer::detach_from_socket(int cfd) {
-    close(cfd);
     return 0;
 }
 

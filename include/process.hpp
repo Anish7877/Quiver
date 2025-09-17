@@ -15,7 +15,6 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <string>
-#include <string_view>
 #include <sys/types.h>
 #include <pty.h>
 #include <utmp.h>
@@ -27,25 +26,29 @@
 #include <signal.h>
 #include <pwd.h>
 
+struct ContainerArgs {
+    std::string hostname;
+    std::string rootfs_path;
+    std::string program_path;
+    int slave_fd;
+    std::string filesystem_dir;
+};
 class Process {
     public:
         Process() = default;
         ~Process();
-        int start(const std::string& new_hostname,const std::string& container_name,std::string_view path);
-        int attach();
-        int detach();
-        int reattach();
-        int stop();
+        int start(const std::string& new_hostname,const std::string& container_name,const std::string& path);
+        static int run_container(ContainerArgs* arg);
         pid_t pid() const { return m_child_pid; }
     private:
-        static int handle_error(std::string_view err);
-        static int run(std::string_view path);
+        static int handle_error(const std::string& err);
+        static int setup_user_namespace();
+        static int run(const std::string& path);
         static int write_file(const std::string& path,const std::string& str);
         static int pivot_root();
-        static std::string get_filesystem_dir(pid_t pid);
+        static std::string get_filesystem_dir(const pid_t pid);
         static void ensure_dirs(const std::string& dir);
         static pid_t m_child_pid;
-        static uid_t m_uid;
         static std::string m_new_hostname;
         static std::string m_new_fs;
 };

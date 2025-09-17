@@ -10,7 +10,7 @@
 class ContainerArgs {
     public:
         explicit ContainerArgs();
-        explicit ContainerArgs(std::string_view host_name = "container",std::string_view container_name = "container 1");
+        explicit ContainerArgs(const std::string& host_name = "container",const std::string& container_name = "container 1");
         void set_running_status(bool running){ m_running = running; }
         void set_attached_status(bool attached){ m_attached = attached; }
         std::string get_container_id() const { return m_container_id; }
@@ -38,17 +38,15 @@ class ContainerArgs {
 class Containers {
     public:
         explicit Containers();
-        void add_container();
-        void remove_container();
-        void log_container_data();
+        void add_container() const;
+        void remove_container() const;
+        void log_container_data() const;
         ~Containers();
     private:
-        std::string container_id_generator(const std::string& seed);
-        std::string seed_generator();
-        void create_necessary_directories();
-        void create_necessary_files();
-        std::string get_username();
+        std::string container_id_generator(const std::string& seed) const;
+        std::string seed_generator() const;
+        void ensure_dirs() const;
+        void ensure_files() const;
         const static std::string m_container_db_path;
         const static std::string m_container_log_path;
-        std::string m_container_database{};
 };

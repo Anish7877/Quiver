@@ -4,7 +4,6 @@
 #include <vector>
 #include <sched.h>
 #include <string>
-#include <string_view>
 #include <iostream>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -19,19 +18,18 @@
 class TTYProxyServer {
     public:
         TTYProxyServer() = default;
-        int start(int master_fd,pid_t monitor_pid,const std::string& sock_path);
+        int start(const int master_fd,const pid_t monitor_pid,const std::string& sock_path);
         bool is_running() const { return m_running; };
-        int reattach_to_socket(std::string_view socket_path);
-        std::string get_sock_path(pid_t pid);
-        static int detach_from_socket(int cfd);
+        int reattach_to_socket(const std::string& socket_path);
+        std::string get_sock_path(const pid_t pid);
         ~TTYProxyServer();
     private:
-        static int handle_error(std::string_view err);
+        static int handle_error(const std::string& err);
         static void ensure_dirs(const std::string& dir);
-        std::string get_sock_dir(pid_t pid);
-        static int run(int master_fd,pid_t monitor_pid,const std::string& sock_path);
-        static int proxy_cleanup(int sfd,int master_fd,const std::string& sock_path);
-        int client_cleanup(const termios& oldt,int sfd);
+        std::string get_sock_dir(const pid_t pid);
+        static int run(const int master_fd,const pid_t monitor_pid,const std::string& sock_path);
+        static int proxy_cleanup(const int sfd,const int master_fd,const std::string& sock_path);
+        int client_cleanup(const termios& oldt,const int sfd);
         static bool m_running;
         static pid_t m_server_pid;
 };
