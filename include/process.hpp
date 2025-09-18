@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vector>
 #include <iostream>
 #include <sched.h>
 #include <string>
@@ -37,7 +38,7 @@ class Process {
     public:
         Process() = default;
         ~Process();
-        int start(const std::string& new_hostname,const std::string& container_name,const std::string& path);
+        int start(const std::string& new_hostname,const std::vector<std::string>& volumes,const std::string& container_name,const std::string& path);
         static int run_container(ContainerArgs* arg);
         pid_t pid() const { return m_child_pid; }
     private:
@@ -51,4 +52,5 @@ class Process {
         static pid_t m_child_pid;
         static std::string m_new_hostname;
         static std::string m_new_fs;
+        static std::vector<std::string> m_volumes;
 };

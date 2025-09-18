@@ -1,21 +1,21 @@
 #include "../include/process.hpp"
 #include "../include/tty_proxy_server.hpp"
 #include "../include/network.hpp"
-#include <cstdlib>
+#include <sys/mount.h>
 
 // static variables
 pid_t Process::m_child_pid{-1};
 std::string Process::m_new_hostname{""};
 std::string Process::m_new_fs{""};
-
+std::vector<std::string> Process::m_volumes{""};
 // Stack for clone
 static constexpr size_t STACK_SIZE = 1024 * 1024; // 1MB stack
 static char child_stack[STACK_SIZE];
 
-
-int Process::start(const std::string& new_hostname,const std::string& filesystem_path,const std::string& path){
+int Process::start(const std::string& new_hostname,const std::vector<std::string>& volumes,const std::string& filesystem_path,const std::string& path){
     m_new_hostname = new_hostname;
     m_new_fs = filesystem_path;
+    m_volumes = volumes;
     if(run(path) == -1) return -1;
     return 0;
 }
@@ -107,10 +107,32 @@ int Process::run_container(ContainerArgs* args) {
     mkdir((merged + "/old_root").c_str(), 0755);
     mkdir((merged + "/etc").c_str(), 0755);
 
+    size_t no_volumes{m_volumes.size()};
+    if(no_volumes > 0){
+        std::vector<std::string> paths{};
+        std::vector<std::string> dirs{};
+        for(size_t i{0};i<no_volumes;++i){
+            size_t pos{ m_volumes[i].find(':') };
+            paths.emplace_back(m_volumes[i].substr(0,pos));
+            dirs.emplace_back(m_volumes[i].substr(pos+1));
+        }
+        for(size_t i{0};i<dirs.size();++i){
+            dirs[i] = merged + dirs[i];
+            ensure_dirs(dirs[i]);
+        }
+        for(size_t i{0};i<paths.size();++i){
+            if(mount(paths[i].c_str(),dirs[i].c_str(),nullptr,MS_BIND|MS_REC,nullptr) == -1){
+                std::cerr << "Unable to mount " << paths[i] << " to " << dirs[i] << '\n';
+            }
+            else{
+                std::cout << "successfully mounted " << paths[i] << " to " << dirs[i] << '\n';
+            }
+        }
+    }
     // Pre-mount essential filesystems
-    std::string new_proc_path = merged + "/proc";
-    std::string new_sys_path  = merged + "/sys";
-    std::string new_dev_path  = merged + "/dev";
+    std::string new_proc_path { merged + "/proc" };
+    std::string new_sys_path  { merged + "/sys" };
+    std::string new_dev_path  { merged + "/dev" };
 
     mount("proc", new_proc_path.c_str(), "proc", MS_NODEV|MS_NOSUID|MS_NOEXEC, NULL);
     mount("sysfs", new_sys_path.c_str(), "sysfs", MS_NODEV|MS_NOSUID|MS_NOEXEC, NULL);
@@ -140,12 +162,11 @@ int Process::run_container(ContainerArgs* args) {
     // Unmount old root
     umount2("/old_root", MNT_DETACH);
     rmdir("/old_root");
-
     std::cerr << "DEBUG: Pivot completed successfully!" << '\n';
-    // In run_container(), after pivot_root but before exec
-    // Create /etc/resolv.conf
+
+    // volumes
     std::ofstream resolv("/etc/resolv.conf");
-    resolv << "nameserver 10.0.2.3\n";  // slirp4netns default DNS
+    resolv << "nameserver 10.0.2.3\n";
     resolv.close();
     // Configure network interface inside container
     std::cerr << "Starting program: " << args->program_path << '\n';
@@ -157,7 +178,7 @@ int Process::run_container(ContainerArgs* args) {
 
 int Process::run(const std::string& path){
     // Create PTY pair
-    int master_fd, slave_fd;
+    int master_fd{}, slave_fd{};
     char slave_name[128];
     winsize ws{};
     ioctl(STDIN_FILENO, TIOCGWINSZ, &ws);
@@ -167,12 +188,12 @@ int Process::run(const std::string& path){
     }
 
     // Prepare arguments for container
-    std::string filesystem_dir = get_filesystem_dir(getpid());
+    std::string filesystem_dir { get_filesystem_dir(getpid()) };
     ContainerArgs args{m_new_hostname, m_new_fs, path, slave_fd, filesystem_dir};
 
     // Clone with all namespaces
-    int clone_flags = CLONE_NEWUSER | CLONE_NEWUTS | CLONE_NEWNS |
-                     CLONE_NEWPID | CLONE_NEWNET | SIGCHLD;
+    int clone_flags { CLONE_NEWUSER | CLONE_NEWUTS | CLONE_NEWNS |
+                     CLONE_NEWPID | CLONE_NEWNET | SIGCHLD };
 
     m_child_pid = clone(container_main,
                        child_stack + STACK_SIZE,
@@ -200,7 +221,7 @@ int Process::run(const std::string& path){
         return -1;
     }
 
-    pid_t proxy_pid = fork();
+    pid_t proxy_pid { fork() };
     if (proxy_pid == -1) {
         close(master_fd);
         return handle_error("fork for proxy failed");
@@ -217,7 +238,7 @@ int Process::run(const std::string& path){
         close(master_fd);
 
         // Wait for container
-        int status;
+        int status{};
         waitpid(m_child_pid, &status, WNOHANG);
 
         std::string sock { tty.get_sock_path(m_child_pid) };

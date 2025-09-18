@@ -33,9 +33,9 @@ int Network::setup_networking(const pid_t& pid){
 
         std::string pid_str{std::to_string(pid)};
         execl("/usr/bin/slirp4netns", "slirp4netns",
-              "--configure",           // Auto-configure network interface
-              "--mtu=65520",          // Set MTU
-              "--enable-sandbox",     // Your existing flag
+              "--configure",
+              "--mtu=65520",
+              "--enable-sandbox",
               pid_str.c_str(),
               "tap0",
               (char*)NULL);
@@ -44,7 +44,6 @@ int Network::setup_networking(const pid_t& pid){
         _exit(1);
     }
     else if(m_net_pid > 0){
-        // Give slirp4netns time to start up
         usleep(500000); // 500ms
         return 0;
     }
@@ -59,7 +58,7 @@ int Network::setup_networking_with_ports(const pid_t& pid,
     std::cout << "Setting up network for PID " << pid << " with port forwarding\n";
 
     // Create API socket path
-    std::string api_socket = "/tmp/slirp4netns-" + std::to_string(pid) + ".sock";
+    std::string api_socket { "/tmp/slirp4netns-" + std::to_string(pid) + ".sock" };
 
     pid_t slirp_pid = fork();
     if (slirp_pid == 0) {
@@ -78,7 +77,7 @@ int Network::setup_networking_with_ports(const pid_t& pid,
             if (devnull > 2) close(devnull);
         }
 
-        std::vector<std::string> args;
+        std::vector<std::string> args{};
         args.push_back("slirp4netns");
         args.push_back("--configure");
         args.push_back("--mtu=65520");
@@ -103,7 +102,7 @@ int Network::setup_networking_with_ports(const pid_t& pid,
         _exit(1);
     }
     else if (slirp_pid > 0) {
-        NetworkConfig config;
+        NetworkConfig config{};
         config.slirp_pid = slirp_pid;
         config.port_forwards = port_forwards;
         config.api_socket = api_socket;
@@ -113,15 +112,15 @@ int Network::setup_networking_with_ports(const pid_t& pid,
 
         // Wait for API socket to be created
         if (wait_for_api_socket(api_socket) == 0) {
-            std::cout << "Network setup complete for container " << pid << std::endl;
+            std::cout << "Network setup complete for container " << pid << '\n';
             return 0;
         } else {
-            std::cerr << "Timeout waiting for network API" << std::endl;
+            std::cerr << "Timeout waiting for network API" << '\n';
             return -1;
         }
     }
     else {
-        std::cerr << "Failed to fork slirp4netns process" << std::endl;
+        std::cerr << "Failed to fork slirp4netns process" << '\n';
         return -1;
     }
 }
@@ -129,7 +128,7 @@ int Network::setup_networking_with_ports(const pid_t& pid,
 int Network::forward_port(const int& host_port, const int& container_port) {
     // Legacy function - use the first container if available
     if (container_networks.empty()) {
-        std::cerr << "No containers with networking configured" << std::endl;
+        std::cerr << "No containers with networking configured" << '\n';
         return -1;
     }
 
@@ -140,7 +139,7 @@ int Network::forward_port(const int& host_port, const int& container_port) {
 int Network::add_port_forward(const pid_t& container_pid, int host_port, int container_port) {
     auto it = container_networks.find(container_pid);
     if (it == container_networks.end()) {
-        std::cerr << "Container network not found for PID " << container_pid << std::endl;
+        std::cerr << "Container network not found for PID " << container_pid << '\n';
         return -1;
     }
 
@@ -154,7 +153,7 @@ int Network::add_port_forward(const pid_t& container_pid, int host_port, int con
     if (send_api_command(container_pid, json_cmd) == 0) {
         // Add to our tracking
         it->second.port_forwards.push_back({host_port, container_port});
-        std::cout << "Port forward added: " << host_port << " -> " << container_port << std::endl;
+        std::cout << "Port forward added: " << host_port << " -> " << container_port << '\n';
         return 0;
     }
 
@@ -164,7 +163,7 @@ int Network::add_port_forward(const pid_t& container_pid, int host_port, int con
 int Network::remove_port_forward(const pid_t& container_pid, int host_port) {
     auto it = container_networks.find(container_pid);
     if (it == container_networks.end()) {
-        std::cerr << "Container network not found for PID " << container_pid << std::endl;
+        std::cerr << "Container network not found for PID " << container_pid << '\n';
         return -1;
     }
 
@@ -179,7 +178,7 @@ int Network::remove_port_forward(const pid_t& container_pid, int host_port) {
                           [host_port](const std::pair<int, int>& p) { return p.first == host_port; }),
             forwards.end());
 
-        std::cout << "Port forward removed: " << host_port << std::endl;
+        std::cout << "Port forward removed: " << host_port << '\n';
         return 0;
     }
 
@@ -217,7 +216,7 @@ int Network::send_api_command(const pid_t& container_pid, const std::string& jso
     // Create Unix socket
     int sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock == -1) {
-        std::cerr << "Failed to create socket" << std::endl;
+        std::cerr << "Failed to create socket" << '\n';
         return -1;
     }
 
@@ -227,15 +226,15 @@ int Network::send_api_command(const pid_t& container_pid, const std::string& jso
     strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
 
     if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-        std::cerr << "Failed to connect to API socket: " << strerror(errno) << std::endl;
+        std::cerr << "Failed to connect to API socket: " << strerror(errno) << '\n';
         close(sock);
         return -1;
     }
 
     // Send command
-    ssize_t sent = send(sock, json_command.c_str(), json_command.length(), 0);
+    ssize_t sent { send(sock, json_command.c_str(), json_command.length(), 0) };
     if (sent == -1) {
-        std::cerr << "Failed to send API command" << std::endl;
+        std::cerr << "Failed to send API command" << '\n';
         close(sock);
         return -1;
     }
@@ -245,7 +244,7 @@ int Network::send_api_command(const pid_t& container_pid, const std::string& jso
     ssize_t received = recv(sock, response, sizeof(response) - 1, 0);
     if (received > 0) {
         response[received] = '\0';
-        std::cout << "API Response: " << response << std::endl;
+        std::cout << "API Response: " << response << '\n';
     }
 
     close(sock);
@@ -269,7 +268,6 @@ int Network::cleanup_networking(const pid_t& container_pid) {
         int status;
         int result = waitpid(slirp_pid, &status, WNOHANG);
         if (result == 0) {
-            // Process still running, force kill
             sleep(1);
             kill(slirp_pid, SIGKILL);
             waitpid(slirp_pid, &status, 0);
@@ -282,26 +280,25 @@ int Network::cleanup_networking(const pid_t& container_pid) {
     // Remove from tracking
     container_networks.erase(it);
 
-    std::cout << "Network cleanup complete for container " << container_pid << std::endl;
+    std::cout << "Network cleanup complete for container " << container_pid << '\n';
     return 0;
 }
 
-// Helper function implementations
 int Network::wait_for_api_socket(const std::string& socket_path, int timeout_ms) {
-    int elapsed = 0;
-    const int check_interval = 100;  // 100ms
+    int elapsed { 0 };
+    const int check_interval { 100 };  // 100ms
 
     while (elapsed < timeout_ms) {
         if (access(socket_path.c_str(), F_OK) == 0) {
             // Socket exists, wait a bit more for it to be ready
-            usleep(200000);  // 200ms
+            usleep(200000);
             return 0;
         }
-        usleep(check_interval * 1000);  // Convert to microseconds
+        usleep(check_interval * 1000);
         elapsed += check_interval;
     }
 
-    return -1;  // Timeout
+    return -1;
 }
 
 int Network::create_port_forward_args(const std::vector<std::pair<int, int>>& forwards,
@@ -314,7 +311,6 @@ int Network::create_port_forward_args(const std::vector<std::pair<int, int>>& fo
 }
 
 Network::~Network() {
-    // Cleanup all container networks on destruction
     for (const auto& pair : container_networks) {
         cleanup_networking(pair.first);
     }
