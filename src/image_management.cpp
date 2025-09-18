@@ -26,18 +26,18 @@ bool ImageManager::remove(const std::string& image_name, std::string& error) {
         return false;
     }
 
-    std::cout << "Removing image at " << image_path << std::endl;
+    std::cout << "Removing image at " << image_path << '\n';
     std::string rm_command { "rm -rf " + image_path };
     if (system(rm_command.c_str()) != 0) {
         error = "Error removing image.";
         return false;
     }
-    std::cout << "Image removed successfully." << std::endl;
+    std::cout << "Image removed successfully." << '\n';
     return true;
 }
 
 void ImageManager::handle_error(const std::string& message) {
-    std::cerr << "\nERROR: " << message << std::endl;
+    std::cerr << "\nERROR: " << message << '\n';
 }
 
 bool ImageManager::path_exists(const std::string& path) const {
@@ -55,11 +55,11 @@ std::string ImageManager::get_image_path(const std::string& image_name) const {
 bool ImageManager::get_image(const std::string& image_name, std::string& out_path, std::string& error) {
     out_path = get_image_path(image_name);
     if (path_exists(out_path)) {
-        std::cout << "Image found in local storage." << std::endl;
+        std::cout << "Image found in local storage." << '\n';
         return true;
     }
 
-    std::cout << "Image not in local storage. Pulling from registry..." << std::endl;
+    std::cout << "Image not in local storage. Pulling from registry..." << '\n';
     if (!pull_image_from_registry(image_name, out_path, error)) {
         if (path_exists(out_path)) {
             std::string rm_command { "rm -rf " + out_path };
@@ -69,7 +69,7 @@ bool ImageManager::get_image(const std::string& image_name, std::string& out_pat
         return false;
     }
 
-    std::cout << "Pull complete." << std::endl;
+    std::cout << "Pull complete." << '\n';
     return true;
 }
 
@@ -80,16 +80,16 @@ bool ImageManager::pull_image_from_registry(const std::string& image_name, const
     tag = (colon_pos != std::string::npos) ? image_name.substr(colon_pos + 1) : "latest";
     if (repo.find('/') == std::string::npos) repo = "library/" + repo;
 
-    std::cout << "Authenticating..." << std::endl;
+    std::cout << "Authenticating..." << '\n';
     std::string token{};
     if (!get_auth_token(image_name, token, error)) return false;
 
-    std::cout << "Fetching manifest for '" << tag << "'..." << std::endl;
+    std::cout << "Fetching manifest for '" << tag << "'..." << '\n';
     json manifest{};
     if (!get_manifest(image_name, token, manifest, error)) return false;
 
     if (manifest.contains("manifests")) {
-        std::cout << "Detected a manifest list. Searching for 'amd64' architecture." << std::endl;
+        std::cout << "Detected a manifest list. Searching for 'amd64' architecture." << '\n';
         std::string arch_digest;
         for (const auto& entry : manifest["manifests"]) {
             if (entry.contains("platform") && entry["platform"]["architecture"] == "amd64") {
@@ -102,12 +102,12 @@ bool ImageManager::pull_image_from_registry(const std::string& image_name, const
             return false;
         }
 
-        std::cout << "Found 'amd64' digest. Fetching architecture-specific manifest..." << std::endl;
+        std::cout << "Found 'amd64' digest. Fetching architecture-specific manifest..." << '\n';
         std::string arch_image_name = repo + "@" + arch_digest;
         if (!get_manifest(arch_image_name, token, manifest, error)) return false;
     }
 
-    std::cout << "Downloading layers..." << std::endl;
+    std::cout << "Downloading layers..." << '\n';
     return download_and_extract_layers(manifest, repo, token, image_path, error);
 }
 
@@ -221,7 +221,7 @@ bool ImageManager::download_and_extract_layers(const json& manifest, const std::
     std::vector<std::future<std::string>> download_futures{};
     std::vector<std::string> tarball_paths{};
 
-    std::cout << "Launching " << digests.size() << " layer downloads in parallel..." << std::endl;
+    std::cout << "Launching " << digests.size() << " layer downloads in parallel..." << '\n';
     for (const auto& digest : digests) {
         std::string url = "https://registry-1.docker.io/v2/" + repo + "/blobs/" + digest;
         std::string path = destination_path + "/" + digest.substr(7) + ".tar.gz";
@@ -229,9 +229,9 @@ bool ImageManager::download_and_extract_layers(const json& manifest, const std::
         download_futures.push_back(download_layer_async(url, token, path));
     }
 
-    std::cout << "Waiting for downloads to complete and extracting layers sequentially..." << std::endl;
+    std::cout << "Waiting for downloads to complete and extracting layers sequentially..." << '\n';
     for (size_t i = 0; i < digests.size(); ++i) {
-        std::cout << "Waiting for layer " << i + 1 << "/" << digests.size() << " (" << digests[i].substr(0, 20) << ")..." << std::endl;
+        std::cout << "Waiting for layer " << i + 1 << "/" << digests.size() << " (" << digests[i].substr(0, 20) << ")..." << '\n';
 
         std::string download_error = download_futures[i].get();
         if (!download_error.empty()) {
@@ -239,7 +239,7 @@ bool ImageManager::download_and_extract_layers(const json& manifest, const std::
             return false;
         }
 
-        std::cout << "  Download complete. Extracting layer " << i + 1 << "..." << std::endl;
+        std::cout << "  Download complete. Extracting layer " << i + 1 << "..." << '\n';
         if (!extract_layer(tarball_paths[i], destination_path, error)) {
             return false;
         }
