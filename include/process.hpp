@@ -28,29 +28,28 @@
 #include <pwd.h>
 
 struct ContainerArgs {
-    std::string hostname;
-    std::string rootfs_path;
-    std::string program_path;
-    int slave_fd;
-    std::string filesystem_dir;
+    std::string hostname{};
+    std::string rootfs_path{};
+    std::string program_path{};
+    int slave_fd{};
+    std::string filesystem_dir{};
 };
 class Process {
     public:
         Process() = default;
-        ~Process();
+        ~Process() {};
         int start(const std::string& new_hostname,const std::vector<std::string>& volumes,const std::string& container_name,const std::string& path);
-        static int run_container(ContainerArgs* arg);
+        int run_container(ContainerArgs* arg);
         pid_t pid() const { return m_child_pid; }
     private:
-        static int handle_error(const std::string& err);
-        static int setup_user_namespace();
-        static int run(const std::string& path);
-        static int write_file(const std::string& path,const std::string& str);
-        static int pivot_root();
-        static std::string get_filesystem_dir(const pid_t pid);
-        static void ensure_dirs(const std::string& dir);
-        static pid_t m_child_pid;
-        static std::string m_new_hostname;
-        static std::string m_new_fs;
-        static std::vector<std::string> m_volumes;
+        int handle_error(const std::string& err);
+        int setup_user_namespace();
+        int run(const std::string& path);
+        int write_file(const std::string& path,const std::string& str);
+        std::string get_filesystem_dir(const pid_t pid);
+        void ensure_dirs(const std::string& dir);
+        pid_t m_child_pid{};
+        std::string m_new_hostname{};
+        std::string m_new_fs{};
+        std::vector<std::string> m_volumes{};
 };

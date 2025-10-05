@@ -7,10 +7,10 @@ int main(int argc,char* argv[]) {
     std::string filesystem_path{};
     std::string err{};
     TTYProxyServer tty{};
-    std::vector<std::string> volumes{"/home/anish/Desktop/my-app:/home"};
+    std::vector<std::string> volumes{};
     if(argc > 1 && strcmp(argv[1],"attach") != 0 && image.pull(argv[1],filesystem_path,err)){
         Process p{};
-        if(p.start("container",volumes,filesystem_path,"/bin/bash") == -1){
+        if(p.start("container",volumes,filesystem_path,"/bin/sh") == -1){
             _exit(0);
         }
     }

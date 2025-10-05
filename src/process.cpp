@@ -1,16 +1,12 @@
 #include "../include/process.hpp"
 #include "../include/tty_proxy_server.hpp"
 #include "../include/network.hpp"
-#include <sys/mount.h>
+#include "../include/package_management.hpp"
 
-// static variables
-pid_t Process::m_child_pid{-1};
-std::string Process::m_new_hostname{""};
-std::string Process::m_new_fs{""};
-std::vector<std::string> Process::m_volumes{""};
-// Stack for clone
-static constexpr size_t STACK_SIZE = 1024 * 1024; // 1MB stack
-static char child_stack[STACK_SIZE];
+int Process::handle_error(const std::string& err){
+    std::cerr << err << '\n';
+    return -1;
+}
 
 int Process::start(const std::string& new_hostname,const std::vector<std::string>& volumes,const std::string& filesystem_path,const std::string& path){
     m_new_hostname = new_hostname;
@@ -18,11 +14,6 @@ int Process::start(const std::string& new_hostname,const std::vector<std::string
     m_volumes = volumes;
     if(run(path) == -1) return -1;
     return 0;
-}
-
-int Process::handle_error(const std::string& err){
-    std::cerr << err << '\n';
-    return -1;
 }
 
 std::string Process::get_filesystem_dir(pid_t pid){
@@ -39,8 +30,7 @@ void Process::ensure_dirs(const std::string& dir){
         pos = dir.find("/",start);
         std::string prefix { pos != std::string::npos ? dir.substr(0,pos) : dir };
         if(!prefix.empty()){
-            if(mkdir(prefix.c_str(),0755) == -1){
-            }
+            if(mkdir(prefix.c_str(),0755) == -1) handle_error("Error : Cannot create "+prefix);
         }
         if(pos == std::string::npos){
             break;
@@ -49,13 +39,9 @@ void Process::ensure_dirs(const std::string& dir){
     }
 }
 
-// Static wrapper function for clone
-static int container_main(void* arg) {
-    ContainerArgs* args = static_cast<ContainerArgs*>(arg);
-    return Process::run_container(args);
-}
 
 int Process::run_container(ContainerArgs* args) {
+    if(unshare(CLONE_NEWUTS | CLONE_NEWNET | CLONE_NEWNS) != 0) return handle_error("namespace creation error");
     // Setup TTY
     if (setsid() == -1) {
         std::cerr << "setsid failed" << '\n';
@@ -164,11 +150,13 @@ int Process::run_container(ContainerArgs* args) {
     rmdir("/old_root");
     std::cerr << "DEBUG: Pivot completed successfully!" << '\n';
 
-    // volumes
     std::ofstream resolv("/etc/resolv.conf");
     resolv << "nameserver 10.0.2.3\n";
     resolv.close();
     // Configure network interface inside container
+
+
+    if(PackageManager::initialize() == -1) handle_error("cannot setup package manager");
     std::cerr << "Starting program: " << args->program_path << '\n';
     execl(args->program_path.c_str(), args->program_path.c_str(), (char*)NULL);
 
@@ -186,83 +174,84 @@ int Process::run(const std::string& path){
     if (openpty(&master_fd, &slave_fd, slave_name, NULL, &ws) == -1) {
         return handle_error("openpty failed");
     }
+    int namespace_pipe[2];
 
     // Prepare arguments for container
     std::string filesystem_dir { get_filesystem_dir(getpid()) };
     ContainerArgs args{m_new_hostname, m_new_fs, path, slave_fd, filesystem_dir};
 
     // Clone with all namespaces
-    int clone_flags { CLONE_NEWUSER | CLONE_NEWUTS | CLONE_NEWNS |
-                     CLONE_NEWPID | CLONE_NEWNET | SIGCHLD };
+    if(unshare(CLONE_NEWUSER | CLONE_NEWPID) != 0) return handle_error("User namespace creation error");
 
-    m_child_pid = clone(container_main,
-                       child_stack + STACK_SIZE,
-                       clone_flags,
-                       &args);
+    if(pipe(namespace_pipe) != 0) return handle_error("Cannot create sync pipe for namespace setup");
 
+    m_child_pid = fork();
     if (m_child_pid == -1) {
+        close(namespace_pipe[0]);
+        close(namespace_pipe[1]);
         close(master_fd);
         close(slave_fd);
-        return handle_error("clone failed");
+        return handle_error("fork failed");
     }
-
-    close(slave_fd);
-
-    std::cerr << "Container started with PID: " << m_child_pid << '\n';
-
-    // Setup user namespace mappings
-    if (setup_user_namespace() != 0) {
-        std::cerr << "Failed to setup user namespace" << '\n';
-        return -1;
+    if(m_child_pid == 0){
+        close(namespace_pipe[1]);
+        char buf{};
+        if(read(namespace_pipe[0],&buf,1) != 1) return handle_error("read for namespace pipe failed");
+        if(buf == 'r'){
+            run_container(&args);
+        }
     }
+    else{
+        close(namespace_pipe[0]);
+        if (setup_user_namespace() != 0) {
+            std::cerr << "Failed to setup user namespace" << '\n';
+            return -1;
+        }
+        if(write(namespace_pipe[1], "r", 1) != 1) return handle_error("write to sync_pipe failed");
 
-    if (Network::setup_networking(m_child_pid) != 0) {
-        std::cerr << "Failed to setup networking" << '\n';
-        return -1;
+        close(slave_fd);
+
+        std::cerr << "Container started with PID: " << m_child_pid << '\n';
+
+        // Setup user namespace mappings
+
+        if (Network::setup_networking(m_child_pid) != 0) {
+            std::cerr << "Failed to setup networking" << '\n';
+            return -1;
+        }
+
+        pid_t proxy_pid { fork() };
+        if (proxy_pid == -1) {
+            close(master_fd);
+            return handle_error("fork for proxy failed");
+        }
+
+        TTYProxyServer tty{};
+        if (proxy_pid == 0) {
+            std::string sock = tty.get_sock_path(m_child_pid);
+            std::cerr << "DEBUG: tty proxy socket: " << sock << '\n';
+            if(tty.start(master_fd, m_child_pid, sock) == -1)
+                handle_error("Proxy server start failed");
+            _exit(1);
+        } else {
+            close(master_fd);
+
+            // Wait for container
+            int status{};
+            waitpid(m_child_pid, &status, WNOHANG);
+
+            std::string sock { tty.get_sock_path(m_child_pid) };
+            std::cerr << "Container started. attach socket: " << sock << '\n';
+            return 0;
+        }
     }
-
-    pid_t proxy_pid { fork() };
-    if (proxy_pid == -1) {
-        close(master_fd);
-        return handle_error("fork for proxy failed");
-    }
-
-    TTYProxyServer tty{};
-    if (proxy_pid == 0) {
-        std::string sock = tty.get_sock_path(m_child_pid);
-        std::cerr << "DEBUG: tty proxy socket: " << sock << '\n';
-        if(tty.start(master_fd, m_child_pid, sock) == -1)
-            handle_error("Proxy server start failed");
-        _exit(1);
-    } else {
-        close(master_fd);
-
-        // Wait for container
-        int status{};
-        waitpid(m_child_pid, &status, WNOHANG);
-
-        std::string sock { tty.get_sock_path(m_child_pid) };
-        std::cerr << "Container started. attach socket: " << sock << '\n';
-        return 0;
-    }
+    return 0;
 }
 
 int Process::setup_user_namespace() {
-    std::string uid_map = "/proc/" + std::to_string(m_child_pid) + "/uid_map";
-    std::string gid_map = "/proc/" + std::to_string(m_child_pid) + "/gid_map";
-    std::string setgroups = "/proc/" + std::to_string(m_child_pid) + "/setgroups";
-
-    // Write setgroups
-    if (write_file(setgroups, "deny\n") == -1) return -1;
-
-    // Write uid_map
-    std::string uid_mapping = "0 " + std::to_string(getuid()) + " 1\n";
-    if (write_file(uid_map, uid_mapping) == -1) return -1;
-
-    // Write gid_map
-    std::string gid_mapping = "0 " + std::to_string(getgid()) + " 1\n";
-    if (write_file(gid_map, gid_mapping) == -1) return -1;
-
+    if(write_file("/proc/self/uid_map", "0 1000 1\n") != 0) return -1;
+    if(write_file("/proc/self/setgroups", "deny\n") != 0) return -1;
+    if(write_file("/proc/self/gid_map", "0 1000 1\n") != 0) return -1;
     return 0;
 }
 
@@ -279,11 +268,4 @@ int Process::write_file(const std::string& path,const std::string& str){
     }
     close(fd);
     return 0;
-}
-
-int Process::pivot_root(){
-    return syscall(SYS_pivot_root,m_new_fs.c_str(),(m_new_fs+"/old_root").c_str());
-}
-
-Process::~Process(){
 }
