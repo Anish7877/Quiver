@@ -1,77 +1,38 @@
 #include "../include/process.hpp"
 #include "../include/tty_proxy_server.hpp"
+#include "../include/utils.hpp"
 #include "../include/network.hpp"
-#include "../include/package_management.hpp"
-
-int Process::handle_error(const std::string& err){
-    std::cerr << err << '\n';
-    return -1;
-}
+#include "../include/package_manager.hpp"
+#include "../include/device_manager.hpp"
 
 int Process::start(const std::string& new_hostname,const std::vector<std::string>& volumes,const std::string& filesystem_path,const std::string& path){
     m_new_hostname = new_hostname;
     m_new_fs = filesystem_path;
     m_volumes = volumes;
-    if(run(path) == -1) return -1;
+    if(run(path) == ERR) return ERR;
     return 0;
 }
 
-std::string Process::get_filesystem_dir(pid_t pid){
-    std::string home { getenv("HOME") };
-    std::string base { home + "/.quiver/filesystems/" };
-    std::string dir { base + std::to_string(long(pid)) + "/"};
-    return dir;
-}
-
-void Process::ensure_dirs(const std::string& dir){
-    size_t start { 1 };
-    size_t pos { 0 };
-    while(true){
-        pos = dir.find("/",start);
-        std::string prefix { pos != std::string::npos ? dir.substr(0,pos) : dir };
-        if(!prefix.empty()){
-            if(mkdir(prefix.c_str(),0755) == -1) handle_error("Error : Cannot create "+prefix);
-        }
-        if(pos == std::string::npos){
-            break;
-        }
-        start = pos+1;
-    }
-}
-
-
 int Process::run_container(ContainerArgs* args) {
-    if(unshare(CLONE_NEWUTS | CLONE_NEWNET | CLONE_NEWNS) != 0) return handle_error("namespace creation error");
+    if(unshare(CLONE_NEWUTS | CLONE_NEWNET | CLONE_NEWNS) != 0) Utils::handle_error("namespace creation error");
     // Setup TTY
-    if (setsid() == -1) {
-        std::cerr << "setsid failed" << '\n';
+    if (setsid() == ERR) {
+        Utils::handle_error("setsid error");
     }
 
-    if (ioctl(args->slave_fd, TIOCSCTTY, 0) == -1) {
-        std::cerr << "TIOCSCTTY failed" << '\n';
-    }
-
-    // Redirect stdio
-    dup2(args->slave_fd, STDIN_FILENO);
-    dup2(args->slave_fd, STDOUT_FILENO);
-    dup2(args->slave_fd, STDERR_FILENO);
-    if (args->slave_fd > STDERR_FILENO) close(args->slave_fd);
-
-    // Set hostname
     if (sethostname(args->hostname.c_str(), args->hostname.length()) != 0) {
         std::cerr << "Failed to set hostname: " << strerror(errno) << '\n';
-        return -1;
+        return ERR;
     }
 
-    // Setup filesystem using your existing overlay approach
     std::string filesystem_path = args->filesystem_dir;
     std::string upper { filesystem_path + "upper" };
-    std::string work  { filesystem_path + "work" };
     std::string merged { filesystem_path + "merged" };
+    std::string work  { filesystem_path + "work" };
 
-    Process::ensure_dirs(upper);
-    Process::ensure_dirs(work);
-    Process::ensure_dirs(merged);
+    Utils::ensure_dirs(upper);
+    Utils::ensure_dirs(work);
+    Utils::ensure_dirs(merged);
 
     pid_t overlay_pid { fork() };
     if (overlay_pid == 0) {
@@ -104,10 +65,10 @@ int Process::run_container(ContainerArgs* args) {
         }
         for(size_t i{0};i<dirs.size();++i){
             dirs[i] = merged + dirs[i];
-            ensure_dirs(dirs[i]);
+            Utils::ensure_dirs(dirs[i]);
         }
         for(size_t i{0};i<paths.size();++i){
-            if(mount(paths[i].c_str(),dirs[i].c_str(),nullptr,MS_BIND|MS_REC,nullptr) == -1){
+            if(mount(paths[i].c_str(),dirs[i].c_str(),nullptr,MS_BIND|MS_REC,nullptr) == ERR){
                 std::cerr << "Unable to mount " << paths[i] << " to " << dirs[i] << '\n';
             }
             else{
@@ -124,25 +85,25 @@ int Process::run_container(ContainerArgs* args) {
     mount("sysfs", new_sys_path.c_str(), "sysfs", MS_NODEV|MS_NOSUID|MS_NOEXEC, NULL);
     mount("tmpfs", new_dev_path.c_str(), "tmpfs", 0, NULL);
 
-    if(mount(merged.c_str(), merged.c_str(), nullptr, MS_BIND | MS_REC, NULL) == -1) {
+    if(mount(merged.c_str(), merged.c_str(), nullptr, MS_BIND | MS_REC, NULL) == ERR) {
         std::cerr << "Unable to mount new fs: " << strerror(errno) << '\n';
-        return -1;
+        return ERR;
     }
 
     // Change to merged directory and pivot root
     if (chdir(merged.c_str()) != 0) {
         std::cerr << "chdir to merged failed: " << strerror(errno) << '\n';
-        return -1;
+        return ERR;
     }
 
     if (syscall(SYS_pivot_root, ".", "old_root") != 0) {
         std::cerr << "pivot_root failed: " << strerror(errno) << '\n';
-        return -1;
+        return ERR;
     }
 
     if (chdir("/") != 0) {
         std::cerr << "chdir to / failed: " << strerror(errno) << '\n';
-        return -1;
+        return ERR;
     }
 
     // Unmount old root
@@ -156,12 +117,12 @@ int Process::run_container(ContainerArgs* args) {
     // Configure network interface inside container
 
 
-    if(PackageManager::initialize() == -1) handle_error("cannot setup package manager");
+    if(PackageManager::initialize() == ERR) Utils::handle_error("cannot setup package manager");
     std::cerr << "Starting program: " << args->program_path << '\n';
     execl(args->program_path.c_str(), args->program_path.c_str(), (char*)NULL);
 
     std::cerr << "exec failed: " << strerror(errno) << '\n';
-    return -1;
+    return ERR;
 }
 
 int Process::run(const std::string& path){
@@ -171,43 +132,39 @@ int Process::run(const std::string& path){
     winsize ws{};
     ioctl(STDIN_FILENO, TIOCGWINSZ, &ws);
 
-    if (openpty(&master_fd, &slave_fd, slave_name, NULL, &ws) == -1) {
-        return handle_error("openpty failed");
+    if (openpty(&master_fd, &slave_fd, slave_name, NULL, &ws) == ERR) {
+        Utils::handle_error("openpty failed");
     }
     int namespace_pipe[2];
 
     // Prepare arguments for container
-    std::string filesystem_dir { get_filesystem_dir(getpid()) };
+    std::string filesystem_dir { Utils::get_filesystem_path(getpid()) };
     ContainerArgs args{m_new_hostname, m_new_fs, path, slave_fd, filesystem_dir};
 
-    // Clone with all namespaces
-    if(unshare(CLONE_NEWUSER | CLONE_NEWPID) != 0) return handle_error("User namespace creation error");
+    if(unshare(CLONE_NEWUSER | CLONE_NEWPID) != 0) Utils::handle_error("User namespace creation error");
 
-    if(pipe(namespace_pipe) != 0) return handle_error("Cannot create sync pipe for namespace setup");
+    if(pipe(namespace_pipe) != 0) Utils::handle_error("Cannot create sync pipe for namespace setup");
 
     m_child_pid = fork();
-    if (m_child_pid == -1) {
+    if (m_child_pid == ERR) {
         close(namespace_pipe[0]);
         close(namespace_pipe[1]);
         close(master_fd);
         close(slave_fd);
-        return handle_error("fork failed");
+        Utils::handle_error("fork failed");
     }
     if(m_child_pid == 0){
         close(namespace_pipe[1]);
         char buf{};
-        if(read(namespace_pipe[0],&buf,1) != 1) return handle_error("read for namespace pipe failed");
+        if(read(namespace_pipe[0],&buf,1) != 1) Utils::handle_error("read for namespace pipe failed");
         if(buf == 'r'){
             run_container(&args);
         }
     }
     else{
         close(namespace_pipe[0]);
-        if (setup_user_namespace() != 0) {
-            std::cerr << "Failed to setup user namespace" << '\n';
-            return -1;
-        }
-        if(write(namespace_pipe[1], "r", 1) != 1) return handle_error("write to sync_pipe failed");
+        setup_user_namespace();
+        if(write(namespace_pipe[1], "r", 1) != 1) Utils::handle_error("write to sync_pipe failed");
 
         close(slave_fd);
 
@@ -216,23 +173,22 @@ int Process::run(const std::string& path){
         // Setup user namespace mappings
 
         if (Network::setup_networking(m_child_pid) != 0) {
-            std::cerr << "Failed to setup networking" << '\n';
-            return -1;
+            Utils::handle_error("Failed to setup network");
         }
 
         pid_t proxy_pid { fork() };
-        if (proxy_pid == -1) {
+        if (proxy_pid == ERR) {
             close(master_fd);
-            return handle_error("fork for proxy failed");
+            Utils::handle_error("fork for proxy failed");
         }
 
         TTYProxyServer tty{};
         if (proxy_pid == 0) {
-            std::string sock = tty.get_sock_path(m_child_pid);
+            std::string sock = Utils::get_sock_path(m_child_pid);
             std::cerr << "DEBUG: tty proxy socket: " << sock << '\n';
-            if(tty.start(master_fd, m_child_pid, sock) == -1)
-                handle_error("Proxy server start failed");
-            _exit(1);
+            if(tty.start(master_fd, m_child_pid, sock) == ERR)
+                Utils::handle_error("Proxy server start failed");
+            exit(1);
         } else {
             close(master_fd);
 
@@ -240,7 +196,7 @@ int Process::run(const std::string& path){
             int status{};
             waitpid(m_child_pid, &status, WNOHANG);
 
-            std::string sock { tty.get_sock_path(m_child_pid) };
+            std::string sock { Utils::get_sock_path(m_child_pid) };
             std::cerr << "Container started. attach socket: " << sock << '\n';
             return 0;
         }
@@ -248,24 +204,8 @@ int Process::run(const std::string& path){
     return 0;
 }
 
-int Process::setup_user_namespace() {
-    if(write_file("/proc/self/uid_map", "0 1000 1\n") != 0) return -1;
-    if(write_file("/proc/self/setgroups", "deny\n") != 0) return -1;
-    if(write_file("/proc/self/gid_map", "0 1000 1\n") != 0) return -1;
-    return 0;
-}
-
-int Process::write_file(const std::string& path,const std::string& str){
-    int fd{ open(path.c_str() , O_WRONLY) };
-    if(fd == -1){
-        std::cerr << "Bad File Descriptor for " << path << '\n';
-        return -1;
-    }
-    if(write(fd, str.c_str(), str.length()) == -1){
-        std::cerr << "Unable to Write to a " << path << '\n';
-        close(fd);
-        return -1;
-    }
-    close(fd);
-    return 0;
+void Process::setup_user_namespace() {
+    Utils::write_file("/proc/self/uid_map", "0 1000 1\n");
+    Utils::write_file("/proc/self/setgroups", "deny\n");
+    Utils::write_file("/proc/self/gid_map", "0 1000 1\n");
 }

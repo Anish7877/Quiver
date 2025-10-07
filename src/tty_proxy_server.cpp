@@ -1,46 +1,12 @@
-
 #include "../include/tty_proxy_server.hpp"
 #include "../include/network.hpp"
+#include "../include/utils.hpp"
 
 bool TTYProxyServer::m_running { false };
 pid_t TTYProxyServer::m_server_pid { -1 };
 
 // attach -> use quiver -a <container_id or container name>
 // detach -> inside container ctrl-p then ctrl-q
-int TTYProxyServer::handle_error(const std::string& err) {
-    perror(err.data());
-    return -1;
-}
-
-std::string TTYProxyServer::get_sock_path(const pid_t pid) {
-    const char* home{ getenv("HOME") };
-    std::string base{ home ? std::string(home) : "/tmp" };
-    std::string path{ base + "/.quiver/containers/" + std::to_string(static_cast<long long>(pid)) + "/attach.sock" };
-    return path;
-}
-
-void TTYProxyServer::ensure_dirs(const std::string& path) {
-    std::string path_copy { path };
-    std::string path_to_create { dirname(&path_copy[0]) };
-    size_t pos = 1;
-
-    while ((pos = path_to_create.find('/', pos)) != std::string::npos) {
-        std::string prefix { path_to_create.substr(0, pos) };
-        if (mkdir(prefix.c_str(), 0755) != 0) {
-            if (errno != EEXIST) {
-                perror("mkdir");
-                return;
-            }
-        }
-        pos++;
-    }
-
-    if (mkdir(path_to_create.c_str(), 0755) != 0) {
-        if (errno != EEXIST) {
-            perror("mkdir");
-        }
-    }
-}
 
 int TTYProxyServer::start(const int master_fd, const pid_t monitor_pid, const std::string& sock_path) {
     if (!m_running) {
@@ -50,12 +16,12 @@ int TTYProxyServer::start(const int master_fd, const pid_t monitor_pid, const st
 }
 
 int TTYProxyServer::run(const int master_fd, const pid_t monitor_pid, const std::string& sock_path) {
-    ensure_dirs(sock_path);
+    Utils::ensure_dirs(sock_path);
 
     unlink(sock_path.c_str());
 
     int sfd{ socket(AF_UNIX, SOCK_STREAM, 0) };
-    if (sfd == -1) return handle_error("TTY Proxy Socket Creation failed");
+    if (sfd == -1) Utils::handle_error("TTY Proxy Socket Creation failed");
 
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
@@ -63,7 +29,7 @@ int TTYProxyServer::run(const int master_fd, const pid_t monitor_pid, const std:
 
     if (bind(sfd, (sockaddr*)&addr, sizeof(addr)) == -1) {
         close(sfd);
-        return handle_error("TTY Proxy Socket binding failed");
+        Utils::handle_error("TTY Proxy Socket binding failed");
     }
 
     chmod(sock_path.c_str(), S_IRUSR | S_IWUSR);
@@ -71,7 +37,7 @@ int TTYProxyServer::run(const int master_fd, const pid_t monitor_pid, const std:
     if (listen(sfd, 1) == -1) {
         close(sfd);
         unlink(sock_path.c_str());
-        return handle_error("TTY Proxy listen failed");
+        Utils::handle_error("TTY Proxy listen failed");
     }
 
     m_running = true;
@@ -164,14 +130,7 @@ int TTYProxyServer::run(const int master_fd, const pid_t monitor_pid, const std:
     return proxy_cleanup(sfd, master_fd, sock_path);
 }
 
-int TTYProxyServer::client_cleanup(const termios& oldt, const int sfd) {
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-    if (sfd >= 0) close(sfd);
-    return -1;
-}
-
 int TTYProxyServer::proxy_cleanup(const int sfd, const int master_fd, const std::string& sock_path) {
-
     if (sfd >= 0) close(sfd);
     if (master_fd >= 0) close(master_fd);
     m_running = false;
@@ -180,7 +139,7 @@ int TTYProxyServer::proxy_cleanup(const int sfd, const int master_fd, const std:
 }
 int TTYProxyServer::reattach_to_socket(const std::string& sock_path) {
     int sfd{ socket(AF_UNIX, SOCK_STREAM, 0) };
-    if (sfd == -1) return handle_error("Attach Socket failed");
+    if (sfd == -1) Utils::handle_error("Attach Socket failed");
 
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
@@ -188,13 +147,13 @@ int TTYProxyServer::reattach_to_socket(const std::string& sock_path) {
 
     if (connect(sfd, (sockaddr*)&addr, sizeof(addr)) == -1) {
         close(sfd);
-        return handle_error("Attach Socket Connection failed");
+        Utils::handle_error("Attach Socket Connection failed");
     }
 
     termios oldt{};
     if (tcgetattr(STDIN_FILENO, &oldt) == -1) {
         close(sfd);
-        return handle_error("Attach tcgetattr failed");
+        Utils::handle_error("Attach tcgetattr failed");
     }
 
     termios newt { oldt };

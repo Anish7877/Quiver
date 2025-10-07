@@ -1,33 +1,36 @@
 #include "../include/mount.hpp"
 #include "../include/utils.hpp"
-#include <sys/mount.h>
 
-void Mount::proc(const std::string& proc_path, const int& flags){
-    if(mount(PROC, proc_path.c_str(), PROC, flags, nullptr) == ERR)
+void Mount::proc(const std::string& proc_path, const int& flags, const std::string& options){
+    if(mount(PROC, proc_path.c_str(), PROC, flags, options.empty() ? nullptr : options.c_str()) == ERR)
         Utils::handle_error("Unable to mount " + std::string(PROC));
 }
 
-void Mount::dev(const std::string& dev_path, const int& flags){
-    if(mount(DEV, dev_path.c_str(), DEV, flags, nullptr) == ERR)
+void Mount::dev(const std::string& dev_path, const int& flags, const std::string& options){
+    if(mount(DEV, dev_path.c_str(), DEV, flags, options.empty() ? nullptr : options.c_str()) == ERR)
         Utils::handle_error("Unable to mount " + std::string(DEV));
 }
 
-void Mount::sys(const std::string& sys_path, const int& flags){
-    if(mount(SYS, sys_path.c_str(), SYS, flags, nullptr) == ERR)
+void Mount::sys(const std::string& sys_path, const int& flags, const std::string& options){
+    if(mount(SYS, sys_path.c_str(), SYS, flags, options.empty() ? nullptr : options.c_str()) == ERR)
         Utils::handle_error("Unable to mount " + std::string(SYS));
 }
 
-void Mount::tmpfs(const std::string& tmpfs_path, const int& flags){
-    if(mount(TMPFS, tmpfs_path.c_str(), TMPFS, flags, nullptr) == ERR)
+void Mount::tmpfs(const std::string& tmpfs_path, const int& flags, const std::string& options){
+    if(mount(TMPFS, tmpfs_path.c_str(), TMPFS, flags, options.empty() ? nullptr : options.c_str()) == ERR)
         Utils::handle_error("Unable to mount " + std::string(PROC));
 }
 
-void Mount::dev_pts(const std::string& dev_pts_path, const int& flags){
-    if(mount(DEVPTS, dev_pts_path.c_str(), DEVPTS, flags, nullptr) == ERR)
+void Mount::dev_pts(const std::string& dev_pts_path, const int& flags, const std::string& options){
+    if(mount(DEVPTS, dev_pts_path.c_str(), DEVPTS, flags, options.empty() ? nullptr : options.c_str()) == ERR)
         Utils::handle_error("Unable to mount " + std::string(DEVPTS));
 }
 
-void Mount::volumes(const std::string& rootfs, const std::vector<std::string> volumes){
+void Mount::bind_mount(const std::string& src, const std::string& dst, const std::string& options){
+    if(mount(src.c_str(), dst.c_str(), nullptr, MS_BIND, options.empty() ? nullptr : options.c_str()) == ERR)
+        Utils::handle_error("Unable to mount " + src + " to " + dst);
+}
+void Mount::volumes(const std::string& rootfs, const std::vector<std::string> volumes, const std::string& options){
     size_t no_volumes{ volumes.size() };
     if(no_volumes > 0){
         std::vector<std::string> paths{};
@@ -42,7 +45,7 @@ void Mount::volumes(const std::string& rootfs, const std::vector<std::string> vo
             Utils::ensure_dirs(dirs[i]);
         }
         for(size_t i{0};i<paths.size();++i){
-            if(mount(paths[i].c_str(), dirs[i].c_str(), nullptr, MS_BIND|MS_REC, nullptr) == -1){
+            if(mount(paths[i].c_str(), dirs[i].c_str(), nullptr, MS_BIND|MS_REC, options.empty() ? nullptr : options.c_str()) == -1){
                 Utils::handle_error("Unable to mount " + paths[i] + " to " + dirs[i]);
             }
         }

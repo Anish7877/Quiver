@@ -12,12 +12,12 @@ class VolumeManager{
             permanent
         };
         explicit VolumeManager() = default;
-        explicit VolumeManager(const std::vector<std::string>& volumes,const std::string& rootfs);
+        explicit VolumeManager(const std::vector<std::string>& volumes, const std::string& rootfs);
         ~VolumeManager(){};
-        void create_volume(const std::vector<std::string>& volumes,const VolumeType& type = VolumeType::permanent);
+        void create_volume(const std::vector<std::string>& volumes, const VolumeType& type = VolumeType::permanent);
         void remove_volume(const std::vector<std::string>& volumes);
-        void link_volume(const std::vector<std::string>& volumes,const std::vector<std::string>& containers);
-        void unlink_volume(const std::vector<std::string>& volumes,const std::vector<std::string>& containers);
+        void link_volume(const std::vector<std::string>& volumes, const std::vector<std::string>& containers);
+        void unlink_volume(const std::vector<std::string>& volumes, const std::vector<std::string>& containers);
     private:
         std::vector<std::string> m_volumes{};
         std::string m_rootfs{};

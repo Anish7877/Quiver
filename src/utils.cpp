@@ -21,7 +21,7 @@ void Utils::ensure_dirs(const std::string& path, const mode_t& mode){
         size_t pos { path.find('/', start) };
         std::string dir { (pos == std::string::npos) ? path : path.substr(0, pos) };
         if (!dir.empty() && dir != "/") {
-            if (mkdir(dir.c_str(), mode) == -1) {
+            if (mkdir(dir.c_str(), mode) == ERR) {
                 if (errno != EEXIST) {
                     handle_error("Unable to create " + dir);
                 }
@@ -39,8 +39,8 @@ void Utils::handle_error(const std::string& err){
 
 void Utils::write_file(const std::string& path,const std::string& buffer){
     int fd{ open(path.c_str(), O_WRONLY) };
-    if(fd == -1) handle_error("Bad file descriptor for " + path);
-    if(write(fd, buffer.c_str(), buffer.length()) == -1){
+    if(fd == ERR) handle_error("Bad file descriptor for " + path);
+    if(write(fd, buffer.c_str(), buffer.length()) == ERR){
         close(fd);
         handle_error("Unable to write to file " + path);
     }

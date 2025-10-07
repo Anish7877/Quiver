@@ -42,12 +42,8 @@ class Process {
         int run_container(ContainerArgs* arg);
         pid_t pid() const { return m_child_pid; }
     private:
-        int handle_error(const std::string& err);
-        int setup_user_namespace();
+        void setup_user_namespace();
         int run(const std::string& path);
-        int write_file(const std::string& path,const std::string& str);
-        std::string get_filesystem_dir(const pid_t pid);
-        void ensure_dirs(const std::string& dir);
         pid_t m_child_pid{};
         std::string m_new_hostname{};
         std::string m_new_fs{};
