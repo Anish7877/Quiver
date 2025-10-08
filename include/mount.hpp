@@ -1,7 +1,7 @@
 #pragma once
 #define PROC "proc"
 #define DEV "dev"
-#define SYS "sys"
+#define SYS "sysfs"
 #define TMPFS "tmpfs"
 #define DEVPTS "devpts"
 #include <string>
@@ -15,5 +15,6 @@ namespace Mount{
     void tmpfs(const std::string& tmpfs_path, const int& flags, const std::string& options = "");
     void dev_pts(const std::string& dev_pts_path, const int& flags, const std::string& options = "");
     void bind_mount(const std::string& src, const std::string& dst, const std::string& options = "");
+    void bind_rec_mount(const std::string& src, const std::string& dst, const std::string& options = "");
     void volumes(const std::string& rootfs, const std::vector<std::string> volumes, const std::string& options = "");
 }

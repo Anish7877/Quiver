@@ -1,21 +1,20 @@
-#include "../include/process.hpp"
-#include "../include/tty_proxy_server.hpp"
 #include "../include/image_management.hpp"
+#include "../include/container.hpp"
+#include <string>
 
 int main(int argc,char* argv[]) {
     ImageManager image{};
     std::string filesystem_path{};
     std::string err{};
-    TTYProxyServer tty{};
     std::vector<std::string> volumes{};
+    Container ctr{ "container", filesystem_path, volumes };
     if(argc > 1 && strcmp(argv[1],"attach") != 0 && image.pull(argv[1],filesystem_path,err)){
-        Process p{};
-        if(p.start("container",volumes,filesystem_path,"/bin/sh") == -1){
-            _exit(0);
-        }
+        ctr.set_filesystem(filesystem_path);
+        ctr.exec("/bin/bash");
     }
     else if(argc > 1 && strcmp(argv[1],"attach") == 0){
-        tty.reattach_to_socket(argv[2]);
+        pid_t container_pid{ (pid_t)std::stoi(argv[2]) };
+        ctr.connect_to_server(container_pid);
     }
     return 0;
 }

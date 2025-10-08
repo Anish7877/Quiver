@@ -11,10 +11,9 @@
 #include <csignal>
 #include <fcntl.h>
 
-
 termios Terminal::m_orig_term{};
 pid_t Terminal::m_container_pid{-1};
-bool Terminal::m_running{ false };
+volatile bool Terminal::m_running{ false };
 
 void Terminal::start_pty_session(PtyArgs& args){
     if(openpty(&args.master_fd, &args.slave_fd, args.slave_name, nullptr, &args.window_size) == ERR)
@@ -32,24 +31,24 @@ void Terminal::redirect_io(const int &slave_fd){
         Utils::handle_error("Redirect stderr to slave file descriptor");
 }
 
-void Terminal::start_server(const PtyArgs& args, const pid_t& container_pid){
-    shim();
+void Terminal::start_server(const PtyArgs& args, const pid_t& container_pid, const pid_t& manager_pid){
+    //shim();
     m_container_pid = container_pid;
     m_running = true;
     close(args.slave_fd);
 
     signal(SIGCHLD, sigchld_handler);
-
-    std::string sock_path{ Utils::get_sock_path(m_container_pid) };
-    unlink(sock_path.c_str());
     int sock_fd{ socket(AF_UNIX, SOCK_STREAM, 0) };
     if (sock_fd == -1) Utils::handle_error("Unable to create a socket from server side");
+
+    const std::string sock_path{ Utils::get_sock_path(manager_pid) };
 
     sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, sock_path.c_str(), sizeof(addr.sun_path) - 1);
 
+    unlink(sock_path.c_str());
     if (bind(sock_fd, (sockaddr*)&addr, sizeof(addr)) == ERR) Utils::handle_error("Unable to bind to a socket");
     if (listen(sock_fd, 5) == ERR) Utils::handle_error("Unable to listen to a socket ");
 
@@ -88,8 +87,8 @@ void Terminal::start_server(const PtyArgs& args, const pid_t& container_pid){
 
 }
 
-void Terminal::connect_to_server(const pid_t& container_pid){
-    std::string sock_path{ Utils::get_sock_path(container_pid) };
+void Terminal::connect_to_server(const pid_t& manager_pid){
+    std::string sock_path{ Utils::get_sock_path(manager_pid) };
     int sock_fd { socket(AF_UNIX, SOCK_STREAM, 0) };
     if (sock_fd == ERR) Utils::handle_error("Unable to create socket from client side");
 
@@ -108,6 +107,7 @@ void Terminal::connect_to_server(const pid_t& container_pid){
     if(master_fd == ERR) Utils::handle_error("Failed to receive master fd");
 
     enable_raw_mode();
+    atexit(restore_state);
 
     enum { NORMAL, ESCAPE } state{ NORMAL };
 
@@ -149,6 +149,7 @@ void Terminal::connect_to_server(const pid_t& container_pid){
             if (write(STDOUT_FILENO, buf, n) != n) break;
         }
     }
+    restore_state();
     close(master_fd);
 }
 
@@ -158,6 +159,7 @@ void Terminal::sigchld_handler(int signum){
     if (reaped_pid == m_container_pid && (WIFEXITED(status) || WIFSIGNALED(status))) {
         m_running = false;
     }
+    restore_state();
 }
 
 void Terminal::enable_raw_mode(){
@@ -170,8 +172,8 @@ void Terminal::enable_raw_mode(){
 }
 
 void Terminal::send_fd(const int& socket, const int& fd_to_send){
-    msghdr msg {0};
-    char buf[1]{0};
+    msghdr msg{};
+    char buf[1]{ 0 };
     iovec iov[1]{};
     iov[0].iov_base = buf;
     iov[0].iov_len = 1;
@@ -191,7 +193,7 @@ void Terminal::send_fd(const int& socket, const int& fd_to_send){
 }
 
 int Terminal::receive_fd(const int& socket){
-    msghdr msg{ 0 };
+    msghdr msg{};
     char buf[1]{};
     iovec iov[1];
     iov[0].iov_base = buf;
