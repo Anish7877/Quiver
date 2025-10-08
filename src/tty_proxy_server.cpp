@@ -1,6 +1,7 @@
 #include "../include/tty_proxy_server.hpp"
 #include "../include/network.hpp"
 #include "../include/utils.hpp"
+#include "../include/database_manager.hpp"
 
 bool TTYProxyServer::m_running { false };
 pid_t TTYProxyServer::m_server_pid { -1 };
@@ -8,14 +9,14 @@ pid_t TTYProxyServer::m_server_pid { -1 };
 // attach -> use quiver -a <container_id or container name>
 // detach -> inside container ctrl-p then ctrl-q
 
-int TTYProxyServer::start(const int master_fd, const pid_t monitor_pid, const std::string& sock_path) {
+int TTYProxyServer::start(const int master_fd, const pid_t monitor_pid, const std::string& sock_path, const std::string& container_id) {
     if (!m_running) {
-        return run(master_fd, monitor_pid, sock_path);
+        return run(master_fd, monitor_pid, sock_path, container_id);
     }
     return 0;
 }
 
-int TTYProxyServer::run(const int master_fd, const pid_t monitor_pid, const std::string& sock_path) {
+int TTYProxyServer::run(const int master_fd, const pid_t monitor_pid, const std::string& sock_path, const std::string& container_id) {
     Utils::ensure_dirs(sock_path);
 
     unlink(sock_path.c_str());
@@ -29,7 +30,7 @@ int TTYProxyServer::run(const int master_fd, const pid_t monitor_pid, const std:
 
     if (bind(sfd, (sockaddr*)&addr, sizeof(addr)) == -1) {
         close(sfd);
-        Utils::handle_error("TTY Proxy Socket binding failed");
+        Utils::handle_error("TTY Proxy Socket binding fbinailed");
     }
 
     chmod(sock_path.c_str(), S_IRUSR | S_IWUSR);
@@ -122,6 +123,15 @@ int TTYProxyServer::run(const int master_fd, const pid_t monitor_pid, const std:
             }
         }
         close(cfd);
+
+        try {
+            std::string db_path = Utils::get_base_dir() + "quiver.db";
+            DatabaseManager db(db_path);
+            db.update_container_status(container_id, "stopped");
+            std::cerr << "Container " << container_id.substr(0, 12) << " marked as stopped." << std::endl;
+        } catch (const std::runtime_error& e) {
+            std::cerr << "Database Error in TTYProxyServer: " << e.what() << std::endl;
+        }
 
         if (!m_running) {
             break;

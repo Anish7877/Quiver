@@ -4,12 +4,27 @@
 #include "../include/network.hpp"
 #include "../include/package_manager.hpp"
 #include "../include/device_manager.hpp"
+#include "../include/database_manager.hpp"
+#include "../include/container_management.hpp"
 
 int Process::start(const std::string& new_hostname,const std::vector<std::string>& volumes,const std::string& filesystem_path,const std::string& path){
     m_new_hostname = new_hostname;
     m_new_fs = filesystem_path;
     m_volumes = volumes;
-    if(run(path) == ERR) return ERR;
+
+    // Initialize database and container managers
+    std::string db_path = Utils::get_base_dir() + "quiver.db";
+    DatabaseManager db(db_path);
+    ContainerManager container_manager(db);
+
+    // Create the container record in the database before starting the process
+    m_container_id = container_manager.create_container(m_new_hostname);
+    if (m_container_id.empty()) {
+        std::cerr << "Failed to create container in database." << std::endl;
+        return ERR;
+    }
+
+    if(run(path, m_container_id) == ERR) return ERR;
     return 0;
 }
 
@@ -125,7 +140,7 @@ int Process::run_container(ContainerArgs* args) {
     return ERR;
 }
 
-int Process::run(const std::string& path){
+int Process::run(const std::string& path, std::string& container_id){
     // Create PTY pair
     int master_fd{}, slave_fd{};
     char slave_name[128];
@@ -162,43 +177,52 @@ int Process::run(const std::string& path){
         }
     }
     else{
-        close(namespace_pipe[0]);
-        setup_user_namespace();
-        if(write(namespace_pipe[1], "r", 1) != 1) Utils::handle_error("write to sync_pipe failed");
+        try {
+            DatabaseManager db(Utils::get_base_dir() + "quiver.db");
+            db.update_container_pid(m_container_id, m_child_pid);
+            db.update_container_status(m_container_id, "running");
+            close(namespace_pipe[0]);
+            setup_user_namespace();
+            if(write(namespace_pipe[1], "r", 1) != 1) Utils::handle_error("write to sync_pipe failed");
 
-        close(slave_fd);
+            close(slave_fd);
 
-        std::cerr << "Container started with PID: " << m_child_pid << '\n';
+            std::cerr << "Container started with PID: " << m_child_pid << '\n';
 
-        // Setup user namespace mappings
+            // Setup user namespace mappings
 
-        if (Network::setup_networking(m_child_pid) != 0) {
-            Utils::handle_error("Failed to setup network");
-        }
+            if (Network::setup_networking(m_child_pid) != 0) {
+                Utils::handle_error("Failed to setup network");
+            }
 
-        pid_t proxy_pid { fork() };
-        if (proxy_pid == ERR) {
-            close(master_fd);
-            Utils::handle_error("fork for proxy failed");
-        }
+            pid_t proxy_pid { fork() };
+            if (proxy_pid == ERR) {
+                close(master_fd);
+                Utils::handle_error("fork for proxy failed");
+            }
 
-        TTYProxyServer tty{};
-        if (proxy_pid == 0) {
-            std::string sock = Utils::get_sock_path(m_child_pid);
-            std::cerr << "DEBUG: tty proxy socket: " << sock << '\n';
-            if(tty.start(master_fd, m_child_pid, sock) == ERR)
-                Utils::handle_error("Proxy server start failed");
-            exit(1);
-        } else {
-            close(master_fd);
+            TTYProxyServer tty{};
+            if (proxy_pid == 0) {
+                std::string sock = Utils::get_sock_path(m_child_pid);
+                std::cerr << "DEBUG: tty proxy socket: " << sock << '\n';
+                if(tty.start(master_fd, m_child_pid, sock, container_id) == ERR)
+                    Utils::handle_error("Proxy server start failed");
+                exit(1);
+            } else {
+                close(master_fd);
 
-            // Wait for container
-            int status{};
-            waitpid(m_child_pid, &status, WNOHANG);
+                // Wait for container
+                int status{};
+                waitpid(m_child_pid, &status, WNOHANG);
 
-            std::string sock { Utils::get_sock_path(m_child_pid) };
-            std::cerr << "Container started. attach socket: " << sock << '\n';
-            return 0;
+                // TODO: Update to use container id
+                std::string sock { Utils::get_sock_path(m_child_pid) };
+                std::cerr << "Container started. attach socket: " << sock << '\n';
+                return 0;
+            }
+        } catch (const std::runtime_error& e) {
+            std::cerr << "Database Error in run(): " << e.what() << std::endl;
+            return ERR;
         }
     }
     return 0;

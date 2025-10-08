@@ -12,6 +12,9 @@ struct Container {
     pid_t pid;
     std::string status;
     std::string created_at;
+    std::string hostname;
+    std::string filesystem_path;
+    std::string pty_shell;
 };
 
 // Represents the Volume Table's Schema
@@ -37,6 +40,7 @@ public:
     bool add_container(const Container& container);
     Container get_container(const std::string& container_id);
     bool update_container_status(const std::string& container_id, const std::string& status);
+    bool update_container_pid(const std::string& container_id, pid_t pid);
     bool remove_container(const std::string& container_id);
     std::vector<Container> list_containers();
 
