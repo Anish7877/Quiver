@@ -28,8 +28,14 @@ void Mount::dev_pts(const std::string& dev_pts_path, const int& flags, const std
 
 void Mount::bind_mount(const std::string& src, const std::string& dst, const std::string& options){
     if(mount(src.c_str(), dst.c_str(), nullptr, MS_BIND, options.empty() ? nullptr : options.c_str()) == ERR)
-        Utils::handle_error("Unable to mount " + src + " to " + dst);
+        Utils::handle_error("Unable to bind mount " + src + " to " + dst);
 }
+
+void Mount::bind_rec_mount(const std::string &src, const std::string &dst, const std::string& options){
+    if(mount(src.c_str(), dst.c_str(), nullptr, MS_BIND | MS_REC, options.empty() ? nullptr : options.c_str()) == ERR)
+        Utils::handle_error("Unable to bind and rec mount " + src + " to " + dst);
+}
+
 void Mount::volumes(const std::string& rootfs, const std::vector<std::string> volumes, const std::string& options){
     size_t no_volumes{ volumes.size() };
     if(no_volumes > 0){

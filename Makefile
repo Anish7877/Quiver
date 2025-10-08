@@ -2,7 +2,7 @@ CXX=g++
 STD=-std=c++17
 OPTFLAGS=-O3
 CXXFLAGS=-Wall -Wextra
-LDFLAGS=-lcpr -lcurl -lssl -lcrypto -pthread -lsqlite3 
+LDFLAGS=-lcpr -lcurl -lssl -lcrypto -pthread -lsqlite3 -lutil
 DEBUG_FLAGS=-g
 INCLUDE_DIRS=./include
 SRCDIR=./src

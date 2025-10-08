@@ -53,16 +53,19 @@ std::string Utils::get_base_dir(){
     return base + "/.quiver/";
 }
 std::string Utils::get_sock_path(const pid_t& pid){
-    std::string path{ get_base_dir() + "containers/" + std::to_string(static_cast<long long>(pid)) + "/attach.sock" };
-    return path;
+    std::string path{ get_base_dir() + "containers/" + std::to_string(static_cast<long long>(pid)) };
+    ensure_dirs(path);
+    return path + "/attach.sock";
 }
 
 std::string Utils::get_filesystem_path(const pid_t& pid){
     std::string path{ get_base_dir() + "filesystems/" + std::to_string(static_cast<long long>(pid)) };
+    ensure_dirs(path);
     return path;
 }
 
 std::string Utils::get_image_path(const std::string& image_name){
     std::string path{ get_base_dir() + "images/" + image_name};
+    ensure_dirs(path);
     return path;
 }
