@@ -12,7 +12,7 @@ BUILDDIR=./build/release
 DEBUG_BUILDDIR=./build/debug
 
 DEBUG_CPPFLAGS=$(STD) $(CXXFLAGS) $(DEBUG_FLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS)
-CPPLAGS=$(STD) $(CXXFLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS)
+CPPFLAGS=$(STD) $(CXXFLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS)
 
 CPPFILES=$(wildcard $(SRCDIR)/*.cpp)
 OBJECTS=$(patsubst $(SRCDIR)/%.cpp,$(BINARIES)/%.o,$(CPPFILES))
@@ -54,4 +54,3 @@ run: build-release
 
 run-debug: build-debug
 	@$(DEBUG_BUILDDIR)/quiver
-
