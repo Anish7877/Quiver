@@ -58,7 +58,7 @@ bool DatabaseManager::init_db() {
 }
 
 // Adds a new container to the database
-bool DatabaseManager::add_container(const Container& container) {
+bool DatabaseManager::add_container(const ContainerObject& container) {
     const char* sql = "INSERT INTO containers (id, name, image, pid, status, hostname, filesystem_path, pty_shell) VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
     sqlite3_stmt* stmt;
 
@@ -83,10 +83,10 @@ bool DatabaseManager::add_container(const Container& container) {
 }
 
 // Retrieves a container from the database by its ID
-Container DatabaseManager::get_container(const std::string& container_id) {
+ContainerObject DatabaseManager::get_container(const std::string& container_id) {
     const char* sql = "SELECT id, name, image, pid, status, created_at, hostname, filesystem_path, pty_shell FROM containers WHERE id = ?;";
     sqlite3_stmt* stmt;
-    Container container{};
+    ContainerObject container{};
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, container_id.c_str(), -1, SQLITE_STATIC);
@@ -156,14 +156,14 @@ bool DatabaseManager::remove_container(const std::string& container_id) {
 }
 
 // Lists all containers in the database
-std::vector<Container> DatabaseManager::list_containers() {
+std::vector<ContainerObject> DatabaseManager::list_containers() {
     const char* sql = "SELECT id, name, image, pid, status, created_at, hostname, filesystem_path, pty_shell FROM containers;";
     sqlite3_stmt* stmt;
-    std::vector<Container> containers;
+    std::vector<ContainerObject> containers;
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
-            Container c;
+            ContainerObject c;
             c.id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
             c.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
             c.image = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
@@ -181,7 +181,7 @@ std::vector<Container> DatabaseManager::list_containers() {
 }
 
 // Adds a new volume to the database
-bool DatabaseManager::add_volume(const Volume& volume) {
+bool DatabaseManager::add_volume(const VolumeObject& volume) {
     const char* sql = "INSERT INTO volumes (container_id, host_path, container_path) VALUES (?, ?, ?);";
     sqlite3_stmt* stmt;
 
@@ -199,15 +199,15 @@ bool DatabaseManager::add_volume(const Volume& volume) {
 }
 
 // Retrieves all volumes for a given container
-std::vector<Volume> DatabaseManager::get_container_volumes(const std::string& container_id) {
+std::vector<VolumeObject> DatabaseManager::get_container_volumes(const std::string& container_id) {
     const char* sql = "SELECT id, container_id, host_path, container_path FROM volumes WHERE container_id = ?;";
     sqlite3_stmt* stmt;
-    std::vector<Volume> volumes;
+    std::vector<VolumeObject> volumes;
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, container_id.c_str(), -1, SQLITE_STATIC);
         while (sqlite3_step(stmt) == SQLITE_ROW) {
-            Volume v;
+            VolumeObject v;
             v.id = sqlite3_column_int(stmt, 0);
             v.container_id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
             v.host_path = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));

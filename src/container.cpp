@@ -19,14 +19,15 @@ std::vector<std::string> Container::m_volumes{};
 Terminal Container::m_term{};
 Terminal::PtyArgs Container::m_pty_args{};
 
-Container::Container(const std::string& hostname, const std::string& new_fs, const std::vector<std::string>& volumes){
+Container::Container(const std::string& hostname, const std::string& new_fs, const std::vector<std::string>& volumes, DatabaseManager& db, const std::string& container_id)
+    : m_db(&db), m_container_id(container_id) {
     m_new_hostname = hostname;
     m_new_fs = new_fs;
     m_volumes = volumes;
 }
 
 void Container::exec(const std::string& program_path){
-    run(program_path);
+    run(program_path, m_container_id);
 }
 
 void Container::set_filesystem(const std::string& path){
@@ -113,10 +114,17 @@ void Container::manage_container(const std::string& path, const std::string& fil
         if (Network::setup_networking(m_child_pid) != 0) {
             Utils::handle_error("Failed to setup network");
         }
+        
+        // DB INTEGRATION: Update PID and status to running
+        m_db->update_container_pid(m_container_id, m_child_pid);
+        m_db->update_container_status(m_container_id, "running");
 
         // The manager process now starts the terminal server.
         // The server's socket will be identified by the manager's PID.
         m_term.start_server(m_pty_args, m_child_pid, getpid());
+
+        // DB INTEGRATION: Update status to exited
+        m_db->update_container_status(m_container_id, "exited");
 
         // When start_server returns, the container has exited.
         int status;
@@ -125,7 +133,7 @@ void Container::manage_container(const std::string& path, const std::string& fil
     }
 }
 
-void Container::run(const std::string& path) {
+void Container::run(const std::string& path, const std::string& container_id) {
     ioctl(STDIN_FILENO, TIOCGWINSZ, &m_pty_args.window_size);
     m_term.start_pty_session(m_pty_args);
 

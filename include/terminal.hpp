@@ -15,7 +15,7 @@ class Terminal{
         ~Terminal();
         void start_pty_session(PtyArgs& args);
         void redirect_io(const int& slave_fd);
-        void start_server(const PtyArgs& args, const pid_t& container_pid, const pid_t& manager_pid, const std::string& container_id);
+        void start_server(const PtyArgs& args, const pid_t& container_pid, const pid_t& manager_pid);
         void connect_to_server(const pid_t& container_pid);
     private:
         static void sigchld_handler(int signum);

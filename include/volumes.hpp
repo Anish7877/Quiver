@@ -3,6 +3,7 @@
 #include <string>
 #include <sys/mount.h>
 #include <sys/stat.h>
+#include "../include/database_manager.hpp"
 
 class VolumeManager{
     public:
@@ -11,7 +12,7 @@ class VolumeManager{
             permanent
         };
         explicit VolumeManager() = default;
-        explicit VolumeManager(const std::vector<std::string>& volumes, const std::string& rootfs);
+        explicit VolumeManager(const std::vector<std::string>& volumes, const std::string& rootfs, DatabaseManager& db, const std::string& container_id);
         ~VolumeManager(){};
         void create_volume(const std::vector<std::string>& volumes, const VolumeType& type = VolumeType::permanent);
         void remove_volume(const std::vector<std::string>& volumes);
@@ -20,4 +21,7 @@ class VolumeManager{
     private:
         std::vector<std::string> m_volumes{};
         std::string m_rootfs{};
+
+        DatabaseManager& m_db;
+        std::string m_container_id{};
 };

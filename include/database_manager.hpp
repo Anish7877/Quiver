@@ -5,7 +5,7 @@
 #include <sqlite3.h>
 
 // Represents the Container Table's Schema
-struct Container {
+struct ContainerObject {
     std::string id;
     std::string name;
     std::string image;
@@ -18,7 +18,7 @@ struct Container {
 };
 
 // Represents the Volume Table's Schema
-struct Volume {
+struct VolumeObject {
     int id;
     std::string container_id;
     std::string host_path;
@@ -37,16 +37,16 @@ public:
     bool init_db();
 
     // Container-related operations
-    bool add_container(const Container& container);
-    Container get_container(const std::string& container_id);
+    bool add_container(const ContainerObject& container);
+    ContainerObject get_container(const std::string& container_id);
     bool update_container_status(const std::string& container_id, const std::string& status);
     bool update_container_pid(const std::string& container_id, pid_t pid);
     bool remove_container(const std::string& container_id);
-    std::vector<Container> list_containers();
+    std::vector<ContainerObject> list_containers();
 
     // Volume-related operations
-    bool add_volume(const Volume& volume);
-    std::vector<Volume> get_container_volumes(const std::string& container_id);
+    bool add_volume(const VolumeObject& volume);
+    std::vector<VolumeObject> get_container_volumes(const std::string& container_id);
     bool remove_volume(int volume_id);
 
 private:

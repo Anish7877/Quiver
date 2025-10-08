@@ -65,26 +65,25 @@
 #include <vector>
 
 class ContainerManager {
-public:
-    explicit ContainerManager(DatabaseManager& db);
+    public:
+        explicit ContainerManager(DatabaseManager& db);
 
-    // Creates a container entry in the DB with initial config
-    std::string create_container(const std::string& image_name, const std::string& container_name = "", const std::string& hostname = "container");
+        // Creates a container entry in the DB with initial config
+        std::string create_container(const std::string& image_name, const std::string& container_name = "", const std::string& hostname = "container");
 
-    // Retrieves full container information
-    Container get_container_info(const std::string& container_id);
+        // Retrieves full container information
+        ContainerObject get_container_info(const std::string& container_id);
 
-    // Lists all containers
-    std::vector<Container> list_all_containers();
+        // Lists all containers
+        std::vector<ContainerObject> list_all_containers();
 
-    // Removes a container and its associated data (like volumes)
-    bool remove_container(const std::string& container_id);
-    
-    // Logs container data to the console (restoring this functionality)
-    void log_container_data(const std::string& container_id);
+        // Removes a container and its associated data (like volumes)
+        bool remove_container(const std::string& container_id);
+        
+        // Logs container data to the console (restoring this functionality)
+        void log_container_data(const std::string& container_id);
 
-private:
-    DatabaseManager& m_db;
-
-    std::string generate_container_id(const std::string& seed);
+    private:
+        DatabaseManager& m_db;
+        std::string generate_container_id(const std::string& seed);
 };
