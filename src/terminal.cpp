@@ -107,7 +107,6 @@ void Terminal::connect_to_server(const pid_t& manager_pid){
     if(master_fd == ERR) Utils::handle_error("Failed to receive master fd");
 
     enable_raw_mode();
-    atexit(restore_state);
 
     enum { NORMAL, ESCAPE } state{ NORMAL };
 
@@ -149,7 +148,6 @@ void Terminal::connect_to_server(const pid_t& manager_pid){
             if (write(STDOUT_FILENO, buf, n) != n) break;
         }
     }
-    restore_state();
     close(master_fd);
 }
 

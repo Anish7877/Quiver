@@ -129,14 +129,19 @@ void Container::run(const std::string& path) {
     ioctl(STDIN_FILENO, TIOCGWINSZ, &m_pty_args.window_size);
     m_term.start_pty_session(m_pty_args);
 
-    int pid_pipe[2];
-    if (pipe(pid_pipe) == -1) {
-        Utils::handle_error("pipe for PID failed");
-    }
-
     pid_t temp_pid{ getpid() };
     std::string filesystem_dir{ Utils::get_filesystem_path(temp_pid) };
-    // ... (filesystem setup remains the same)
+    std::string upper { filesystem_dir + "/upper" };
+    std::string merged { filesystem_dir + "/merged" };
+    std::string work  { filesystem_dir + "/work" };
+
+    Utils::ensure_dirs(upper);
+    Utils::ensure_dirs(work);
+    Utils::ensure_dirs(merged);
+
+    std::cerr << "Setting up FUSE overlay before fork..." << '\n';
+    FuseOverlay::setup(m_new_fs, upper, work, merged);
+    std::cerr << "FUSE overlay ready at: " << merged << '\n';
 
     pid_t manager_pid = fork();
     if (manager_pid == -1) {
@@ -144,20 +149,14 @@ void Container::run(const std::string& path) {
     }
 
     if (manager_pid == 0) {
-        // Child process (becomes the detached manager)
-        close(pid_pipe[0]); // Close read end of the pipe
-        manage_container(path, filesystem_dir); // Pass the write end
+        // This child process becomes the detached container manager
+        manage_container(path, filesystem_dir);
     } else {
-        // Original parent process
-        //close(pid_pipe[1]); // Close write end of the pipe
-        //pid_t actual_manager_pid;
-        //// Read the actual PID from the manager process
-        //if (read(pid_pipe[0], &actual_manager_pid, sizeof(actual_manager_pid)) > 0) {
-        //    std::cerr << "Container started." << '\n';
-        //    std::cerr << "To attach, run: quiver attach " << actual_manager_pid << '\n';
-        //}
-        close(pid_pipe[0]);
-        waitpid(manager_pid, NULL, 0); // Wait for the first child to exit
+        // The original process prints the manager's PID for the user and exits.
+        std::cerr << "Container started." << '\n';
+        std::cerr << "To attach, run: quiver attach " << manager_pid << '\n';
+        // Wait for the first fork in manage_container to exit, ensuring daemonization has started.
+        waitpid(manager_pid, NULL, 0);
     }
 }
 
