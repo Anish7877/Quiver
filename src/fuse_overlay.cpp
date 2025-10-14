@@ -1,7 +1,6 @@
 #include "../include/fuse_overlay.hpp"
 #include "../include/utils.hpp"
 #include <sys/wait.h>
-
 #include "../include/fuse_overlay.hpp"
 #include "../include/utils.hpp"
 #include <sys/wait.h>
@@ -22,10 +21,8 @@ bool is_mountpoint(const std::string& path) {
     return false;
 }
 
-void FuseOverlay::setup(const std::string& lower, const std::string& upper,
-                        const std::string& work, const std::string& merged){
+void FuseOverlay::setup(const std::string& lower, const std::string& upper, const std::string& work, const std::string& merged){
 
-    // Check if already mounted
     if(is_mountpoint(merged)) {
         std::cerr << "FUSE overlay already mounted at " << merged << '\n';
         return;
@@ -41,13 +38,12 @@ void FuseOverlay::setup(const std::string& lower, const std::string& upper,
                 "-o", ("upperdir=" + upper).c_str(),
                 "-o", ("workdir=" + work).c_str(),
                 merged.c_str(),
-                (char*) NULL) == -1){
+                (char*) NULL) == ERR){
             Utils::handle_error("Overlay filesystem error: exec failed");
         }
         exit(1);
     }
     else if(pid > 0){
-        // Wait for child process to complete initialization
         int status;
         waitpid(pid, &status, 0);
 
@@ -55,9 +51,8 @@ void FuseOverlay::setup(const std::string& lower, const std::string& upper,
             Utils::handle_error("fuse-overlayfs exited with error");
         }
 
-        // Now wait for the mount to actually appear in /proc/mounts
-        int max_attempts = 100;  // 10 seconds total
-        bool mounted = false;
+        int max_attempts{ 10 };
+        bool mounted{ false };
 
         for(int i = 0; i < max_attempts; i++){
             if(is_mountpoint(merged)){
@@ -65,7 +60,7 @@ void FuseOverlay::setup(const std::string& lower, const std::string& upper,
                 std::cerr << "FUSE overlay mounted successfully at " << merged << '\n';
                 break;
             }
-            usleep(100000);  // Wait 100ms
+            usleep(100000);
         }
 
         if(!mounted){

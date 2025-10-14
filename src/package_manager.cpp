@@ -1,15 +1,47 @@
 #include "../include/package_manager.hpp"
+#include "../include/utils.hpp"
 #include <iostream>
 #include <fstream>
 #include <vector>
 #include <algorithm>
 #include <dirent.h>
+#include <sys/stat.h>
+#include <string.h>
 
 int PackageManager::initialize(){
+    // Pre-create common directories that package managers need with proper permissions
+    std::vector<std::string> common_dirs = {
+        "/var",
+        "/var/cache",
+        "/var/log",
+        "/var/lib",
+        "/usr/share",
+        "/usr/share/doc",
+        "/usr/share/man",
+        "/usr/share/bug",
+        "/usr/share/lintian",
+        "/usr/share/pixmaps",
+        "/usr/share/applications",
+        "/etc"
+    };
+
+    for (const auto& dir : common_dirs) {
+        if (mkdir(dir.c_str(), 0755) == -1 && errno != EEXIST) {
+            std::cerr << "Warning: Could not create " << dir << ": " << strerror(errno) << '\n';
+        }
+        chmod(dir.c_str(), 0755);  // Ensure proper permissions even if exists
+    }
+
     Managers pkg { get_manager() };
+
+    if (pkg == Managers::unknown) {
+        std::cerr << "Warning: Could not detect package manager, skipping configuration" << '\n';
+        return 0;  // Don't fail, just warn
+    }
     switch (pkg) {
         case Managers::apk : {
             mkdir("/etc/apk", 0755);
+            chmod("/etc/apk", 0755);
             std::ofstream apk_conf("/etc/apk/apk.conf");
             if (apk_conf.is_open()){
             apk_conf << "# Rootless container APK configuration\n";
@@ -21,8 +53,26 @@ int PackageManager::initialize(){
         }
         break;
         case Managers::apt : {
-            mkdir("/etc/apt", 0755);
-            mkdir("/etc/apt/apt.conf.d", 0755);
+            // Create APT directories
+            std::vector<std::string> apt_dirs = {
+                "/etc/apt",
+                "/etc/apt/apt.conf.d",
+                "/etc/apt/sources.list.d",
+                "/etc/apt/preferences.d",
+                "/var/lib/apt",
+                "/var/lib/apt/lists",
+                "/var/lib/apt/lists/partial",
+                "/var/cache/apt",
+                "/var/cache/apt/archives",
+                "/var/cache/apt/archives/partial",
+                "/var/log/apt"
+            };
+
+            for (const auto& dir : apt_dirs) {
+                mkdir(dir.c_str(), 0755);
+                chmod(dir.c_str(), 0755);
+            }
+
             std::ofstream apt_conf("/etc/apt/apt.conf.d/99-rootless-container");
             if (apt_conf.is_open()) {
                 apt_conf << "// Rootless container APT configuration\n";
@@ -39,9 +89,21 @@ int PackageManager::initialize(){
                 std::cerr << "DEBUG: APT configuration created" << '\n';
             }
 
-            // DPKG configuration
-            mkdir("/etc/dpkg", 0755);
-            mkdir("/etc/dpkg/dpkg.cfg.d", 0755);
+            // DPKG configuration and directories
+            std::vector<std::string> dpkg_dirs = {
+                "/etc/dpkg",
+                "/etc/dpkg/dpkg.cfg.d",
+                "/var/lib/dpkg",
+                "/var/lib/dpkg/info",
+                "/var/lib/dpkg/updates",
+                "/var/lib/dpkg/triggers"
+            };
+
+            for (const auto& dir : dpkg_dirs) {
+                mkdir(dir.c_str(), 0755);
+                chmod(dir.c_str(), 0755);
+            }
+
             std::ofstream dpkg_conf("/etc/dpkg/dpkg.cfg.d/99-rootless-container");
             if (dpkg_conf.is_open()) {
                 dpkg_conf << "# Rootless container DPKG configuration\n";
@@ -49,13 +111,26 @@ int PackageManager::initialize(){
                 dpkg_conf << "no-debsig\n";
                 dpkg_conf << "force-depends\n";
                 dpkg_conf << "force-confnew\n";
+                dpkg_conf << "force-overwrite\n";  // Allow overwriting files
                 dpkg_conf.close();
                 std::cerr << "DEBUG: DPKG configuration created" << '\n';
             }
         }
         break;
         case Managers::pacman : {
-            mkdir("/etc/pacman.d", 0755);
+            std::vector<std::string> pacman_dirs = {
+                "/etc/pacman.d",
+                "/var/lib/pacman",
+                "/var/cache/pacman",
+                "/var/cache/pacman/pkg",
+                "/var/log"
+            };
+
+            for (const auto& dir : pacman_dirs) {
+                mkdir(dir.c_str(), 0755);
+                chmod(dir.c_str(), 0755);
+            }
+
             std::ofstream pacman_conf("/etc/pacman.conf");
             if (pacman_conf.is_open()) {
                 pacman_conf << "# Rootless container Pacman configuration\n";
@@ -73,7 +148,7 @@ int PackageManager::initialize(){
                 pacman_conf << "VerbosePkgLists\n";
                 pacman_conf << "NoUpgrade   = etc/passwd etc/group etc/shadow\n";
                 pacman_conf << "NoExtract   = usr/share/man/* usr/share/doc/*\n";
-                pacman_conf << "SigLevel    = Never\n";  // Disable signature checking in containers
+                pacman_conf << "SigLevel    = Never\n";
                 pacman_conf << "\n[core]\n";
                 pacman_conf << "Include = /etc/pacman.d/mirrorlist\n";
                 pacman_conf << "\n[extra]\n";
@@ -84,7 +159,22 @@ int PackageManager::initialize(){
         }
         break;
         case Managers::rcf : {
-            mkdir("/etc/yum", 0755);
+            std::vector<std::string> yum_dirs = {
+                "/etc/yum",
+                "/etc/dnf",
+                "/etc/rpm",
+                "/var/lib/rpm",
+                "/var/lib/dnf",
+                "/var/cache/yum",
+                "/var/cache/dnf",
+                "/var/log"
+            };
+
+            for (const auto& dir : yum_dirs) {
+                mkdir(dir.c_str(), 0755);
+                chmod(dir.c_str(), 0755);
+            }
+
             std::ofstream yum_conf("/etc/yum.conf");
             if (yum_conf.is_open()) {
                 yum_conf << "[main]\n";
@@ -104,7 +194,6 @@ int PackageManager::initialize(){
             }
 
             // DNF configuration
-            mkdir("/etc/dnf", 0755);
             std::ofstream dnf_conf("/etc/dnf/dnf.conf");
             if (dnf_conf.is_open()) {
                 dnf_conf << "[main]\n";
@@ -125,7 +214,6 @@ int PackageManager::initialize(){
             }
 
             // RPM configuration
-            mkdir("/etc/rpm", 0755);
             std::ofstream rpmrc("/etc/rpm/macros.rootless");
             if (rpmrc.is_open()) {
                 rpmrc << "# Rootless container RPM macros\n";
@@ -139,7 +227,19 @@ int PackageManager::initialize(){
         }
         break;
         case Managers::zypper : {
-            mkdir("/etc/zypp", 0755);
+            std::vector<std::string> zypper_dirs = {
+                "/etc/zypp",
+                "/var/cache/zypp",
+                "/var/cache/zypp/packages",
+                "/var/cache/zypp/raw",
+                "/var/cache/zypp/solv"
+            };
+
+            for (const auto& dir : zypper_dirs) {
+                mkdir(dir.c_str(), 0755);
+                chmod(dir.c_str(), 0755);
+            }
+
             std::ofstream zypper_conf("/etc/zypp/zypp.conf");
             if (zypper_conf.is_open()) {
                 zypper_conf << "# Rootless container Zypper configuration\n";
@@ -165,13 +265,9 @@ int PackageManager::initialize(){
     return 0;
 }
 
-bool PackageManager::path_exist(const std::string& path){
-    struct stat st{};
-    return stat(path.c_str(),&st) == 0;
-}
 PackageManager::Managers PackageManager::get_manager(){
     std::string os_release {  "/etc/os-release" };
-    if (path_exist(os_release)) {
+    if (Utils::path_exists(os_release)) {
         std::ifstream f(os_release);
         std::string line{}, content{};
         while (std::getline(f, line)) {
@@ -209,7 +305,7 @@ PackageManager::Managers PackageManager::get_manager(){
         for (auto& b : bins) {
             for (auto& d : bin_dirs) {
                 std::string full = d + "/" + b;
-                if (path_exist(full)) {
+                if (Utils::path_exists(full)) {
                     return pkg;
                 }
             }

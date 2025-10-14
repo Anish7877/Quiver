@@ -54,13 +54,13 @@ bool ContainerManager::remove_container(const std::string& container_id) {
         // Remove each volume entry by its ID
         if (!m_db.remove_volume(volume.id)) {
             // Log an error if removal fails, but continue to remove the container
-            std::cerr << "Warning: Failed to remove volume ID " << volume.id 
+            std::cerr << "Warning: Failed to remove volume ID " << volume.id
                       << " for container " << container_id << " from DB." << std::endl;
         } else {
             std::cout << "Successfully removed volume ID " << volume.id << " from DB." << std::endl;
         }
     }
-    
+
     // 2. Remove the container itself
     return m_db.remove_container(container_id);
 }

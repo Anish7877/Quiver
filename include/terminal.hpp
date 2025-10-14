@@ -27,4 +27,5 @@ class Terminal{
         static termios m_orig_term;
         static pid_t m_container_pid;
         static volatile bool m_running;
+        static bool m_raw_mode_enabled;
 };
