@@ -43,6 +43,7 @@ int main(int argc, char* argv[]) {
         commands["volume"] = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::volume(db, args); };
         commands["create"] = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::create(db, args); };
         commands["pull"]   = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::pull(db, img, args); };
+        commands["help"]  = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ Utils::print_usage(); };
 
         std::vector<std::string> cmds;
         for (int i = 2; i < argc; ++i) {

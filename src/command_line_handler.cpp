@@ -30,7 +30,6 @@ void CommandLineHandler::run(const std::vector<std::string>& cmds){
     while(i < cmds.size()){
         commands.emplace_back(cmds[i]);
     }
-
 }
 
 void CommandLineHandler::attach(const std::vector<std::string>& cmds){

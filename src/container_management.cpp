@@ -43,7 +43,7 @@ ContainerObject ContainerManager::get_container_info(const std::string& containe
 
 // Lists all containers stored in the database
 std::vector<ContainerObject> ContainerManager::list_all_containers() {
-    return m_db.list_containers();
+    return m_db.list_all_containers();
 }
 
 // Removes a container and its associated data

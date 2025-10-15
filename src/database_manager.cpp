@@ -62,7 +62,6 @@ bool DatabaseManager::init_db() {
         return false;
     }
 
-    char* err_msg = nullptr;
     if (sqlite3_exec(m_db, create_images_table, 0, 0, &err_msg) != SQLITE_OK) {
         std::cerr << "SQL error: " << err_msg << std::endl;
         sqlite3_free(err_msg);

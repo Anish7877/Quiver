@@ -36,7 +36,7 @@ void VolumeManager::create_volume(const std::vector<std::string>& volumes, const
             }
 
             VolumeObject v;
-            v.container_id = m_container_id;
+            v.container_name = m_container_id;
             v.host_path = volume_spec.substr(0, pos);
             v.container_path = volume_spec.substr(pos + 1);
 
@@ -81,7 +81,7 @@ void VolumeManager::link_volume(const std::vector<std::string>& volumes,const st
         }
 
         VolumeObject v;
-        v.container_id = containers[i]; // The target container ID
+        v.container_name = containers[i]; // The target container ID
         v.host_path = volumes[i].substr(0, pos);
         v.container_path = volumes[i].substr(pos + 1);
 

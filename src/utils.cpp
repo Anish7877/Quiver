@@ -69,3 +69,18 @@ std::string Utils::get_image_path(const std::string& image_name){
     ensure_dirs(path);
     return path;
 }
+
+void Utils::print_usage(){
+    std::cout << "Usage: quiver <command> [options]\n"
+                 "Commands:\n"
+                 "  run <image> [options]       Run a new container from the specified image\n"
+                 "  ps [options]                List containers\n"
+                 "  stop <container_id>         Stop a running container\n"
+                 "  rm <container_id>           Remove a container\n"
+                 "  images                      List available images\n"
+                 "  rmi <image_name>            Remove an image\n"
+                 "  pull <image_name>           Pull an image from a registry\n"
+                 "  exec <container_id> <cmd>   Execute a command in a running container\n"
+                 "  attach <container_id>       Attach to a running container's console\n"
+                 "  help                        Show this help message\n";
+}
