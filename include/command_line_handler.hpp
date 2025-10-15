@@ -7,15 +7,17 @@ extern std::vector<std::string> commands;
 extern std::string image_name;
 extern std::string container_name;
 extern pid_t container_pid;
-namespace CommandLineHandler{
-    void run(const std::vector<std::string>& cmds);
-    void attach(const std::vector<std::string>& cmds);
-    void ps(const std::vector<std::string>& cmds);
-    void rm(const std::vector<std::string>& cmds);
-    void image(const std::vector<std::string>& cmds);
-    void volume(const std::vector<std::string>& cmds);
-    void create(const std::vector<std::string>& cmds);
-    void pull(const std::vector<std::string>& cmds);
-    void start(const std::vector<std::string>& cmds);
-    void stop(const std::vector<std::string>& cmds);
-}
+
+class CommandLineHandler {
+public:
+    static void run(const std::vector<std::string>& cmds);
+    static void attach(const std::vector<std::string>& cmds);
+    static void ps(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
+    static void rm(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
+    static void image(DatabaseManager& db_manager, ImageManager& img_manager, const std::vector<std::string>& cmds);
+    static void volume(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
+    static void create(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
+    static void pull(DatabaseManager& db_manager, ImageManager& img_manager, const std::vector<std::string>& cmds);
+    static void start(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
+    static void stop(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
+};

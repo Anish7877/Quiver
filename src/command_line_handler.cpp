@@ -11,8 +11,6 @@ std::string image_name{""};
 std::string container_name{""};
 pid_t container_pid{-1};
 
-DatabaseManager db_manager("quiver.db");
-ImageManager img_manager;
 
 void CommandLineHandler::run(const std::vector<std::string>& cmds){
     size_t i{1};
@@ -42,7 +40,7 @@ void CommandLineHandler::attach(const std::vector<std::string>& cmds){
     container_pid = std::stoi(cmds[1]);
 }
 
-void CommandLineHandler::ps(const std::vector<std::string>& cmds){
+void CommandLineHandler::ps(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds.size() > 1){
         Utils::print_usage();
     }
@@ -71,7 +69,7 @@ void CommandLineHandler::ps(const std::vector<std::string>& cmds){
     }
 }
 
-void CommandLineHandler::rm(const std::vector<std::string>& cmds){
+void CommandLineHandler::rm(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds.size() > 2){
         Utils::print_usage();
     }
@@ -85,7 +83,7 @@ void CommandLineHandler::rm(const std::vector<std::string>& cmds){
     }
 }
 
-void CommandLineHandler::image(const std::vector<std::string>&  cmds){
+void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_manager, const std::vector<std::string>&  cmds){
     if (cmds.size() != 1) {
         Utils::print_usage();
     }
@@ -142,7 +140,7 @@ void CommandLineHandler::image(const std::vector<std::string>&  cmds){
     }
 }
 
-void CommandLineHandler::volume(const std::vector<std::string>& cmds){
+void CommandLineHandler::volume(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds[0] == "ls"){
         // list all the volumes database in tabular form
         std::vector<VolumeObject> volumes = db_manager.list_all_volumes();
@@ -157,7 +155,7 @@ void CommandLineHandler::volume(const std::vector<std::string>& cmds){
     // baaki abhi not sure
 }
 
-void CommandLineHandler::create(const std::vector<std::string>& cmds){
+void CommandLineHandler::create(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds[0] == "container"){
         std::vector<std::string> new_cmds{ cmds };
         new_cmds.erase(new_cmds.begin());
@@ -189,7 +187,7 @@ void CommandLineHandler::create(const std::vector<std::string>& cmds){
     }
 }
 
-void CommandLineHandler::pull(const std::vector<std::string>& cmds){
+void CommandLineHandler::pull(DatabaseManager& db_manager, ImageManager& img_manager, const std::vector<std::string>& cmds){
     if(cmds.size() > 1){
         Utils::print_usage();
     }
@@ -211,7 +209,7 @@ void CommandLineHandler::pull(const std::vector<std::string>& cmds){
     }
 }
 
-void CommandLineHandler::start(const std::vector<std::string>& cmds){
+void CommandLineHandler::start(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds.size() > 1){
         Utils::print_usage();
     }
@@ -224,7 +222,7 @@ void CommandLineHandler::start(const std::vector<std::string>& cmds){
     }
 }
 
-void CommandLineHandler::stop(const std::vector<std::string>& cmds){
+void CommandLineHandler::stop(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds.size() > 1){
         Utils::print_usage();
     }
