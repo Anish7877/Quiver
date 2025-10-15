@@ -307,6 +307,7 @@ void Container::run_container(const ContainerArgs& args) {
         Utils::handle_error("Failed to execute " + args.program_path);
     }
 }
+
 void Container::setup_user_namespace() {
     uid_t host_uid{ getuid() };
     gid_t host_gid{ getgid() };

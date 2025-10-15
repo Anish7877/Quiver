@@ -5,6 +5,10 @@
 #include <string.h>
 #include <iostream>
 #include <unistd.h>
+#include <openssl/sha.h>
+#include <sstream>
+#include <iomanip>
+#include <chrono>
 
 bool Utils::path_exists(const std::string& path){
     struct stat st{};
@@ -83,4 +87,22 @@ void Utils::print_usage(){
                  "  exec <container_id> <cmd>   Execute a command in a running container\n"
                  "  attach <container_id>       Attach to a running container's console\n"
                  "  help                        Show this help message\n";
+}
+
+std::string Utils::generate_container_id() {
+
+    auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::string seed = std::to_string(now);
+
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+    SHA256_Update(&sha256, seed.c_str(), seed.size());
+    SHA256_Final(hash, &sha256);
+
+    std::stringstream ss;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+    }
+    return ss.str();
 }

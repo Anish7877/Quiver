@@ -13,9 +13,8 @@ ContainerManager::ContainerManager(DatabaseManager& db) : m_db(db) {}
 // Creates a new container and saves it to the database
 std::string ContainerManager::create_container(const std::string& image_name, const std::string& container_name, const std::string& hostname) {
     // 1. Generate a unique ID for the container
-    auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-    std::string seed = image_name + container_name + std::to_string(now);
-    std::string container_id = generate_container_id(seed);
+    
+    std::string container_id = Utils::generate_container_id();
 
     // 2. Create a Container struct with the initial data
     ContainerObject c;
@@ -83,16 +82,4 @@ void ContainerManager::log_container_data(const std::string& container_id) {
 
 
 // Generates a unique SHA256 ID for a new container
-std::string ContainerManager::generate_container_id(const std::string& seed) {
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-    SHA256_Update(&sha256, seed.c_str(), seed.size());
-    SHA256_Final(hash, &sha256);
 
-    std::stringstream ss;
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
-        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
-    }
-    return ss.str();
-}

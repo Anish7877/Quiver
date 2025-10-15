@@ -2,6 +2,7 @@
 #include "../include/database_manager.hpp"
 #include "../include/image_management.hpp"
 #include "../include/command_line_handler.hpp"
+#include "../include/container.hpp"
 #include <vector>
 #include <iostream>
 
@@ -10,9 +11,11 @@ std::vector<std::string> commands{};
 std::string image_name{""};
 std::string container_name{""};
 pid_t container_pid{-1};
+std::string root_fs{""};
+std::string err{""};
 
 
-void CommandLineHandler::run(const std::vector<std::string>& cmds){
+void CommandLineHandler::run(DatabaseManager& db, ImageManager& img_manager, const std::vector<std::string>& cmds){
     size_t i{1};
     if(cmds[0] == "-v"){
         while(i < cmds.size() && cmds[i] != "-i"){
@@ -30,13 +33,22 @@ void CommandLineHandler::run(const std::vector<std::string>& cmds){
     while(i < cmds.size()){
         commands.emplace_back(cmds[i]);
     }
+
+    CommandLineHandler::pull(db, img_manager, {image_name});
+    
+    Container container("container", root_fs, volumes, db, Utils::generate_container_id());
+    container.exec("/bin/bash", commands);
+
 }
 
 void CommandLineHandler::attach(const std::vector<std::string>& cmds){
-    if(cmds.size() > 2){
+    if(cmds.size() > 1){
         Utils::print_usage();
     }
-    container_pid = std::stoi(cmds[1]);
+    container_pid = std::stoi(cmds[0]);
+
+    Container container;
+    container.connect_to_server(container_pid);
 }
 
 void CommandLineHandler::ps(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
@@ -154,11 +166,11 @@ void CommandLineHandler::volume(DatabaseManager& db_manager, const std::vector<s
     // baaki abhi not sure
 }
 
-void CommandLineHandler::create(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
+void CommandLineHandler::create(DatabaseManager& db_manager, ImageManager& img, const std::vector<std::string>& cmds){
     if(cmds[0] == "container"){
         std::vector<std::string> new_cmds{ cmds };
         new_cmds.erase(new_cmds.begin());
-        run(new_cmds);
+        run(db_manager, img, new_cmds);
     }
     else if(cmds[0] == "volume"){
         // write to database for further volume details
@@ -206,6 +218,7 @@ void CommandLineHandler::pull(DatabaseManager& db_manager, ImageManager& img_man
             std::cout << "Failed to add image " << image_name << " to database.\n";
         }
     }
+    root_fs = out_path;
 }
 
 void CommandLineHandler::start(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
