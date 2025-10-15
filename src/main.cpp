@@ -9,7 +9,6 @@
 #include <string>
 #include <memory>
 
-// Updated CommandHandler type
 using CommandHandler = std::function<void(DatabaseManager&, ImageManager&, const std::vector<std::string>&)>;
 
 int main(int argc, char* argv[]) {
@@ -34,15 +33,15 @@ int main(int argc, char* argv[]) {
         }
 
         std::map<std::string, CommandHandler> commands{};
-        commands["run"]    = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::run(db, img, args); };
-        commands["attach"] = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::attach(db, img, args); };
-        commands["ps"]     = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::ps(db, img, args); };
-        commands["rm"]     = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::rm(db, img, args); };
-        commands["start"]  = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::start(db, img, args); };
-        commands["stop"]   = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::stop(db, img, args); };
+        commands["run"]    = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::run(args); };
+        commands["attach"] = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::attach(args); };
+        commands["ps"]     = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::ps(db, args); };
+        commands["rm"]     = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::rm(db, args); };
+        commands["start"]  = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::start(db, args); };
+        commands["stop"]   = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::stop(db, args); };
         commands["image"]  = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::image(db, img, args); };
-        commands["volume"] = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::volume(db, img, args); };
-        commands["create"] = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::create(db, img, args); };
+        commands["volume"] = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::volume(db, args); };
+        commands["create"] = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::create(db, args); };
         commands["pull"]   = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::pull(db, img, args); };
 
         std::vector<std::string> cmds;
