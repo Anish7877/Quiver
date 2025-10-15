@@ -10,12 +10,10 @@
 #include <cstring>
 #include <csignal>
 #include <fcntl.h>
-#include <iostream>
 
 termios Terminal::m_orig_term{};
 pid_t Terminal::m_container_pid{-1};
 volatile bool Terminal::m_running{ false };
-bool Terminal::m_raw_mode_enabled{ false };
 
 void Terminal::start_pty_session(PtyArgs& args){
     if(openpty(&args.master_fd, &args.slave_fd, args.slave_name, nullptr, &args.window_size) == ERR)
@@ -34,6 +32,7 @@ void Terminal::redirect_io(const int &slave_fd){
 }
 
 void Terminal::start_server(const PtyArgs& args, const pid_t& container_pid, const pid_t& manager_pid){
+    //shim();
     m_container_pid = container_pid;
     m_running = true;
     close(args.slave_fd);
@@ -57,7 +56,6 @@ void Terminal::start_server(const PtyArgs& args, const pid_t& container_pid, con
         fd_set read_fds{};
         FD_ZERO(&read_fds);
         FD_SET(sock_fd, &read_fds);
-
         timeval tv{};
         tv.tv_sec = 1;
         tv.tv_usec = 0;
@@ -69,27 +67,24 @@ void Terminal::start_server(const PtyArgs& args, const pid_t& container_pid, con
         }
         if (ret == 0) continue;
 
-        if (FD_ISSET(sock_fd, &read_fds)) {
-            int client_sock{ accept(sock_fd, NULL, NULL) };
-            if (client_sock == -1) continue;
+        int client_sock{ accept(sock_fd, NULL, NULL) };
+        if (client_sock == -1) continue;
 
-            pid_t handler_pid{ fork() };
-            if (handler_pid == 0) {
-                close(sock_fd);
-                send_fd(client_sock, args.master_fd);
-                close(client_sock);
-                exit(0);
-            } else {
-                close(client_sock);
-                waitpid(handler_pid, NULL, 0);
-            }
+        pid_t handler_pid{ fork() };
+        if (handler_pid == 0) {
+            close(sock_fd);
+            send_fd(client_sock, args.master_fd);
+            close(client_sock);
+            exit(0);
+        } else {
+            close(client_sock);
+            waitpid(handler_pid, NULL, 0);
         }
     }
-
-    // Clean shutdown of PTY server
     close(args.master_fd);
     close(sock_fd);
     unlink(sock_path.c_str());
+
 }
 
 void Terminal::connect_to_server(const pid_t& manager_pid){
@@ -112,6 +107,7 @@ void Terminal::connect_to_server(const pid_t& manager_pid){
     if(master_fd == ERR) Utils::handle_error("Failed to receive master fd");
 
     enable_raw_mode();
+    atexit(restore_state);
 
     enum { NORMAL, ESCAPE } state{ NORMAL };
 
@@ -122,12 +118,7 @@ void Terminal::connect_to_server(const pid_t& manager_pid){
         FD_SET(master_fd, &read_fds);
 
         int max_fd { std::max(STDIN_FILENO, master_fd) };
-        int sel_ret = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
-
-        if (sel_ret < 0) {
-            if (errno == EINTR) continue;
-            break;
-        }
+        if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) < 0) Utils::handle_error("Select error from client side");
 
         if (FD_ISSET(STDIN_FILENO, &read_fds)) {
             char c{};
@@ -154,19 +145,11 @@ void Terminal::connect_to_server(const pid_t& manager_pid){
         if (FD_ISSET(master_fd, &read_fds)) {
             char buf[256]{};
             ssize_t n{ read(master_fd, buf, 256) };
-            if (n <= 0) {
-                // Container shell has exited
-                break;
-            }
+            if (n <= 0) break;
             if (write(STDOUT_FILENO, buf, n) != n) break;
         }
     }
-
-    // Ensure terminal is restored before closing
-    restore_state();
     close(master_fd);
-
-    std::cout << "\nContainer session ended.\n";
 }
 
 void Terminal::sigchld_handler(int signum){
@@ -175,14 +158,12 @@ void Terminal::sigchld_handler(int signum){
     if (reaped_pid == m_container_pid && (WIFEXITED(status) || WIFSIGNALED(status))) {
         m_running = false;
     }
+    restore_state();
 }
 
 void Terminal::enable_raw_mode(){
     if(tcgetattr(STDIN_FILENO, &m_orig_term) == ERR)
         Utils::handle_error("tcgetattr original terminal");
-
-    m_raw_mode_enabled = true;
-
     termios raw{};
     cfmakeraw(&raw);
     if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == ERR)
@@ -241,14 +222,9 @@ void Terminal::shim(){
 }
 
 void Terminal::restore_state(){
-    if (m_raw_mode_enabled) {
-        if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &m_orig_term) == ERR) {
-            std::cerr << "Warning: Cannot restore terminal original state\n";
-        }
-        m_raw_mode_enabled = false;
-    }
+    if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &m_orig_term) == ERR)
+        Utils::handle_error("Cannot restore terminal original state");
 }
 
 Terminal::~Terminal(){
-    restore_state();
 }
