@@ -20,9 +20,16 @@ struct ContainerObject {
 // Represents the Volume Table's Schema
 struct VolumeObject {
     int id;
-    std::string container_id;
+    std::string container_name;
     std::string host_path;
     std::string container_path;
+};
+
+struct ImageObject {
+    int id;
+    std::string name;
+    std::string tag;
+    std::string created_at;
 };
 
 class DatabaseManager {
@@ -39,15 +46,24 @@ public:
     // Container-related operations
     bool add_container(const ContainerObject& container);
     ContainerObject get_container(const std::string& container_id);
-    bool update_container_status(const std::string& container_id, const std::string& status);
+    bool update_container_status(const std::string& container_name, const std::string& status);
     bool update_container_pid(const std::string& container_id, pid_t pid);
-    bool remove_container(const std::string& container_id);
-    std::vector<ContainerObject> list_containers();
+    bool remove_container(const std::string& container_name);
+    std::vector<ContainerObject> list_all_containers();
+    std::vector<ContainerObject> list_running_containers();
+    std::vector<ContainerObject> list_containers_by_image(const std::string& image_name);
 
     // Volume-related operations
     bool add_volume(const VolumeObject& volume);
+    bool remove_volume(const int volume_id);
+    bool update_container_name_in_volumes(const int& volume_id, const std::string& container_name);
+    std::vector<VolumeObject> list_all_volumes();
     std::vector<VolumeObject> get_container_volumes(const std::string& container_id);
-    bool remove_volume(int volume_id);
+
+    // Image-related operations
+    std::vector<ImageObject> list_all_images();
+    bool add_image(const std::string& image_name);
+    bool remove_image(const std::string& image_name);
 
 private:
     sqlite3* m_db;
