@@ -1,2 +1,10 @@
 /build/**
 /bin/*
+
+.vscode/**
+*.code-workspace
+*.swp
+*.swo
+*.out
+*.exe
+*.o
