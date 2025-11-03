@@ -1,6 +1,6 @@
 #include "../include/utils.hpp"
 #include "../include/database_manager.hpp"
-#include "../include/image_management.hpp"
+#include "../include/image_manager.hpp"
 #include "../include/command_line_handler.hpp"
 #include "../include/container.hpp"
 #include <vector>
@@ -32,13 +32,13 @@ void CommandLineHandler::run(DatabaseManager& db, ImageManager& img_manager, con
     }
     while(i < cmds.size()){
         commands.emplace_back(cmds[i]);
+        ++i;
     }
 
-    CommandLineHandler::pull(db, img_manager, {image_name});
-    
-    Container container("container", root_fs, volumes, db, Utils::generate_container_id());
-    container.exec("/bin/bash", commands);
+    pull(db, img_manager, {image_name});
 
+    Container container{ "container", root_fs, volumes, db, Utils::generate_container_id() };
+    container.exec("/bin/bash", commands);
 }
 
 void CommandLineHandler::attach(const std::vector<std::string>& cmds){
@@ -71,7 +71,7 @@ void CommandLineHandler::ps(DatabaseManager& db_manager, const std::vector<std::
         std::cout << container.id << "\t"
             << container.name << "\t"
             << container.image << "\t"
-            << container.pid << "\t" 
+            << container.pid << "\t"
             << container.status << "\t"
             << container.created_at << "\t"
             << container.hostname << "\t"
@@ -85,7 +85,7 @@ void CommandLineHandler::rm(DatabaseManager& db_manager, const std::vector<std::
         Utils::print_usage();
     }
     container_name = cmds[1];
-    
+
     // remove db entry from database of container
     if (db_manager.remove_container(container_name)) {
         std::cout << "Container " << container_name << " removed successfully from database.\n";
@@ -137,7 +137,7 @@ void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_ma
                 std::cout << container.id << "\t"
                     << container.name << "\t"
                     << container.image << "\t"
-                    << container.pid << "\t" 
+                    << container.pid << "\t"
                     << container.status << "\t"
                     << container.created_at << "\t"
                     << container.hostname << "\t"
@@ -184,7 +184,7 @@ void CommandLineHandler::create(DatabaseManager& db_manager, ImageManager& img, 
             }
             std::string host_path = volume_input.substr(0, sep_pos);
             std::string container_path = volume_input.substr(sep_pos + 1);
-            
+
             VolumeObject volume;
             volume.host_path = host_path;
             volume.container_path = container_path;

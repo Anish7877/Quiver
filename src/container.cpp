@@ -4,6 +4,7 @@
 #include "../include/package_manager.hpp"
 #include "../include/mount.hpp"
 #include "../include/device_manager.hpp"
+#include "../include/fuse_overlay.hpp"
 #include <cstdlib>
 #include <iostream>
 #include <sys/syscall.h>
@@ -41,6 +42,8 @@ void Container::connect_to_server(const pid_t& container_pid){
 }
 
 void Container::manage_container(const std::string& path, const std::string& filesystem_dir) {
+    ioctl(STDIN_FILENO, TIOCGWINSZ, &m_pty_args.window_size);
+    m_term.start_pty_session(m_pty_args);
     if (fork() != 0) {
         exit(0);
     }
@@ -55,7 +58,7 @@ void Container::manage_container(const std::string& path, const std::string& fil
     }
 
     m_child_pid = fork();
-    if (m_child_pid == -1) {
+    if (m_child_pid == ERR) {
         Utils::handle_error("fork failed");
     }
 
@@ -131,8 +134,6 @@ void Container::manage_container(const std::string& path, const std::string& fil
 }
 
 void Container::run(const std::string& path, const std::string& container_id) {
-    ioctl(STDIN_FILENO, TIOCGWINSZ, &m_pty_args.window_size);
-    m_term.start_pty_session(m_pty_args);
 
     pid_t temp_pid{ getpid() };
     std::string filesystem_dir{ Utils::get_filesystem_path(temp_pid) };
@@ -154,14 +155,13 @@ void Container::run(const std::string& path, const std::string& container_id) {
     if (manager_pid == 0) {
         manage_container(path, filesystem_dir);
     } else {
-        // Close both FDs in the parent process
         close(m_pty_args.master_fd);
         close(m_pty_args.slave_fd);
 
         std::cerr << "Container started." << '\n';
-        std::cerr << "To attach, run: quiver attach " << manager_pid << '\n';
+        std::cerr << "To attach, run: quiver attach " << manager_pid+1 << '\n';
 
-        int status;
+        int status{};
         waitpid(manager_pid, &status, 0);
     }
 }
@@ -180,6 +180,9 @@ void Container::run_container(const ContainerArgs& args) {
     std::string merged { filesystem_path + "/merged" };
     std::string upper { filesystem_path + "/upper" };
     std::string work { filesystem_path + "/work" };
+    Utils::ensure_dirs(merged);
+    Utils::ensure_dirs(upper);
+    Utils::ensure_dirs(work);
 
     std::cerr << "DEBUG: Container init PID: " << getpid() << '\n';
 
@@ -188,26 +191,29 @@ void Container::run_container(const ContainerArgs& args) {
     }
 
     std::cerr << "DEBUG: Mounting overlayfs..." << '\n';
-    std::string overlay_options { "lowerdir=" + args.rootfs_path +
-                                  ",upperdir=" + upper +
-                                  ",workdir=" + work };
+    //std::string overlay_options { "lowerdir=" + args.rootfs_path +
+    //                              ",upperdir=" + upper +
+    //                              ",workdir=" + work };
 
-    if (mount("overlay", merged.c_str(), "overlay", MS_NODEV, overlay_options.c_str()) == ERR) {
-        std::cerr << "ERROR: Failed to mount overlayfs: " << strerror(errno) << '\n';
-        std::cerr << "DEBUG: Options were: " << overlay_options << '\n';
-        Utils::handle_error("Cannot mount overlay filesystem");
-    }
+    //if (mount("overlay", merged.c_str(), "overlay", MS_NODEV, overlay_options.c_str()) == ERR) {
+    //    std::cerr << "ERROR: Failed to mount overlayfs: " << strerror(errno) << '\n';
+    //    std::cerr << "DEBUG: Options were: " << overlay_options << '\n';
+    //    Utils::handle_error("Cannot mount overlay filesystem");
+    //}
 
-    std::cerr << "DEBUG: Overlay mounted successfully at: " << merged << '\n';
-    std::cerr << "DEBUG: Setting up merged as mount point..." << '\n';
+    //std::cerr << "DEBUG: Overlay mounted successfully at: " << merged << '\n';
+    //std::cerr << "DEBUG: Setting up merged as mount point..." << '\n';
 
-    if (mount(merged.c_str(), merged.c_str(), NULL, MS_BIND | MS_REC, NULL) == ERR) {
-        Utils::handle_error("Unable to bind mount merged");
-    }
+    FuseOverlay::setup(filesystem_path, upper, work, merged);
 
-    if (mount(NULL, merged.c_str(), NULL, MS_PRIVATE | MS_REC, NULL) == ERR) {
-        Utils::handle_error("Unable to make merged private");
-    }
+
+    //if (mount(merged.c_str(), merged.c_str(), NULL, MS_BIND | MS_REC, NULL) == ERR) {
+    //    Utils::handle_error("Unable to bind mount merged");
+    //}
+
+    //if (mount(NULL, merged.c_str(), NULL, MS_PRIVATE | MS_REC, NULL) == ERR) {
+    //    Utils::handle_error("Unable to make merged private");
+    //}
 
     if (chdir(merged.c_str()) == ERR) {
         Utils::handle_error("Unable to change directory to " + merged);

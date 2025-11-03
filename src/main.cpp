@@ -1,5 +1,4 @@
-#include "../include/image_management.hpp"
-#include "../include/container.hpp"
+#include "../include/image_manager.hpp"
 #include "../include/database_manager.hpp"
 #include "../include/container_management.hpp"
 #include "../include/utils.hpp"
@@ -24,7 +23,7 @@ int main(int argc, char* argv[]) {
         }
 
         DatabaseManager& db = *db_ptr;
-        ImageManager img_manager;
+        ImageManager img_manager{};
         ContainerManager containerManager(db);
 
         if (argc < 2) {

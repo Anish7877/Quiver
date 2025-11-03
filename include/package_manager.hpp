@@ -16,6 +16,5 @@ class PackageManager{
             zypper,
             unknown
         };
-        static bool path_exist(const std::string& path);
         static Managers get_manager();
 };

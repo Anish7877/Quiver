@@ -1,4 +1,4 @@
-#include "../include/image_management.hpp"
+#include "../include/image_manager.hpp"
 #include <thread>
 #include <chrono>
 #include <iomanip>

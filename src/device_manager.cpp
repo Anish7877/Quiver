@@ -8,11 +8,6 @@
 #include <iostream>
 
 void DeviceManager::create_terminal_devices(){
-    struct DeviceBind {
-        const char* name;
-        bool required;
-    };
-
     DeviceBind devices[]{
         {"null", true},
         {"zero", true},
