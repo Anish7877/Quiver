@@ -15,7 +15,7 @@ std::string root_fs{""};
 std::string err{""};
 
 
-void CommandLineHandler::run(DatabaseManager& db, ImageManager& img_manager, const std::vector<std::string>& cmds){
+void CommandLineHandler::run(DatabaseManager& db, const std::vector<std::string>& cmds){
     size_t i{1};
     if(cmds[0] == "-v"){
         while(i < cmds.size() && cmds[i] != "-i"){
@@ -34,7 +34,7 @@ void CommandLineHandler::run(DatabaseManager& db, ImageManager& img_manager, con
         commands.emplace_back(cmds[i]);
     }
 
-    CommandLineHandler::pull(db, img_manager, {image_name});
+    CommandLineHandler::pull(db, {image_name});
     
     Container container("container", root_fs, volumes, db, Utils::generate_container_id());
     container.exec("/bin/bash", commands);
@@ -170,7 +170,7 @@ void CommandLineHandler::create(DatabaseManager& db_manager, ImageManager& img, 
     if(cmds[0] == "container"){
         std::vector<std::string> new_cmds{ cmds };
         new_cmds.erase(new_cmds.begin());
-        run(db_manager, img, new_cmds);
+        run(db_manager, new_cmds);
     }
     else if(cmds[0] == "volume"){
         // write to database for further volume details
@@ -198,25 +198,20 @@ void CommandLineHandler::create(DatabaseManager& db_manager, ImageManager& img, 
     }
 }
 
-void CommandLineHandler::pull(DatabaseManager& db_manager, ImageManager& img_manager, const std::vector<std::string>& cmds){
+void CommandLineHandler::pull(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds.size() > 1){
         Utils::print_usage();
     }
     image_name = cmds[0];
 
     // pull image and save to local storage
-    std::string out_path="";
-    std::string err="";
-    img_manager.pull(image_name, out_path, err);
-    if (!err.empty()) {
+    ImageManager img_manager(db_manager);
+    std::string out_path;
+    std::string err;
+    if (!img_manager.pull(image_name, out_path, err)) {
         std::cout << "Failed to pull image: " << err << std::endl;
     } else {
         std::cout << "Image pulled successfully to: " << out_path << std::endl;
-        if (db_manager.add_image(image_name)) {
-            std::cout << "Image " << image_name << " added to database successfully.\n";
-        } else {
-            std::cout << "Failed to add image " << image_name << " to database.\n";
-        }
     }
     root_fs = out_path;
 }

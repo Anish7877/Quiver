@@ -11,21 +11,16 @@
 ContainerManager::ContainerManager(DatabaseManager& db) : m_db(db) {}
 
 // Creates a new container and saves it to the database
-std::string ContainerManager::create_container(const std::string& image_name, const std::string& container_name, const std::string& hostname) {
-    // 1. Generate a unique ID for the container
-    
-    std::string container_id = Utils::generate_container_id();
-
-    // 2. Create a Container struct with the initial data
+std::string ContainerManager::create_container(const std::string& container_id, const pid_t& container_pid, const std::string& container_name, const std::string& filesystem_path) {
     ContainerObject c;
     c.id = container_id;
+    c.pid = container_pid;
     c.name = container_name.empty() ? "quiver-" + container_id.substr(0, 12) : container_name;
-    c.image = image_name;
-    c.pid = 0;
-    c.status = "created";
-    c.hostname = hostname;
-    c.filesystem_path = Utils::get_filesystem_path(getpid()); // TODO: Placeholder, may need adjustment
-    c.pty_shell = "/bin/sh";
+    c.image = filesystem_path.substr(filesystem_path.find_last_of("/") + 1);
+    c.status = "running";
+    c.hostname = container_id.substr(0, 6);
+    c.filesystem_path = filesystem_path;
+    c.pty_shell = "/bin/sh";  // TODO: Need to update later based on actual shell used
 
     // 3. Add the container to the database
     if (!m_db.add_container(c)) {
