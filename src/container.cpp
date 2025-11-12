@@ -121,7 +121,7 @@ void Container::manage_container(const std::string& path, const std::string& fil
         
         // pty_shell - Initial Command - Will be set later
         ContainerManager containerManager(*m_db);
-        containerManager.create_container(m_container_id, m_child_pid, "", filesystem_dir);
+        containerManager.create_container(m_container_id, m_child_pid-1, "", filesystem_dir);
 
         m_term.start_server(m_pty_args, m_child_pid, getpid());
 
