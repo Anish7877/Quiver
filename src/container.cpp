@@ -4,7 +4,6 @@
 #include "../include/package_manager.hpp"
 #include "../include/mount.hpp"
 #include "../include/device_manager.hpp"
-#include "../include/fuse_overlay.hpp"
 #include <cstdlib>
 #include <iostream>
 #include <sys/syscall.h>
@@ -191,29 +190,26 @@ void Container::run_container(const ContainerArgs& args) {
     }
 
     std::cerr << "DEBUG: Mounting overlayfs..." << '\n';
-    //std::string overlay_options { "lowerdir=" + args.rootfs_path +
-    //                              ",upperdir=" + upper +
-    //                              ",workdir=" + work };
+    std::string overlay_options { "lowerdir=" + args.rootfs_path +
+                                  ",upperdir=" + upper +
+                                  ",workdir=" + work };
 
-    //if (mount("overlay", merged.c_str(), "overlay", MS_NODEV, overlay_options.c_str()) == ERR) {
-    //    std::cerr << "ERROR: Failed to mount overlayfs: " << strerror(errno) << '\n';
-    //    std::cerr << "DEBUG: Options were: " << overlay_options << '\n';
-    //    Utils::handle_error("Cannot mount overlay filesystem");
-    //}
+    if (mount("overlay", merged.c_str(), "overlay", MS_NODEV, overlay_options.c_str()) == ERR) {
+        std::cerr << "ERROR: Failed to mount overlayfs: " << strerror(errno) << '\n';
+        std::cerr << "DEBUG: Options were: " << overlay_options << '\n';
+        Utils::handle_error("Cannot mount overlay filesystem");
+    }
 
-    //std::cerr << "DEBUG: Overlay mounted successfully at: " << merged << '\n';
-    //std::cerr << "DEBUG: Setting up merged as mount point..." << '\n';
+    std::cerr << "DEBUG: Overlay mounted successfully at: " << merged << '\n';
+    std::cerr << "DEBUG: Setting up merged as mount point..." << '\n';
 
-    FuseOverlay::setup(filesystem_path, upper, work, merged);
+    if (mount(merged.c_str(), merged.c_str(), NULL, MS_BIND | MS_REC, NULL) == ERR) {
+        Utils::handle_error("Unable to bind mount merged");
+    }
 
-
-    //if (mount(merged.c_str(), merged.c_str(), NULL, MS_BIND | MS_REC, NULL) == ERR) {
-    //    Utils::handle_error("Unable to bind mount merged");
-    //}
-
-    //if (mount(NULL, merged.c_str(), NULL, MS_PRIVATE | MS_REC, NULL) == ERR) {
-    //    Utils::handle_error("Unable to make merged private");
-    //}
+    if (mount(NULL, merged.c_str(), NULL, MS_PRIVATE | MS_REC, NULL) == ERR) {
+        Utils::handle_error("Unable to make merged private");
+    }
 
     if (chdir(merged.c_str()) == ERR) {
         Utils::handle_error("Unable to change directory to " + merged);
