@@ -81,12 +81,11 @@ void CommandLineHandler::ps(DatabaseManager& db_manager, const std::vector<std::
 }
 
 void CommandLineHandler::rm(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
-    if(cmds.size() > 2){
+    if(cmds.size() != 1){
         Utils::print_usage();
     }
-    container_name = cmds[1];
+    container_name = cmds[0];
 
-    // remove db entry from database of container
     if (db_manager.remove_container(container_name)) {
         std::cout << "Container " << container_name << " removed successfully from database.\n";
     } else {
@@ -100,10 +99,8 @@ void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_ma
     }
 
     if(cmds[0] == "ls"){
-        // list all the images downloaded and their versions
         std::vector<ImageObject> images = db_manager.list_all_images();
 
-        // Print the images in a tabular format
         std::cout << "IMAGE ID\tNAME\tTAG\tCREATED AT\n";
         for (const auto& image : images) {
             std::cout << image.id << "\t"

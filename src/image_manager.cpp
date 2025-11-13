@@ -1,4 +1,5 @@
 #include "../include/image_manager.hpp"
+#include "../include/utils.hpp"
 #include <thread>
 #include <chrono>
 #include <iomanip>
@@ -11,8 +12,8 @@
 ImageManager::ImageManager(DatabaseManager& db_manager)
     : db_manager(db_manager) {
     const char* home_dir = std::getenv("HOME");
+    this->base_cache_path = std::string(home_dir) + "/.quiver/images";
     if (home_dir != nullptr) {
-        this->base_cache_path = std::string(home_dir) + "/.quiver/images";
     }
 }
 
@@ -42,7 +43,7 @@ bool ImageManager::remove(const std::string& image_name, std::string& error) {
         return false;
     }
     std::string image_path = get_image_path(image_name);
-    if (!path_exists(image_path)) {
+    if (!Utils::path_exists(image_path)) {
         error = "Image not found locally: " + image_name;
         return false;
     }
@@ -52,27 +53,27 @@ bool ImageManager::remove(const std::string& image_name, std::string& error) {
         return false;
     }
 
-    std::cout << "Removing image at " << image_path << std::endl;
+    std::cout << "Removing image at " << image_path << '\n';
     std::string rm_command = "rm -rf " + image_path;
     if (system(rm_command.c_str()) != 0) {
         error = "Error removing image.";
         db_manager.add_image(image_name, image_path, get_directory_size(image_path));
         return false;
     }
-    std::cout << "Image removed successfully." << std::endl;
+    std::cout << "Image removed successfully." << '\n';
     return true;
 }
 
 bool ImageManager::get_image(const std::string& image_name, std::string& out_path, std::string& error) {
     out_path = get_image_path(image_name);
-    if (path_exists(out_path)) {
-        std::cout << "Image found in local cache." << std::endl;
+    if (Utils::path_exists(out_path)) {
+        std::cout << "Image found in local cache." << '\n';
         return true;
     }
 
-    std::cout << "Image not in cache. Pulling from registry..." << std::endl;
+    std::cout << "Image not in cache. Pulling from registry..." << '\n';
     if (!pull_image_from_registry(image_name, out_path, error)) {
-        if (path_exists(out_path)) {
+        if (Utils::path_exists(out_path)) {
             std::string rm_command = "rm -rf " + out_path;
             system(rm_command.c_str());
         }
@@ -255,7 +256,7 @@ void ImageManager::print_progress() {
         if (completed_layers == total_layers && total_layers > 0) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    std::cout << std::endl; // Clean up with a final newline after the loop finishes.
+    std::cout << '\n'; // Clean up with a final newline after the loop finishes.
 }
 
 bool ImageManager::extract_layer(const std::string& tarball_path, const std::string& destination_path, std::string& error) {
@@ -284,8 +285,6 @@ bool ImageManager::download_and_extract_layers(const json& manifest, const std::
     std::vector<std::future<std::string>> download_futures;
     std::vector<std::string> tarball_paths;
 
-    // FIX: Removed the noisy logging messages that were here.
-
     for (const auto& digest : digests) {
         std::string url = "https://registry-1.docker.io/v2/" + repo + "/blobs/" + digest;
         std::string path = destination_path + "/" + digest.substr(7) + ".tar.gz";
@@ -306,15 +305,15 @@ bool ImageManager::download_and_extract_layers(const json& manifest, const std::
 
     progress_thread.join();
 
-    std::cout << "Download complete. Now extracting layers..." << std::endl;
+    std::cout << "Download complete. Now extracting layers..." << '\n';
     for (size_t i = 0; i < digests.size(); ++i) {
-        std::cout << "  -> Extracting layer " << i+1 << "/" << digests.size() << " (" << digests[i].substr(0, 12) << ")" << std::endl;
+        std::cout << "  -> Extracting layer " << i+1 << "/" << digests.size() << " (" << digests[i].substr(0, 12) << ")" << '\n';
         if (!extract_layer(tarball_paths[i], destination_path, error)) {
             return false;
         }
         std::remove(tarball_paths[i].c_str());
     }
-    std::cout << "Image pull and extraction complete." << std::endl;
+    std::cout << "Image pull and extraction complete." << '\n';
     return true;
 }
 
@@ -323,11 +322,6 @@ std::string ImageManager::get_image_path(const std::string& image_name) const {
     std::replace(safe_image_name.begin(), safe_image_name.end(), ':', '_');
     std::replace(safe_image_name.begin(), safe_image_name.end(), '/', '_');
     return this->base_cache_path + "/" + safe_image_name;
-}
-
-bool ImageManager::path_exists(const std::string& path) const {
-    struct stat buffer;
-    return (stat(path.c_str(), &buffer) == 0);
 }
 
 long long ImageManager::get_directory_size(const std::string& path) {

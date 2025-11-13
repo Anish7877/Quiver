@@ -157,7 +157,7 @@ bool DatabaseManager::update_container_pid(const std::string& container_id, pid_
 
 // Removes a container from the database
 bool DatabaseManager::remove_container(const std::string& container_name) {
-    const char* sql = "DELETE FROM containers WHERE name = ?;";
+    const char* sql = "DELETE FROM containers WHERE id = ?;";
     sqlite3_stmt* stmt;
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
@@ -343,19 +343,19 @@ bool DatabaseManager::add_image(const std::string& image_name, const std::string
         name = image_name;
         tag = "latest";
     }
-    
+
     const char* sql = "INSERT INTO images (name, tag, path, size) VALUES (?, ?, ?, ?);";
     sqlite3_stmt* stmt;
-    
+
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         return false;
     }
-    
+
     sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, tag.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 3, image_path.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_int64(stmt, 4, image_size);
-    
+
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
     return result;
@@ -369,7 +369,7 @@ bool DatabaseManager::remove_image(const std::string& image_name) {
         return false;
     }
     sqlite3_bind_text(stmt, 1, image_name.c_str(), -1, SQLITE_STATIC);
-    
+
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
     return result;
@@ -379,7 +379,7 @@ std::vector<ImageObject> DatabaseManager::list_all_images() {
     const char* sql = "SELECT id, name, tag, path, size, created_at FROM images;";
     sqlite3_stmt* stmt;
     std::vector<ImageObject> images;
-    
+
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             ImageObject img;
