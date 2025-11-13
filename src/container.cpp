@@ -5,7 +5,6 @@
 #include "../include/mount.hpp"
 #include "../include/device_manager.hpp"
 #include "../include/container_management.hpp"
-#include <cstdlib>
 #include <iostream>
 #include <sys/syscall.h>
 #include <sys/wait.h>
