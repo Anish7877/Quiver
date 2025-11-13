@@ -18,7 +18,6 @@ DatabaseManager::~DatabaseManager() {
 
 // Initializes the database by creating the necessary tables
 bool DatabaseManager::init_db() {
-    // Updated table schema to include the restored fields
     const char* create_containers_table =
         "CREATE TABLE IF NOT EXISTS containers ("
         "id TEXT PRIMARY KEY NOT NULL,"
@@ -46,6 +45,8 @@ bool DatabaseManager::init_db() {
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "name TEXT NOT NULL UNIQUE,"
         "tag TEXT NOT NULL,"
+        "path TEXT NOT NULL,"
+        "size INT NOT NULL,"
         "created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
         ");";
 
@@ -332,23 +333,32 @@ bool DatabaseManager::update_container_name_in_volumes(const int& volume_id, con
 }
 
 
-std::vector<ImageObject> DatabaseManager::list_all_images() {
-    const char* sql = "SELECT id, name, tag, created_at FROM images;";
-    sqlite3_stmt* stmt;
-    std::vector<ImageObject> images;
-    
-    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
-            ImageObject img;
-            img.id = sqlite3_column_int(stmt, 0);
-            img.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-            img.tag = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
-            img.created_at = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
-            images.push_back(img);
-        }
+bool DatabaseManager::add_image(const std::string& image_name, const std::string& image_path, long long image_size) {
+    std::string name, tag;
+    size_t pos = image_name.find(':');
+    if (pos != std::string::npos) {
+        name = image_name.substr(0, pos);
+        tag = image_name.substr(pos + 1);
+    } else {
+        name = image_name;
+        tag = "latest";
     }
+    
+    const char* sql = "INSERT INTO images (name, tag, path, size) VALUES (?, ?, ?, ?);";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    
+    sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, tag.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, image_path.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 4, image_size);
+    
+    bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
-    return images;
+    return result;
 }
 
 bool DatabaseManager::remove_image(const std::string& image_name) {
@@ -365,30 +375,25 @@ bool DatabaseManager::remove_image(const std::string& image_name) {
     return result;
 }
 
-bool DatabaseManager::add_image(const std::string& image_name) {
-    std::string name, tag;
-    size_t pos = image_name.find(':');
-    if (pos != std::string::npos) {
-        name = image_name.substr(0, pos);
-        tag = image_name.substr(pos + 1);
-    } else {
-        name = image_name;
-        tag = "latest";
-    }
-    
-    const char* sql = "INSERT INTO images (name, tag) VALUES (?, ?);";
+std::vector<ImageObject> DatabaseManager::list_all_images() {
+    const char* sql = "SELECT id, name, tag, path, size, created_at FROM images;";
     sqlite3_stmt* stmt;
+    std::vector<ImageObject> images;
     
-    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-        return false;
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            ImageObject img;
+            img.id = sqlite3_column_int(stmt, 0);
+            img.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+            img.tag = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+            img.path = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+            img.size = sqlite3_column_int64(stmt, 4);
+            img.created_at = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5));
+            images.push_back(img);
+        }
     }
-    
-    sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, tag.c_str(), -1, SQLITE_STATIC);
-    
-    bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
-    return result;
+    return images;
 }
 
 // Generic callback function for sqlite3_exec

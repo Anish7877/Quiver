@@ -29,6 +29,8 @@ struct ImageObject {
     int id;
     std::string name;
     std::string tag;
+    std::string path;
+    long long size;
     std::string created_at;
 };
 
@@ -62,7 +64,7 @@ public:
 
     // Image-related operations
     std::vector<ImageObject> list_all_images();
-    bool add_image(const std::string& image_name);
+    bool add_image(const std::string& image_name, const std::string& image_path, long long image_size);
     bool remove_image(const std::string& image_name);
 
 private:

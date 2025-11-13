@@ -4,6 +4,7 @@
 #include "../include/package_manager.hpp"
 #include "../include/mount.hpp"
 #include "../include/device_manager.hpp"
+#include "../include/container_management.hpp"
 #include <cstdlib>
 #include <iostream>
 #include <sys/syscall.h>
@@ -19,6 +20,7 @@ std::vector<std::string> Container::m_volumes{};
 std::vector<std::string> Container::m_commands{};
 Terminal Container::m_term{};
 Terminal::PtyArgs Container::m_pty_args{};
+
 
 Container::Container(const std::string& hostname, const std::string& new_fs, const std::vector<std::string>& volumes, DatabaseManager& db, const std::string& container_id)
     : m_db(&db), m_container_id(container_id) {
@@ -119,8 +121,9 @@ void Container::manage_container(const std::string& path, const std::string& fil
             Utils::handle_error("Failed to setup network");
         }
 
-        m_db->update_container_pid(m_container_id, m_child_pid);
-        m_db->update_container_status(m_container_id, "running");
+        // pty_shell - Initial Command - Will be set later
+        ContainerManager containerManager(*m_db);
+        containerManager.create_container(m_container_id, m_child_pid-1, "", filesystem_dir);
 
         m_term.start_server(m_pty_args, m_child_pid, getpid());
 

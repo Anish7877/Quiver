@@ -2,8 +2,14 @@
 #include <thread>
 #include <chrono>
 #include <iomanip>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <iostream>
+#include <fstream>
+#include <algorithm>
 
-ImageManager::ImageManager() {
+ImageManager::ImageManager(DatabaseManager& db_manager)
+    : db_manager(db_manager) {
     const char* home_dir = std::getenv("HOME");
     if (home_dir != nullptr) {
         this->base_cache_path = std::string(home_dir) + "/.quiver/images";
@@ -15,7 +21,19 @@ bool ImageManager::pull(const std::string& image_name, std::string& out_path, st
         error = "CRITICAL: HOME environment variable is not set.";
         return false;
     }
-    return get_image(image_name, out_path, error);
+
+    if (!get_image(image_name, out_path, error)) {
+        return false;
+    }
+
+    // Add image to database
+    long long image_size = get_directory_size(out_path);
+    if (!db_manager.add_image(image_name, out_path, image_size)) {
+        error = "Failed to register image in database: " + image_name;
+        return false;
+    }
+
+    return true;
 }
 
 bool ImageManager::remove(const std::string& image_name, std::string& error) {
@@ -29,30 +47,20 @@ bool ImageManager::remove(const std::string& image_name, std::string& error) {
         return false;
     }
 
+    if (!db_manager.remove_image(image_name)) {
+        error = "Failed to remove image from database: " + image_name;
+        return false;
+    }
+
     std::cout << "Removing image at " << image_path << std::endl;
     std::string rm_command = "rm -rf " + image_path;
     if (system(rm_command.c_str()) != 0) {
         error = "Error removing image.";
+        db_manager.add_image(image_name, image_path, get_directory_size(image_path));
         return false;
     }
     std::cout << "Image removed successfully." << std::endl;
     return true;
-}
-
-void ImageManager::handle_error(const std::string& message) {
-    std::cerr << "\nERROR: " << message << std::endl;
-}
-
-bool ImageManager::path_exists(const std::string& path) const {
-    struct stat buffer;
-    return (stat(path.c_str(), &buffer) == 0);
-}
-
-std::string ImageManager::get_image_path(const std::string& image_name) const {
-    std::string safe_image_name = image_name;
-    std::replace(safe_image_name.begin(), safe_image_name.end(), ':', '_');
-    std::replace(safe_image_name.begin(), safe_image_name.end(), '/', '_');
-    return this->base_cache_path + "/" + safe_image_name;
 }
 
 bool ImageManager::get_image(const std::string& image_name, std::string& out_path, std::string& error) {
@@ -232,7 +240,6 @@ void ImageManager::print_progress() {
             int bar_width = 50;
             int pos = bar_width * (percentage / 100.0f);
 
-            // FIX: Use \r at the beginning and no \n at the end.
             std::cout << "\rDownloading: [";
             for (int i=0; i < bar_width; ++i) {
                 if (i < pos) std::cout << "=";
@@ -246,7 +253,6 @@ void ImageManager::print_progress() {
         }
 
         if (completed_layers == total_layers && total_layers > 0) break;
-        // FIX: Changed std::this_thread_sleep_for to std::this_thread::sleep_for
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     std::cout << std::endl; // Clean up with a final newline after the loop finishes.
@@ -312,6 +318,35 @@ bool ImageManager::download_and_extract_layers(const json& manifest, const std::
     return true;
 }
 
-ImageManager::~ImageManager() {
-    // Empty destructor is fine
+std::string ImageManager::get_image_path(const std::string& image_name) const {
+    std::string safe_image_name = image_name;
+    std::replace(safe_image_name.begin(), safe_image_name.end(), ':', '_');
+    std::replace(safe_image_name.begin(), safe_image_name.end(), '/', '_');
+    return this->base_cache_path + "/" + safe_image_name;
 }
+
+bool ImageManager::path_exists(const std::string& path) const {
+    struct stat buffer;
+    return (stat(path.c_str(), &buffer) == 0);
+}
+
+long long ImageManager::get_directory_size(const std::string& path) {
+    long long size = 0;
+    DIR* dir = opendir(path.c_str());
+    if (!dir) return 0;
+
+    struct dirent* entry;
+    struct stat stat_buf;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string full_path = path + "/" + entry->d_name;
+        if (stat(full_path.c_str(), &stat_buf) == 0) {
+            if (S_ISREG(stat_buf.st_mode)) {
+                size += stat_buf.st_size;
+            }
+        }
+    }
+    closedir(dir);
+    return size;
+}
+
+ImageManager::~ImageManager() {}

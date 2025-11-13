@@ -8,7 +8,7 @@ class ContainerManager {
     public:
         explicit ContainerManager(DatabaseManager& db);
 
-        std::string create_container(const std::string& image_name, const std::string& container_name = "", const std::string& hostname = "container");
+        std::string create_container(const std::string& container_id, const pid_t& container_pid, const std::string& container_name, const std::string& filesystem_path);
 
         ContainerObject get_container_info(const std::string& container_id);
 
