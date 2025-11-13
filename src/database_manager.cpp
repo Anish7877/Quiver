@@ -2,21 +2,18 @@
 #include <iostream>
 #include <stdexcept>
 
-// Constructor: Opens the database connection
 DatabaseManager::DatabaseManager(const std::string& db_path) : m_db(nullptr), m_db_path(db_path) {
     if (sqlite3_open(m_db_path.c_str(), &m_db) != SQLITE_OK) {
         throw std::runtime_error("Cannot open database: " + std::string(sqlite3_errmsg(m_db)));
     }
 }
 
-// Destructor: Closes the database connection
 DatabaseManager::~DatabaseManager() {
     if (m_db) {
         sqlite3_close(m_db);
     }
 }
 
-// Initializes the database by creating the necessary tables
 bool DatabaseManager::init_db() {
     const char* create_containers_table =
         "CREATE TABLE IF NOT EXISTS containers ("
@@ -72,7 +69,6 @@ bool DatabaseManager::init_db() {
     return true;
 }
 
-// Adds a new container to the database
 bool DatabaseManager::add_container(const ContainerObject& container) {
     const char* sql = "INSERT INTO containers (id, name, image, pid, status, hostname, filesystem_path, pty_shell) VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
     sqlite3_stmt* stmt;
@@ -123,7 +119,7 @@ ContainerObject DatabaseManager::get_container(const std::string& container_id) 
 
 // Updates the status of a container
 bool DatabaseManager::update_container_status(const std::string& container_name, const std::string& status) {
-    const char* sql = "UPDATE containers SET status = ? WHERE name = ?;";
+    const char* sql = "UPDATE containers SET status = ? WHERE id = ?;";
     sqlite3_stmt* stmt;
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {

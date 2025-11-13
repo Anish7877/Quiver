@@ -11,7 +11,6 @@
 #include <unistd.h>
 
 int PackageManager::initialize(){
-    // Pre-create common directories that package managers need with proper permissions
     std::vector<std::string> common_dirs = {
         "/var",
         "/var/cache",
@@ -27,18 +26,16 @@ int PackageManager::initialize(){
         "/etc"
     };
 
-    for (const auto& dir : common_dirs) {
-        if (mkdir(dir.c_str(), 0755) == -1 && errno != EEXIST) {
-            std::cerr << "Warning: Could not create " << dir << ": " << strerror(errno) << '\n';
-        }
-        chmod(dir.c_str(), 0755);  // Ensure proper permissions even if exists
+    for (const std::string& dir : common_dirs) {
+        Utils::ensure_dirs(dir);
+        chmod(dir.c_str(), 0755);
     }
 
     Managers pkg { get_manager() };
 
     if (pkg == Managers::unknown) {
         std::cerr << "Warning: Could not detect package manager, skipping configuration" << '\n';
-        return 0;  // Don't fail, just warn
+        return 0;
     }
 
     switch (pkg) {
@@ -57,7 +54,6 @@ int PackageManager::initialize(){
         break;
 
         case Managers::apt : {
-            // Create APT directories
             std::vector<std::string> apt_dirs = {
                 "/etc/apt",
                 "/etc/apt/apt.conf.d",
@@ -97,7 +93,6 @@ int PackageManager::initialize(){
                 std::cerr << "DEBUG: APT configuration created" << '\n';
             }
 
-            // DPKG configuration and directories
             std::vector<std::string> dpkg_dirs = {
                 "/etc/dpkg",
                 "/etc/dpkg/dpkg.cfg.d",
@@ -112,7 +107,6 @@ int PackageManager::initialize(){
                 chmod(dir.c_str(), 0755);
             }
 
-            // Initialize dpkg status file if it doesn't exist
             std::string status_file = "/var/lib/dpkg/status";
             if (access(status_file.c_str(), F_OK) == -1) {
                 std::ofstream status(status_file);
@@ -123,7 +117,6 @@ int PackageManager::initialize(){
                 }
             }
 
-            // Initialize dpkg available file
             std::string available_file = "/var/lib/dpkg/available";
             if (access(available_file.c_str(), F_OK) == -1) {
                 std::ofstream available(available_file);
@@ -168,7 +161,6 @@ int PackageManager::initialize(){
                 chmod(dir.c_str(), 0755);
             }
 
-            // Initialize pacman database
             std::string local_db = "/var/lib/pacman/local/ALPM_DB_VERSION";
             if (access(local_db.c_str(), F_OK) == -1) {
                 std::ofstream db_ver(local_db);

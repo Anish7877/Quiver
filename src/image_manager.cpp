@@ -12,8 +12,8 @@
 ImageManager::ImageManager(DatabaseManager& db_manager)
     : db_manager(db_manager) {
     const char* home_dir = std::getenv("HOME");
-    this->base_cache_path = std::string(home_dir) + "/.quiver/images";
     if (home_dir != nullptr) {
+        base_cache_path = std::string(home_dir) + "/.quiver/images";
     }
 }
 
@@ -31,7 +31,6 @@ bool ImageManager::pull(const std::string& image_name, std::string& out_path, st
     long long image_size = get_directory_size(out_path);
     if (!db_manager.add_image(image_name, out_path, image_size)) {
         error = "Failed to register image in database: " + image_name;
-        return false;
     }
 
     return true;

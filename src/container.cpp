@@ -5,6 +5,7 @@
 #include "../include/mount.hpp"
 #include "../include/device_manager.hpp"
 #include "../include/container_management.hpp"
+#include <cstdlib>
 #include <iostream>
 #include <sys/syscall.h>
 #include <sys/wait.h>
@@ -120,17 +121,13 @@ void Container::manage_container(const std::string& path, const std::string& fil
             Utils::handle_error("Failed to setup network");
         }
 
-        // pty_shell - Initial Command - Will be set later
         ContainerManager containerManager(*m_db);
-        containerManager.create_container(m_container_id, m_child_pid-1, "", filesystem_dir);
+        containerManager.create_container(m_container_id, m_child_pid, "", filesystem_dir);
 
-        m_term.start_server(m_pty_args, m_child_pid, getpid());
-
-        m_db->update_container_status(m_container_id, "exited");
-
+        m_term.start_server(m_pty_args, m_container_id ,m_child_pid);
         int status{};
         waitpid(m_child_pid, &status, 0);
-        exit(0);
+        exit(EXIT_SUCCESS);
     }
 }
 

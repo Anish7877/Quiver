@@ -3,6 +3,7 @@
 #include "../include/image_manager.hpp"
 #include "../include/command_line_handler.hpp"
 #include "../include/container.hpp"
+#include <cstdlib>
 #include <vector>
 #include <iostream>
 
@@ -16,15 +17,19 @@ std::string err{""};
 
 
 void CommandLineHandler::run(DatabaseManager& db, const std::vector<std::string>& cmds){
+    if(cmds.size() == 0){
+        Utils::print_usage();
+        return;
+    }
     size_t i{1};
     if(cmds[0] == "-v"){
         while(i < cmds.size() && cmds[i] != "-i"){
             volumes.emplace_back(cmds[i]);
             ++i;
         }
-        ++i;
     }
-    if(i < cmds.size()){
+    if((cmds[i] == "-i" || cmds[0] == "-i") && i+1 < cmds.size()){
+        ++i;
         image_name = cmds[i++];
     }
     else{
@@ -44,6 +49,7 @@ void CommandLineHandler::run(DatabaseManager& db, const std::vector<std::string>
 void CommandLineHandler::attach(const std::vector<std::string>& cmds){
     if(cmds.size() > 1){
         Utils::print_usage();
+        return;
     }
     container_pid = std::stoi(cmds[0]);
 
@@ -54,18 +60,16 @@ void CommandLineHandler::attach(const std::vector<std::string>& cmds){
 void CommandLineHandler::ps(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds.size() > 1){
         Utils::print_usage();
+        return;
     }
     std::vector<ContainerObject> containers{};
     if(cmds.size() == 0){
-        // To do list all running container table of database in table form
         containers = db_manager.list_running_containers();
     }
     else if(cmds.size() == 1 && cmds[0] == "-a"){
-        // To do list all the containers in database
         containers = db_manager.list_all_containers();
     }
 
-    // Print the containers in a tabular format
     std::cout << "CONTAINER ID\tNAME\tIMAGE\tPID\tSTATUS\tCREATED AT\tHOSTNAME\tFILESYSTEM PATH\tPTY SHELL\n";
     for (const auto& container : containers) {
         std::cout << container.id << "\t"
@@ -112,7 +116,6 @@ void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_ma
     else if(cmds[0] == "rm"){
         image_name = cmds[1];
 
-        // remove image from the local storage
         std::string err;
         if (img_manager.remove(image_name, err)) {
             std::cout << "Image " << image_name << " removed successfully from local storage.\n";
@@ -125,7 +128,6 @@ void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_ma
     else if(cmds[0] == "cls"){
         if(cmds.size() > 1){
             image_name = cmds[1];
-            // list containers which are using a particular image
             std::vector<ContainerObject> containers = db_manager.list_containers_by_image(image_name);
 
             // Print the containers in a tabular format
@@ -146,11 +148,13 @@ void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_ma
             Utils::print_usage();
         }
     }
+    else{
+        Utils::print_usage();
+    }
 }
 
 void CommandLineHandler::volume(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds[0] == "ls"){
-        // list all the volumes database in tabular form
         std::vector<VolumeObject> volumes = db_manager.list_all_volumes();
         std::cout << "VOLUME ID\tCONTAINER ID\tHOST PATH\tCONTAINER PATH\n";
         for (const auto& volume : volumes) {
@@ -170,7 +174,6 @@ void CommandLineHandler::create(DatabaseManager& db_manager, ImageManager& img, 
         run(db_manager, new_cmds);
     }
     else if(cmds[0] == "volume"){
-        // write to database for further volume details
         int i = 1;
         while (true) {
             std::string volume_input = cmds[i];
@@ -186,7 +189,6 @@ void CommandLineHandler::create(DatabaseManager& db_manager, ImageManager& img, 
             volume.host_path = host_path;
             volume.container_path = container_path;
 
-            // Add volume to database
             db_manager.add_volume(volume);
 
             ++i;
@@ -201,12 +203,12 @@ void CommandLineHandler::pull(DatabaseManager& db_manager, const std::vector<std
     }
     image_name = cmds[0];
 
-    // pull image and save to local storage
     ImageManager img_manager(db_manager);
     std::string out_path;
     std::string err;
     if (!img_manager.pull(image_name, out_path, err)) {
         std::cout << "Failed to pull image: " << err << std::endl;
+        exit(EXIT_FAILURE);
     } else {
         std::cout << "Image pulled successfully to: " << out_path << std::endl;
     }
@@ -218,7 +220,6 @@ void CommandLineHandler::start(DatabaseManager& db_manager, const std::vector<st
         Utils::print_usage();
     }
     container_name = cmds[0];
-    // start the stopped container with loaded info
     if (db_manager.update_container_status(cmds[0], "running")) {
         std::cout << "Container " << cmds[0] << " running successfully.\n";
     } else {
@@ -230,7 +231,6 @@ void CommandLineHandler::stop(DatabaseManager& db_manager, const std::vector<std
     if(cmds.size() > 1){
         Utils::print_usage();
     }
-    // stop the container shell and make running status false in database
     if (db_manager.update_container_status(cmds[0], "stopped")) {
         std::cout << "Container " << cmds[0] << " stopped successfully.\n";
     } else {
