@@ -36,11 +36,8 @@ void CommandLineHandler::run(DatabaseManager& db, const std::vector<std::string>
     }
 
     CommandLineHandler::pull(db, {image_name});
-    
-    Container container("container", root_fs, volumes, db, Utils::generate_container_id());
-    container.exec("/bin/bash", commands);
 
-    Container container{ "container", root_fs, volumes, db, Utils::generate_container_id() };
+    Container container("container", root_fs, volumes, db, Utils::generate_container_id());
     container.exec("/bin/bash", commands);
 }
 
