@@ -12,21 +12,29 @@
 #include <sys/mount.h>
 #include <sys/sysmacros.h>
 #include <cstring>
+#include <utility>
 
 pid_t Container::m_child_pid{ -1 };
 std::string Container::m_new_hostname{ "container" };
 std::string Container::m_new_fs{ "" };
 std::vector<std::string> Container::m_volumes{};
 std::vector<std::string> Container::m_commands{};
+std::vector<std::pair<int,int>> Container::m_forward_ports{};
 Terminal Container::m_term{};
 Terminal::PtyArgs Container::m_pty_args{};
 
 
-Container::Container(const std::string& hostname, const std::string& new_fs, const std::vector<std::string>& volumes, DatabaseManager& db, const std::string& container_id)
+Container::Container(const std::string& hostname,
+                     const std::string& new_fs,
+                     const std::vector<std::string>& volumes,
+                     const std::vector<std::pair<int,int>>& ports,
+                     const std::string& container_id,
+                     DatabaseManager& db)
     : m_db(&db), m_container_id(container_id) {
     m_new_hostname = hostname;
     m_new_fs = new_fs;
     m_volumes = volumes;
+    m_forward_ports = ports;
 }
 
 void Container::exec(const std::string& program_path, const std::vector<std::string>& commands){
@@ -117,8 +125,15 @@ void Container::manage_container(const std::string& path, const std::string& fil
         }
         close(parent_to_child_pipe[1]);
 
-        if (Network::setup_networking(m_child_pid) != 0) {
-            Utils::handle_error("Failed to setup network");
+        if(m_forward_ports.empty()){
+            if(Network::setup_networking(m_child_pid) != 0){
+                Utils::handle_error("Unable to setup networking");
+            }
+        }
+        else{
+            if(Network::setup_networking_with_ports(m_child_pid, m_forward_ports) != 0){
+                Utils::handle_error("Unable to setup networking");
+            }
         }
 
         ContainerManager containerManager(*m_db);
@@ -157,7 +172,7 @@ void Container::run(const std::string& path, const std::string& container_id) {
         close(m_pty_args.slave_fd);
 
         std::cerr << "Container started." << '\n';
-        std::cerr << "To attach, run: quiver attach " << manager_pid+1 << '\n';
+        std::cerr << "To attach, run: quiver attach " << manager_pid << '\n';
 
         int status{};
         waitpid(manager_pid, &status, 0);

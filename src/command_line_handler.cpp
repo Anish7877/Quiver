@@ -9,6 +9,7 @@
 
 std::vector<std::string> volumes{};
 std::vector<std::string> commands{};
+std::vector<std::pair<int,int>> forward_ports{};
 std::string image_name{""};
 std::string container_name{""};
 pid_t container_pid{-1};
@@ -17,42 +18,80 @@ std::string err{""};
 
 
 void CommandLineHandler::run(DatabaseManager& db, const std::vector<std::string>& cmds){
-    if(cmds.size() == 0){
+    if (cmds.empty()) {
         Utils::print_usage();
         return;
     }
-    size_t i{1};
-    if(cmds[0] == "-v"){
-        while(i < cmds.size() && cmds[i] != "-i"){
-            volumes.emplace_back(cmds[i]);
-            ++i;
+    size_t i{ 0 };
+    while (i < cmds.size()) {
+        const std::string& arg { cmds[i] };
+
+        if (arg == "-v") {
+            if (i + 1 < cmds.size()) {
+                volumes.emplace_back(cmds[++i]);
+            } else {
+                std::cerr << "Error: -v requires an argument\n";
+                return;
+            }
         }
+        else if (arg == "-p") {
+            if (i + 1 < cmds.size()) {
+                std::string port_str{ cmds[++i] };
+                size_t pos = port_str.find(':');
+                if (pos != std::string::npos) {
+                    try {
+                        int host{ std::stoi(port_str.substr(0, pos)) };
+                        int cont{ std::stoi(port_str.substr(pos + 1)) };
+                        forward_ports.emplace_back(host, cont);
+                    } catch (...) {
+                        std::cerr << "Error: Invalid port format " << port_str << "\n";
+                        return;
+                    }
+                }
+            } else {
+                std::cerr << "Error: -p requires an argument\n";
+                return;
+            }
+        }
+        else if (arg == "-i") {
+            if (i + 1 < cmds.size()) {
+                image_name = cmds[++i];
+
+                i++;
+                while(i < cmds.size()) {
+                    commands.emplace_back(cmds[i++]);
+                }
+                break;
+            } else {
+                std::cerr << "Error: -i requires an image name\n";
+                return;
+            }
+        }
+        else {
+            std::cerr << "Unknown argument: " << arg << "\n";
+            Utils::print_usage();
+            return;
+        }
+        i++;
     }
-    if((cmds[i] == "-i" || cmds[0] == "-i") && i+1 < cmds.size()){
-        ++i;
-        image_name = cmds[i++];
-    }
-    else{
-        Utils::print_usage();
-    }
-    while(i < cmds.size()){
-        commands.emplace_back(cmds[i]);
-        ++i;
+
+    if (image_name.empty()) {
+        std::cerr << "Error: Image name required (-i)\n";
+        return;
     }
 
     CommandLineHandler::pull(db, {image_name});
-
-    Container container("container", root_fs, volumes, db, Utils::generate_container_id());
+    Container container("container", root_fs, volumes, forward_ports, Utils::generate_container_id(), db);
     container.exec("/bin/bash", commands);
 }
 
-void CommandLineHandler::attach(const std::vector<std::string>& cmds){
-    if(cmds.size() > 1){
+void CommandLineHandler::attach(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
+    if(cmds.size() != 1){
         Utils::print_usage();
         return;
     }
-    container_pid = std::stoi(cmds[0]);
-
+    std::string container_id { cmds[0] };
+    container_pid = { db_manager.get_container(container_id).pid };
     Container container;
     container.connect_to_server(container_pid);
 }
@@ -87,6 +126,7 @@ void CommandLineHandler::ps(DatabaseManager& db_manager, const std::vector<std::
 void CommandLineHandler::rm(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds.size() != 1){
         Utils::print_usage();
+        return;
     }
     container_name = cmds[0];
 
@@ -100,6 +140,7 @@ void CommandLineHandler::rm(DatabaseManager& db_manager, const std::vector<std::
 void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_manager, const std::vector<std::string>&  cmds){
     if (cmds.size() != 1) {
         Utils::print_usage();
+        return;
     }
 
     if(cmds[0] == "ls"){
@@ -121,6 +162,7 @@ void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_ma
             std::cout << "Image " << image_name << " removed successfully from local storage.\n";
         } else {
             std::cout << "Failed to remove image " << image_name << " from local storage.\n";
+            exit(1);
         }
         db_manager.remove_image(image_name);
 
@@ -128,9 +170,8 @@ void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_ma
     else if(cmds[0] == "cls"){
         if(cmds.size() > 1){
             image_name = cmds[1];
-            std::vector<ContainerObject> containers = db_manager.list_containers_by_image(image_name);
+            std::vector<ContainerObject> containers{ db_manager.list_containers_by_image(image_name) };
 
-            // Print the containers in a tabular format
             std::cout << "CONTAINER ID\tNAME\tIMAGE\tPID\tSTATUS\tCREATED AT\tHOSTNAME\tFILESYSTEM PATH\tPTY SHELL\n";
             for (const auto& container : containers) {
                 std::cout << container.id << "\t"
@@ -154,6 +195,10 @@ void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_ma
 }
 
 void CommandLineHandler::volume(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
+    if(cmds.size() != 1){
+        Utils::print_usage();
+        return;
+    }
     if(cmds[0] == "ls"){
         std::vector<VolumeObject> volumes = db_manager.list_all_volumes();
         std::cout << "VOLUME ID\tCONTAINER ID\tHOST PATH\tCONTAINER PATH\n";
@@ -176,8 +221,8 @@ void CommandLineHandler::create(DatabaseManager& db_manager, ImageManager& img, 
     else if(cmds[0] == "volume"){
         int i = 1;
         while (true) {
-            std::string volume_input = cmds[i];
-            size_t sep_pos = volume_input.find(':');
+            std::string volume_input{ cmds[i] };
+            size_t sep_pos { volume_input.find(':') };
             if (sep_pos == std::string::npos) {
                 std::cerr << "Invalid volume format. Expected host_path:container_path\n";
                 break;
@@ -198,14 +243,15 @@ void CommandLineHandler::create(DatabaseManager& db_manager, ImageManager& img, 
 }
 
 void CommandLineHandler::pull(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
-    if(cmds.size() > 1){
+    if(cmds.size() != 1){
         Utils::print_usage();
+        return;
     }
     image_name = cmds[0];
 
     ImageManager img_manager(db_manager);
-    std::string out_path;
-    std::string err;
+    std::string out_path{};
+    std::string err{};
     if (!img_manager.pull(image_name, out_path, err)) {
         std::cout << "Failed to pull image: " << err << std::endl;
         exit(EXIT_FAILURE);
@@ -216,8 +262,9 @@ void CommandLineHandler::pull(DatabaseManager& db_manager, const std::vector<std
 }
 
 void CommandLineHandler::start(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
-    if(cmds.size() > 1){
+    if(cmds.size() != 1){
         Utils::print_usage();
+        return;
     }
     container_name = cmds[0];
     if (db_manager.update_container_status(cmds[0], "running")) {
@@ -228,8 +275,9 @@ void CommandLineHandler::start(DatabaseManager& db_manager, const std::vector<st
 }
 
 void CommandLineHandler::stop(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
-    if(cmds.size() > 1){
+    if(cmds.size() != 1){
         Utils::print_usage();
+        return;
     }
     if (db_manager.update_container_status(cmds[0], "stopped")) {
         std::cout << "Container " << cmds[0] << " stopped successfully.\n";
