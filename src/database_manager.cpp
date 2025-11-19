@@ -225,6 +225,7 @@ std::vector<ContainerObject> DatabaseManager::list_containers_by_image(const std
     std::vector<ContainerObject> containers;
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, image_name.c_str(), -1, SQLITE_TRANSIENT);
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             ContainerObject c;
             c.id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));

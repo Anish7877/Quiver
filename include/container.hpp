@@ -16,7 +16,7 @@ class Container{
         };
 
         explicit Container() = default;
-        explicit Container(const std::string& hostname, const std::string& new_fs, const std::vector<std::string>& volumes, DatabaseManager& db, const std::string& container_id);
+        explicit Container(const std::string& hostname, const std::string& new_fs, const std::vector<std::string>& volumes, DatabaseManager& db, const std::string& container_id, const std::string& image_name);
         ~Container() {};
         void exec(const std::string& program_path, const std::vector<std::string>& commands);
         void run_container(const ContainerArgs& args);
@@ -35,4 +35,5 @@ class Container{
         std::string m_container_id{};
         static Terminal m_term;
         static Terminal::PtyArgs m_pty_args;
+        static std::string m_image_name;
 };

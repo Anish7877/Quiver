@@ -20,13 +20,14 @@ std::vector<std::string> Container::m_volumes{};
 std::vector<std::string> Container::m_commands{};
 Terminal Container::m_term{};
 Terminal::PtyArgs Container::m_pty_args{};
+std::string Container::m_image_name{ "" };
 
-
-Container::Container(const std::string& hostname, const std::string& new_fs, const std::vector<std::string>& volumes, DatabaseManager& db, const std::string& container_id)
+Container::Container(const std::string& hostname, const std::string& new_fs, const std::vector<std::string>& volumes, DatabaseManager& db, const std::string& container_id, const std::string& image_name)
     : m_db(&db), m_container_id(container_id) {
     m_new_hostname = hostname;
     m_new_fs = new_fs;
     m_volumes = volumes;
+    m_image_name = image_name;
 }
 
 void Container::exec(const std::string& program_path, const std::vector<std::string>& commands){
@@ -121,7 +122,7 @@ void Container::manage_container(const std::string& path, const std::string& fil
 
         // pty_shell - Initial Command - Will be set later
         ContainerManager containerManager(*m_db);
-        containerManager.create_container(m_container_id, m_child_pid-1, "", filesystem_dir);
+        containerManager.create_container(m_container_id, m_child_pid-1, "", filesystem_dir, m_image_name);
 
         m_term.start_server(m_pty_args, m_child_pid, getpid());
 

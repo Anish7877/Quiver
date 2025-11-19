@@ -11,18 +11,18 @@
 ContainerManager::ContainerManager(DatabaseManager& db) : m_db(db) {}
 
 // Creates a new container and saves it to the database
-std::string ContainerManager::create_container(const std::string& container_id, const pid_t& container_pid, const std::string& container_name, const std::string& filesystem_path) {
+std::string ContainerManager::create_container(const std::string& container_id, const pid_t& container_pid, const std::string& container_name, const std::string& filesystem_path, const std::string& image_name) {
     ContainerObject c;
     c.id = container_id;
     c.pid = container_pid;
     c.name = container_name.empty() ? "quiver-" + container_id.substr(0, 12) : container_name;
-    c.image = filesystem_path.substr(filesystem_path.find_last_of("/") + 1);
+    c.image = image_name;
     c.status = "running";
     c.hostname = container_id.substr(0, 6);
     c.filesystem_path = filesystem_path;
     c.pty_shell = "/bin/sh";  // TODO: Need to update later based on actual shell used
 
-    // 3. Add the container to the database
+    // Add the container to the database
     if (!m_db.add_container(c)) {
         return "";
     }

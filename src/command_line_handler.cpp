@@ -36,7 +36,7 @@ void CommandLineHandler::run(DatabaseManager& db, const std::vector<std::string>
 
     CommandLineHandler::pull(db, {image_name});
     
-    Container container("container", root_fs, volumes, db, Utils::generate_container_id());
+    Container container("container", root_fs, volumes, db, Utils::generate_container_id(), image_name);
     container.exec("/bin/bash", commands);
 
 }
@@ -95,7 +95,7 @@ void CommandLineHandler::rm(DatabaseManager& db_manager, const std::vector<std::
 }
 
 void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_manager, const std::vector<std::string>&  cmds){
-    if (cmds.size() != 1) {
+    if (cmds.size() < 1) {        
         Utils::print_usage();
     }
 
@@ -127,6 +127,10 @@ void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_ma
     }
     else if(cmds[0] == "cls"){
         if(cmds.size() > 1){
+            for (const auto& cmd : cmds) {
+                std::cout << "cmd: " << cmd << "\n";
+            }
+
             image_name = cmds[1];
             // list containers which are using a particular image
             std::vector<ContainerObject> containers = db_manager.list_containers_by_image(image_name);
