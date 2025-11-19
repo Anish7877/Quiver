@@ -7,7 +7,6 @@
 #include <random>
 #include <iostream>
 
-// Constructor that takes a reference to the DatabaseManager
 ContainerManager::ContainerManager(DatabaseManager& db) : m_db(db) {}
 
 // Creates a new container and saves it to the database
@@ -22,7 +21,6 @@ std::string ContainerManager::create_container(const std::string& container_id, 
     c.filesystem_path = filesystem_path;
     c.pty_shell = "/bin/sh";  // TODO: Need to update later based on actual shell used
 
-    // Add the container to the database
     if (!m_db.add_container(c)) {
         return "";
     }
@@ -30,24 +28,18 @@ std::string ContainerManager::create_container(const std::string& container_id, 
     return container_id;
 }
 
-// Retrieves full container information from the database
 ContainerObject ContainerManager::get_container_info(const std::string& container_id) {
     return m_db.get_container(container_id);
 }
 
-// Lists all containers stored in the database
 std::vector<ContainerObject> ContainerManager::list_all_containers() {
     return m_db.list_all_containers();
 }
 
-// Removes a container and its associated data
 bool ContainerManager::remove_container(const std::string& container_id) {
-    // 1. Get and remove all associated volumes
     std::vector<VolumeObject> volumes = m_db.get_container_volumes(container_id);
     for (const auto& volume : volumes) {
-        // Remove each volume entry by its ID
         if (!m_db.remove_volume(volume.id)) {
-            // Log an error if removal fails, but continue to remove the container
             std::cerr << "Warning: Failed to remove volume ID " << volume.id
                       << " for container " << container_id << " from DB." << std::endl;
         } else {
@@ -55,10 +47,8 @@ bool ContainerManager::remove_container(const std::string& container_id) {
         }
     }
 
-    // 2. Remove the container itself
     return m_db.remove_container(container_id);
 }
-// Logs container data to the console
 void ContainerManager::log_container_data(const std::string& container_id) {
     ContainerObject c = get_container_info(container_id);
     if (!c.id.empty()) {
@@ -74,7 +64,3 @@ void ContainerManager::log_container_data(const std::string& container_id) {
         std::cerr << "Could not find container with ID: " << container_id << std::endl;
     }
 }
-
-
-// Generates a unique SHA256 ID for a new container
-

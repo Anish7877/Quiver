@@ -12,21 +12,29 @@
 #include <sys/mount.h>
 #include <sys/sysmacros.h>
 #include <cstring>
+#include <utility>
 
 pid_t Container::m_child_pid{ -1 };
 std::string Container::m_new_hostname{ "container" };
 std::string Container::m_new_fs{ "" };
 std::vector<std::string> Container::m_volumes{};
 std::vector<std::string> Container::m_commands{};
+std::vector<std::pair<int,int>> Container::m_forward_ports{};
 Terminal Container::m_term{};
 Terminal::PtyArgs Container::m_pty_args{};
 std::string Container::m_image_name{ "" };
 
-Container::Container(const std::string& hostname, const std::string& new_fs, const std::vector<std::string>& volumes, DatabaseManager& db, const std::string& container_id, const std::string& image_name)
+Container::Container(const std::string& hostname,
+                     const std::string& new_fs,
+                     const std::vector<std::string>& volumes,
+                     const std::vector<std::pair<int,int>>& ports,
+                     const std::string& container_id, const std::string& image_name,
+                     DatabaseManager& db)
     : m_db(&db), m_container_id(container_id) {
     m_new_hostname = hostname;
     m_new_fs = new_fs;
     m_volumes = volumes;
+    m_forward_ports = ports;
     m_image_name = image_name;
 }
 
@@ -44,6 +52,8 @@ void Container::connect_to_server(const pid_t& container_pid){
 }
 
 void Container::manage_container(const std::string& path, const std::string& filesystem_dir) {
+    ioctl(STDIN_FILENO, TIOCGWINSZ, &m_pty_args.window_size);
+    m_term.start_pty_session(m_pty_args);
     if (fork() != 0) {
         exit(0);
     }
@@ -58,7 +68,7 @@ void Container::manage_container(const std::string& path, const std::string& fil
     }
 
     m_child_pid = fork();
-    if (m_child_pid == -1) {
+    if (m_child_pid == ERR) {
         Utils::handle_error("fork failed");
     }
 
@@ -116,27 +126,28 @@ void Container::manage_container(const std::string& path, const std::string& fil
         }
         close(parent_to_child_pipe[1]);
 
-        if (Network::setup_networking(m_child_pid) != 0) {
-            Utils::handle_error("Failed to setup network");
+        if(m_forward_ports.empty()){
+            if(Network::setup_networking(m_child_pid) != 0){
+                Utils::handle_error("Unable to setup networking");
+            }
+        }
+        else{
+            if(Network::setup_networking_with_ports(m_child_pid, m_forward_ports) != 0){
+                Utils::handle_error("Unable to setup networking");
+            }
         }
 
-        // pty_shell - Initial Command - Will be set later
         ContainerManager containerManager(*m_db);
         containerManager.create_container(m_container_id, m_child_pid-1, "", filesystem_dir, m_image_name);
 
-        m_term.start_server(m_pty_args, m_child_pid, getpid());
-
-        m_db->update_container_status(m_container_id, "exited");
-
+        m_term.start_server(m_pty_args, m_container_id ,m_child_pid);
         int status{};
         waitpid(m_child_pid, &status, 0);
-        exit(0);
+        exit(EXIT_SUCCESS);
     }
 }
 
 void Container::run(const std::string& path, const std::string& container_id) {
-    ioctl(STDIN_FILENO, TIOCGWINSZ, &m_pty_args.window_size);
-    m_term.start_pty_session(m_pty_args);
 
     pid_t temp_pid{ getpid() };
     std::string filesystem_dir{ Utils::get_filesystem_path(temp_pid) };
@@ -158,14 +169,13 @@ void Container::run(const std::string& path, const std::string& container_id) {
     if (manager_pid == 0) {
         manage_container(path, filesystem_dir);
     } else {
-        // Close both FDs in the parent process
         close(m_pty_args.master_fd);
         close(m_pty_args.slave_fd);
 
         std::cerr << "Container started." << '\n';
         std::cerr << "To attach, run: quiver attach " << manager_pid << '\n';
 
-        int status;
+        int status{};
         waitpid(manager_pid, &status, 0);
     }
 }
@@ -184,6 +194,9 @@ void Container::run_container(const ContainerArgs& args) {
     std::string merged { filesystem_path + "/merged" };
     std::string upper { filesystem_path + "/upper" };
     std::string work { filesystem_path + "/work" };
+    Utils::ensure_dirs(merged);
+    Utils::ensure_dirs(upper);
+    Utils::ensure_dirs(work);
 
     std::cerr << "DEBUG: Container init PID: " << getpid() << '\n';
 

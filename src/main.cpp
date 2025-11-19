@@ -1,5 +1,4 @@
-#include "../include/image_management.hpp"
-#include "../include/container.hpp"
+#include "../include/image_manager.hpp"
 #include "../include/database_manager.hpp"
 #include "../include/container_management.hpp"
 #include "../include/utils.hpp"
@@ -16,17 +15,17 @@ using CommandHandler = std::function<void(DatabaseManager&, ImageManager&, const
 
 int main(int argc, char* argv[]) {
     try {
-        std::string base_dir = Utils::get_base_dir();
+        std::string base_dir{ Utils::get_base_dir() };
         Utils::ensure_dirs(base_dir);
 
-        std::string db_path = base_dir + "quiver.db";
+        std::string db_path{ base_dir + "quiver.db" };
         auto db_ptr = std::make_unique<DatabaseManager>(db_path);
         if (!db_ptr->init_db()) {
             std::cerr << "Failed to initialize the database. Exiting." << '\n';
             return EXIT_FAILURE;
         }
 
-        DatabaseManager& db = *db_ptr;
+        DatabaseManager& db{ *db_ptr };
         ImageManager img_manager(db);
         ContainerManager containerManager(db);
 
@@ -36,17 +35,39 @@ int main(int argc, char* argv[]) {
         }
 
         std::map<std::string, CommandHandler> commands{};
-        commands["run"]    = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::run(db, args); };
-        commands["attach"] = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::attach(args); };
-        commands["ps"]     = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::ps(db, args); };
-        commands["rm"]     = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::rm(db, args); };
-        commands["start"]  = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::start(db, args); };
-        commands["stop"]   = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::stop(db, args); };
-        commands["image"]  = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::image(db, img, args); };
-        commands["volume"] = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::volume(db, args); };
-        commands["create"] = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::create(db, img, args); };
-        commands["pull"]   = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ CommandLineHandler::pull(db, args); };
-        commands["help"]  = [](DatabaseManager& db, ImageManager& img, const std::vector<std::string>& args){ Utils::print_usage(); };
+        commands["run"]    = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::run(db, args); };
+        commands["attach"] = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::attach(db, args); };
+        commands["ps"]     = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::ps(db, args); };
+        commands["rm"]     = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::rm(db, args); };
+        commands["start"]  = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::start(db, args); };
+        commands["stop"]   = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::stop(db, args); };
+        commands["image"]  = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::image(db, img, args); };
+        commands["volume"] = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::volume(db, args); };
+        commands["create"] = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::create(db, img, args); };
+        commands["pull"]   = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::pull(db, args); };
+        commands["help"]   = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ Utils::print_usage(); };
 
         std::vector<std::string> cmds;
         for (int i = 2; i < argc; ++i) {

@@ -1,13 +1,13 @@
 #include "../include/utils.hpp"
 #include <cstdlib>
 #include <fcntl.h>
+#include <string>
 #include <sys/stat.h>
 #include <string.h>
 #include <iostream>
 #include <unistd.h>
 #include <openssl/sha.h>
-#include <sstream>
-#include <iomanip>
+#include <random>
 #include <chrono>
 
 bool Utils::path_exists(const std::string& path){
@@ -74,6 +74,12 @@ std::string Utils::get_image_path(const std::string& image_name){
     return path;
 }
 
+std::string Utils::get_logs_path(const pid_t& pid){
+    std::string path{ get_base_dir() + "logs/" + std::to_string(pid) + "/" };
+    ensure_dirs(path);
+    return path;
+}
+
 void Utils::print_usage(){
     std::cout << "Usage: quiver <command> [options]\n"
                  "Commands:\n"
@@ -90,19 +96,21 @@ void Utils::print_usage(){
 }
 
 std::string Utils::generate_container_id() {
-
     auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-    std::string seed = std::to_string(now);
+    std::random_device rd;
+    std::string input = std::to_string(now) + ":" + std::to_string(rd());
 
     unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-    SHA256_Update(&sha256, seed.c_str(), seed.size());
-    SHA256_Final(hash, &sha256);
+    SHA256(reinterpret_cast<const unsigned char*>(input.c_str()), input.size(), hash);
 
-    std::stringstream ss;
+    std::string hexString;
+    hexString.reserve(SHA256_DIGEST_LENGTH * 2);
+    static const char hexDigits[] = "0123456789abcdef";
+
     for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
-        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+        hexString += hexDigits[(hash[i] >> 4) & 0xF];
+        hexString += hexDigits[hash[i] & 0xF];
     }
-    return ss.str();
+
+    return hexString;
 }

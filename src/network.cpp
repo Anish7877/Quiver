@@ -8,7 +8,6 @@
 #include <cstring>
 #include <algorithm>
 
-// Static member definitions
 pid_t Network::m_net_pid{-1};
 std::map<pid_t, Network::NetworkConfig> Network::container_networks;
 
@@ -16,13 +15,11 @@ int Network::setup_networking(const pid_t& pid){
     std::cout << "Setting Network for PID " << pid << '\n';
     m_net_pid = fork();
     if(m_net_pid == 0){
-        // Detach from parent
         if(setsid() == -1){
             std::cerr << "SetSID failed" << '\n';
             _exit(1);
         }
 
-        // Redirect output to avoid blocking
         int devnull = open("/dev/null", O_RDWR);
         if (devnull != -1) {
             dup2(devnull, STDIN_FILENO);
@@ -44,7 +41,7 @@ int Network::setup_networking(const pid_t& pid){
         _exit(1);
     }
     else if(m_net_pid > 0){
-        usleep(500000); // 500ms
+        usleep(500000);
         return 0;
     }
     else{
@@ -57,18 +54,15 @@ int Network::setup_networking_with_ports(const pid_t& pid,
                                         const std::vector<std::pair<int, int>>& port_forwards) {
     std::cout << "Setting up network for PID " << pid << " with port forwarding\n";
 
-    // Create API socket path
     std::string api_socket { "/tmp/slirp4netns-" + std::to_string(pid) + ".sock" };
 
     pid_t slirp_pid = fork();
     if (slirp_pid == 0) {
-        // Detach from parent
         if(setsid() == -1){
             std::cerr << "SetSID failed" << '\n';
             _exit(1);
         }
 
-        // Redirect output
         int devnull = open("/dev/null", O_RDWR);
         if (devnull != -1) {
             dup2(devnull, STDIN_FILENO);
@@ -85,13 +79,9 @@ int Network::setup_networking_with_ports(const pid_t& pid,
         args.push_back("--api-socket");
         args.push_back(api_socket);
 
-        // Add port forwards
-        create_port_forward_args(port_forwards, args);
-
         args.push_back(std::to_string(pid));
         args.push_back("tap0");
 
-        // Convert to char* array
         std::vector<char*> argv;
         for (auto& arg : args) {
             argv.push_back(const_cast<char*>(arg.c_str()));
@@ -104,31 +94,32 @@ int Network::setup_networking_with_ports(const pid_t& pid,
     else if (slirp_pid > 0) {
         NetworkConfig config{};
         config.slirp_pid = slirp_pid;
-        config.port_forwards = port_forwards;
         config.api_socket = api_socket;
 
         container_networks[pid] = config;
         m_net_pid = slirp_pid;  // Keep for compatibility
 
-        // Wait for API socket to be created
         if (wait_for_api_socket(api_socket) == 0) {
-            std::cout << "Network setup complete for container " << pid << '\n';
-            return 0;
+
+            bool success = true;
+            for (const auto& pf : port_forwards) {
+                if (add_port_forward(pid, pf.first, pf.second) != 0) {
+                    success = false;
+                }
+            }
+
+            return success ? 0 : -1;
         } else {
-            std::cerr << "Timeout waiting for network API" << '\n';
             return -1;
         }
     }
     else {
-        std::cerr << "Failed to fork slirp4netns process" << '\n';
         return -1;
     }
 }
 
 int Network::forward_port(const int& host_port, const int& container_port) {
-    // Legacy function - use the first container if available
     if (container_networks.empty()) {
-        std::cerr << "No containers with networking configured" << '\n';
         return -1;
     }
 
@@ -145,15 +136,12 @@ int Network::add_port_forward(const pid_t& container_pid, int host_port, int con
 
     std::string api_socket = it->second.api_socket;
 
-    // Create JSON command for slirp4netns API
     std::string json_cmd = "{\"execute\": \"add_hostfwd\", \"arguments\": {\"proto\": \"tcp\", \"host_addr\": \"0.0.0.0\", \"host_port\": "
                           + std::to_string(host_port) + ", \"guest_addr\": \"10.0.2.100\", \"guest_port\": "
                           + std::to_string(container_port) + "}}";
 
     if (send_api_command(container_pid, json_cmd) == 0) {
-        // Add to our tracking
         it->second.port_forwards.push_back({host_port, container_port});
-        std::cout << "Port forward added: " << host_port << " -> " << container_port << '\n';
         return 0;
     }
 
@@ -163,7 +151,6 @@ int Network::add_port_forward(const pid_t& container_pid, int host_port, int con
 int Network::remove_port_forward(const pid_t& container_pid, int host_port) {
     auto it = container_networks.find(container_pid);
     if (it == container_networks.end()) {
-        std::cerr << "Container network not found for PID " << container_pid << '\n';
         return -1;
     }
 
@@ -171,7 +158,6 @@ int Network::remove_port_forward(const pid_t& container_pid, int host_port) {
                           + std::to_string(host_port) + "}}";
 
     if (send_api_command(container_pid, json_cmd) == 0) {
-        // Remove from our tracking
         auto& forwards = it->second.port_forwards;
         forwards.erase(
             std::remove_if(forwards.begin(), forwards.end(),
@@ -186,7 +172,6 @@ int Network::remove_port_forward(const pid_t& container_pid, int host_port) {
 }
 
 std::string Network::get_container_ip(const pid_t& container_pid) {
-    // Default slirp4netns guest IP
     return "10.0.2.100";
 }
 
@@ -213,7 +198,6 @@ int Network::send_api_command(const pid_t& container_pid, const std::string& jso
 
     std::string socket_path = it->second.api_socket;
 
-    // Create Unix socket
     int sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock == -1) {
         std::cerr << "Failed to create socket" << '\n';
@@ -231,7 +215,6 @@ int Network::send_api_command(const pid_t& container_pid, const std::string& jso
         return -1;
     }
 
-    // Send command
     ssize_t sent { send(sock, json_command.c_str(), json_command.length(), 0) };
     if (sent == -1) {
         std::cerr << "Failed to send API command" << '\n';
@@ -239,12 +222,10 @@ int Network::send_api_command(const pid_t& container_pid, const std::string& jso
         return -1;
     }
 
-    // Read response (optional - for debugging)
     char response[1024];
     ssize_t received = recv(sock, response, sizeof(response) - 1, 0);
     if (received > 0) {
         response[received] = '\0';
-        std::cout << "API Response: " << response << '\n';
     }
 
     close(sock);
@@ -254,17 +235,15 @@ int Network::send_api_command(const pid_t& container_pid, const std::string& jso
 int Network::cleanup_networking(const pid_t& container_pid) {
     auto it = container_networks.find(container_pid);
     if (it == container_networks.end()) {
-        return 0;  // Already cleaned up
+        return 0;
     }
 
     pid_t slirp_pid = it->second.slirp_pid;
     std::string api_socket = it->second.api_socket;
 
-    // Terminate slirp4netns process
     if (slirp_pid > 0) {
         kill(slirp_pid, SIGTERM);
 
-        // Wait for process to terminate
         int status;
         int result = waitpid(slirp_pid, &status, WNOHANG);
         if (result == 0) {
@@ -274,10 +253,8 @@ int Network::cleanup_networking(const pid_t& container_pid) {
         }
     }
 
-    // Remove API socket file
     unlink(api_socket.c_str());
 
-    // Remove from tracking
     container_networks.erase(it);
 
     std::cout << "Network cleanup complete for container " << container_pid << '\n';
@@ -286,11 +263,10 @@ int Network::cleanup_networking(const pid_t& container_pid) {
 
 int Network::wait_for_api_socket(const std::string& socket_path, int timeout_ms) {
     int elapsed { 0 };
-    const int check_interval { 100 };  // 100ms
+    const int check_interval { 100 };
 
     while (elapsed < timeout_ms) {
         if (access(socket_path.c_str(), F_OK) == 0) {
-            // Socket exists, wait a bit more for it to be ready
             usleep(200000);
             return 0;
         }
@@ -299,15 +275,6 @@ int Network::wait_for_api_socket(const std::string& socket_path, int timeout_ms)
     }
 
     return -1;
-}
-
-int Network::create_port_forward_args(const std::vector<std::pair<int, int>>& forwards,
-                                    std::vector<std::string>& args) {
-    for (const auto& forward : forwards) {
-        args.push_back("--port-forward");
-        args.push_back("tcp:" + std::to_string(forward.first) + ":" + std::to_string(forward.second));
-    }
-    return 0;
 }
 
 Network::~Network() {

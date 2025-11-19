@@ -11,7 +11,7 @@ extern pid_t container_pid;
 class CommandLineHandler {
 public:
     static void run(DatabaseManager& db, const std::vector<std::string>& cmds);
-    static void attach(const std::vector<std::string>& cmds);
+    static void attach(DatabaseManager& db, const std::vector<std::string>& cmds);
     static void ps(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
     static void rm(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
     static void image(DatabaseManager& db_manager, ImageManager& img_manager, const std::vector<std::string>& cmds);

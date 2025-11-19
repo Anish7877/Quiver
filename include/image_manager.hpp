@@ -23,7 +23,7 @@ class ImageManager {
     private:
         DatabaseManager& db_manager;
         std::string base_cache_path;
-        
+
         // Progress Tracking
         struct DownloadProgress {
             long long total = 0;
@@ -39,10 +39,10 @@ class ImageManager {
         bool get_auth_token(const std::string& imageName, std::string& outToken, std::string& error);
         bool download_and_extract_layers(const json& manifest, const std::string& repo, const std::string& token, const std::string& destinationPath, std::string& error);
         bool extract_layer(const std::string& tarball_path, const std::string& destination_path, std::string& error);
-        
+
         std::future<std::string> download_layer_async(const std::string& url, const std::string& token, const std::string& destination_path, const std::string& digest);
         void print_progress();
-        
+
         std::string get_image_path(const std::string& imageName) const;
         bool path_exists(const std::string& path) const;
         std::string parse_auth_header(const std::string& header, const std::string& key);

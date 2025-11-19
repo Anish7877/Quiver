@@ -2,23 +2,20 @@
 #include <iostream>
 #include <stdexcept>
 
-// Constructor: Opens the database connection
 DatabaseManager::DatabaseManager(const std::string& db_path) : m_db(nullptr), m_db_path(db_path) {
     if (sqlite3_open(m_db_path.c_str(), &m_db) != SQLITE_OK) {
         throw std::runtime_error("Cannot open database: " + std::string(sqlite3_errmsg(m_db)));
     }
 }
 
-// Destructor: Closes the database connection
 DatabaseManager::~DatabaseManager() {
     if (m_db) {
         sqlite3_close(m_db);
     }
 }
 
-// Initializes the database by creating the necessary tables
 bool DatabaseManager::init_db() {
-    const char* create_containers_table =
+    const char* create_containers_table{
         "CREATE TABLE IF NOT EXISTS containers ("
         "id TEXT PRIMARY KEY NOT NULL,"
         "name TEXT NOT NULL UNIQUE,"
@@ -29,18 +26,18 @@ bool DatabaseManager::init_db() {
         "hostname TEXT,"
         "filesystem_path TEXT,"
         "pty_shell TEXT"
-        ");";
+        ");" };
 
-    const char* create_volumes_table =
+    const char* create_volumes_table{
         "CREATE TABLE IF NOT EXISTS volumes ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "container_name TEXT,"
         "host_path TEXT NOT NULL,"
         "container_path TEXT NOT NULL,"
         "FOREIGN KEY(container_name) REFERENCES containers(name)"
-        ");";
+        ");" };
 
-    const char* create_images_table =
+    const char* create_images_table{
         "CREATE TABLE IF NOT EXISTS images ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "name TEXT NOT NULL UNIQUE,"
@@ -48,9 +45,9 @@ bool DatabaseManager::init_db() {
         "path TEXT NOT NULL,"
         "size INT NOT NULL,"
         "created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
-        ");";
+        ");" };
 
-    char* err_msg = nullptr;
+    char* err_msg{ nullptr };
     if (sqlite3_exec(m_db, create_containers_table, 0, 0, &err_msg) != SQLITE_OK) {
         std::cerr << "SQL error: " << err_msg << std::endl;
         sqlite3_free(err_msg);
@@ -72,9 +69,8 @@ bool DatabaseManager::init_db() {
     return true;
 }
 
-// Adds a new container to the database
 bool DatabaseManager::add_container(const ContainerObject& container) {
-    const char* sql = "INSERT INTO containers (id, name, image, pid, status, hostname, filesystem_path, pty_shell) VALUES (?, ?, ?, ?, ?, ?, ?, ?);";
+    const char* sql{ "INSERT INTO containers (id, name, image, pid, status, hostname, filesystem_path, pty_shell) VALUES (?, ?, ?, ?, ?, ?, ?, ?);" };
     sqlite3_stmt* stmt;
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
@@ -91,7 +87,6 @@ bool DatabaseManager::add_container(const ContainerObject& container) {
     sqlite3_bind_text(stmt, 7, container.filesystem_path.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 8, container.pty_shell.c_str(), -1, SQLITE_STATIC);
 
-
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
     return result;
@@ -99,8 +94,8 @@ bool DatabaseManager::add_container(const ContainerObject& container) {
 
 // Retrieves a container from the database by its ID
 ContainerObject DatabaseManager::get_container(const std::string& container_id) {
-    const char* sql = "SELECT id, name, image, pid, status, created_at, hostname, filesystem_path, pty_shell FROM containers WHERE id = ?;";
-    sqlite3_stmt* stmt;
+    const char* sql{ "SELECT id, name, image, pid, status, created_at, hostname, filesystem_path, pty_shell FROM containers WHERE id = ?;" };
+    sqlite3_stmt* stmt{};
     ContainerObject container{};
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
@@ -121,9 +116,8 @@ ContainerObject DatabaseManager::get_container(const std::string& container_id) 
     return container;
 }
 
-// Updates the status of a container
 bool DatabaseManager::update_container_status(const std::string& container_name, const std::string& status) {
-    const char* sql = "UPDATE containers SET status = ? WHERE name = ?;";
+    const char* sql = "UPDATE containers SET status = ? WHERE id = ?;";
     sqlite3_stmt* stmt;
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
@@ -138,7 +132,6 @@ bool DatabaseManager::update_container_status(const std::string& container_name,
     return result;
 }
 
-// NEW: Updates the PID of a container after it has been started
 bool DatabaseManager::update_container_pid(const std::string& container_id, pid_t pid) {
     const char* sql = "UPDATE containers SET pid = ? WHERE id = ?;";
     sqlite3_stmt* stmt;
@@ -155,9 +148,8 @@ bool DatabaseManager::update_container_pid(const std::string& container_id, pid_
     return result;
 }
 
-// Removes a container from the database
 bool DatabaseManager::remove_container(const std::string& container_name) {
-    const char* sql = "DELETE FROM containers WHERE name = ?;";
+    const char* sql = "DELETE FROM containers WHERE id = ?;";
     sqlite3_stmt* stmt;
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
@@ -170,7 +162,6 @@ bool DatabaseManager::remove_container(const std::string& container_name) {
     return result;
 }
 
-// Lists all containers in the database
 std::vector<ContainerObject> DatabaseManager::list_all_containers() {
     const char* sql = "SELECT id, name, image, pid, status, created_at, hostname, filesystem_path, pty_shell FROM containers;";
     sqlite3_stmt* stmt;
@@ -244,7 +235,6 @@ std::vector<ContainerObject> DatabaseManager::list_containers_by_image(const std
     return containers;
 }
 
-// Adds a new volume to the database
 bool DatabaseManager::add_volume(const VolumeObject& volume) {
     const char* sql = "INSERT INTO volumes (container_name, host_path, container_path) VALUES (?, ?, ?);";
     sqlite3_stmt* stmt;
@@ -262,7 +252,6 @@ bool DatabaseManager::add_volume(const VolumeObject& volume) {
     return result;
 }
 
-// Retrieves all volumes for a given container
 std::vector<VolumeObject> DatabaseManager::get_container_volumes(const std::string& container_id) {
     const char* sql = "SELECT id, container_name, host_path, container_path FROM volumes WHERE container_id = ?;";
     sqlite3_stmt* stmt;
@@ -302,7 +291,6 @@ std::vector<VolumeObject> DatabaseManager::list_all_volumes() {
     return volumes;
 }
 
-// Removes a volume from the database
 bool DatabaseManager::remove_volume(int volume_id) {
     const char* sql = "DELETE FROM volumes WHERE id = ?;";
     sqlite3_stmt* stmt;
@@ -317,7 +305,6 @@ bool DatabaseManager::remove_volume(int volume_id) {
     return result;
 }
 
-// Updates the container name in volumes when a container is linked
 bool DatabaseManager::update_container_name_in_volumes(const int& volume_id, const std::string& container_name) {
     const char* sql = "UPDATE volumes SET container_name = ? WHERE id = ?;";
     sqlite3_stmt* stmt;
@@ -344,19 +331,19 @@ bool DatabaseManager::add_image(const std::string& image_name, const std::string
         name = image_name;
         tag = "latest";
     }
-    
+
     const char* sql = "INSERT INTO images (name, tag, path, size) VALUES (?, ?, ?, ?);";
     sqlite3_stmt* stmt;
-    
+
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         return false;
     }
-    
+
     sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, tag.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 3, image_path.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_int64(stmt, 4, image_size);
-    
+
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
     return result;
@@ -370,7 +357,7 @@ bool DatabaseManager::remove_image(const std::string& image_name) {
         return false;
     }
     sqlite3_bind_text(stmt, 1, image_name.c_str(), -1, SQLITE_STATIC);
-    
+
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
     return result;
@@ -380,7 +367,7 @@ std::vector<ImageObject> DatabaseManager::list_all_images() {
     const char* sql = "SELECT id, name, tag, path, size, created_at FROM images;";
     sqlite3_stmt* stmt;
     std::vector<ImageObject> images;
-    
+
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             ImageObject img;
@@ -397,7 +384,6 @@ std::vector<ImageObject> DatabaseManager::list_all_images() {
     return images;
 }
 
-// Generic callback function for sqlite3_exec
 int DatabaseManager::exec_callback(void* data, int argc, char** argv, char** azColName) {
     return 0;
 }

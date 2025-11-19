@@ -13,5 +13,6 @@ namespace Utils{
     std::string get_sock_path(const pid_t& pid);
     std::string get_filesystem_path(const pid_t& pid);
     std::string get_image_path(const std::string& image_name);
+    std::string get_logs_path(const pid_t& pid);
     std::string generate_container_id();
 }
