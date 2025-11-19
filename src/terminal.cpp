@@ -258,14 +258,13 @@ void Terminal::connect_to_server(const int& container_pid){
 }
 
 void Terminal::cleanup(int sfd, int master_fd){
-    db.update_container_status(container_id, "exited");
     if (sfd >= 0) close(sfd);
     if (master_fd >= 0) close(master_fd);
-    pid_t pid{ db.get_container(container_id).pid };
-    std::string sock_path{ Utils::get_sock_path(pid) };
-    size_t pos{ sock_path.find_last_of('/') };
-    rmdir(sock_path.substr(0,pos-1).c_str());
-    rmdir(Utils::get_filesystem_path(pid).c_str());
+    // pid_t pid{ db.get_container(container_id).pid };
+    // std::string sock_path{ Utils::get_sock_path(pid) };
+    // size_t pos{ sock_path.find_last_of('/') };
+    // rmdir(sock_path.substr(0,pos-1).c_str());
+    // rmdir(Utils::get_filesystem_path(pid).c_str());
     kill(Network::get_net_pid(),SIGTERM);
     m_running = false;
 }

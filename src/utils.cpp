@@ -54,28 +54,28 @@ void Utils::write_file(const std::string& path,const std::string& buffer){
 std::string Utils::get_base_dir(){
     const char* home{ getenv("HOME") };
     std::string base{ home ? std::string(home) : "/tmp" };
-    return base + "/.quiver/";
+    return base + "/.quiver";
 }
 std::string Utils::get_sock_path(const pid_t& pid){
-    std::string path{ get_base_dir() + "containers/" + std::to_string(static_cast<long long>(pid)) };
+    std::string path{ get_base_dir() + "/containers/" + std::to_string(static_cast<long long>(pid)) };
     ensure_dirs(path);
     return path + "/attach.sock";
 }
 
 std::string Utils::get_filesystem_path(const pid_t& pid){
-    std::string path{ get_base_dir() + "filesystems/" + std::to_string(static_cast<long long>(pid)) };
+    std::string path{ get_base_dir() + "/filesystems/" + std::to_string(static_cast<long long>(pid)) };
     ensure_dirs(path);
     return path;
 }
 
 std::string Utils::get_image_path(const std::string& image_name){
-    std::string path{ get_base_dir() + "images/" + image_name};
+    std::string path{ get_base_dir() + "/images/" + image_name};
     ensure_dirs(path);
     return path;
 }
 
 std::string Utils::get_logs_path(const pid_t& pid){
-    std::string path{ get_base_dir() + "logs/" + std::to_string(pid) + "/" };
+    std::string path{ get_base_dir() + "/logs/" + std::to_string(pid) + "/" };
     ensure_dirs(path);
     return path;
 }

@@ -138,11 +138,14 @@ void Container::manage_container(const std::string& path, const std::string& fil
         }
 
         ContainerManager containerManager(*m_db);
-        containerManager.create_container(m_container_id, m_child_pid-1, "", filesystem_dir, m_image_name);
+        containerManager.create_container(m_container_id, m_child_pid, "", filesystem_dir, m_image_name);
 
         m_term.start_server(m_pty_args, m_container_id ,m_child_pid);
+
         int status{};
         waitpid(m_child_pid, &status, 0);
+
+        m_db->update_container_status(m_container_id, "exited");
         exit(EXIT_SUCCESS);
     }
 }

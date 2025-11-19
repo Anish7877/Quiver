@@ -18,14 +18,13 @@ int main(int argc, char* argv[]) {
         std::string base_dir{ Utils::get_base_dir() };
         Utils::ensure_dirs(base_dir);
 
-        std::string db_path{ base_dir + "quiver.db" };
-        auto db_ptr = std::make_unique<DatabaseManager>(db_path);
-        if (!db_ptr->init_db()) {
+        std::string db_path{ base_dir + "/quiver.db" };
+        DatabaseManager db{ db_path };
+        if (!db.init_db()) {
             std::cerr << "Failed to initialize the database. Exiting." << '\n';
             return EXIT_FAILURE;
         }
 
-        DatabaseManager& db{ *db_ptr };
         ImageManager img_manager(db);
         ContainerManager containerManager(db);
 

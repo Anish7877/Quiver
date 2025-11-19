@@ -116,7 +116,7 @@ ContainerObject DatabaseManager::get_container(const std::string& container_id) 
     return container;
 }
 
-bool DatabaseManager::update_container_status(const std::string& container_name, const std::string& status) {
+bool DatabaseManager::update_container_status(const std::string& container_id, const std::string& status) {
     const char* sql = "UPDATE containers SET status = ? WHERE id = ?;";
     sqlite3_stmt* stmt;
 
@@ -125,7 +125,7 @@ bool DatabaseManager::update_container_status(const std::string& container_name,
     }
 
     sqlite3_bind_text(stmt, 1, status.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, container_name.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, container_id.c_str(), -1, SQLITE_STATIC);
 
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
