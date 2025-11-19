@@ -28,8 +28,8 @@ Container::Container(const std::string& hostname,
                      const std::string& new_fs,
                      const std::vector<std::string>& volumes,
                      const std::vector<std::pair<int,int>>& ports,
-                     const std::string& container_id, const std::string& image_name,
-                     DatabaseManager& db)
+                     const std::string& container_id, DatabaseManager& db, 
+                     const std::string& image_name)
     : m_db(&db), m_container_id(container_id) {
     m_new_hostname = hostname;
     m_new_fs = new_fs;
