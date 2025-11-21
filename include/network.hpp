@@ -17,6 +17,7 @@ class Network {
         static int forward_port(const int& host_port, const int& container_port);
         static int add_port_forward(const pid_t& container_pid, int host_port, int container_port);
         static int remove_port_forward(const pid_t& container_pid, int host_port);
+        static int connect_namespaces(const pid_t& target_pid, int host_port, int target_port);
 
         static pid_t get_net_pid() { return m_net_pid; }
         static std::string get_container_ip(const pid_t& container_pid);
@@ -37,8 +38,7 @@ class Network {
         };
 
         static pid_t m_net_pid;
-        static std::map<pid_t, NetworkConfig> container_networks;
         static bool m_running;
-
+        static std::map<pid_t, NetworkConfig> m_container_networks;
         static int wait_for_api_socket(const std::string& socket_path, int timeout_ms = 5000);
 };

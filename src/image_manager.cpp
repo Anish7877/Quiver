@@ -66,11 +66,11 @@ bool ImageManager::remove(const std::string& image_name, std::string& error) {
 bool ImageManager::get_image(const std::string& image_name, std::string& out_path, std::string& error) {
     out_path = get_image_path(image_name);
     if (Utils::path_exists(out_path)) {
-        std::cout << "Image found in local cache." << '\n';
+        std::cout << "Image found in local storage." << '\n';
         return true;
     }
 
-    std::cout << "Image not in cache. Pulling from registry..." << '\n';
+    std::cout << "Image not in local storage. Pulling from registry..." << '\n';
     if (!pull_image_from_registry(image_name, out_path, error)) {
         if (Utils::path_exists(out_path)) {
             std::string rm_command = "rm -rf " + out_path;

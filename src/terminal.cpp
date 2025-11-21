@@ -15,7 +15,8 @@
 #include <fcntl.h>
 
 DatabaseManager db{ Utils::get_base_dir() + "quiver.db" };
-std::string container_id{};
+int Terminal::m_sfd{-1};
+std::string Terminal::m_container_id{""};
 termios Terminal::m_orig_term{};
 pid_t Terminal::m_container_pid{-1};
 volatile bool Terminal::m_running{ false };
@@ -36,32 +37,36 @@ void Terminal::redirect_io(const int &slave_fd){
         Utils::handle_error("Redirect stderr to slave file descriptor");
 }
 
+int Terminal::get_sfd() const {
+    return m_sfd;
+}
 void Terminal::start_server(const PtyArgs& args, const std::string& container_id, const pid_t& container_pid){
-    ::container_id = container_id;
+    m_container_id = container_id;
     std::string sock_path{ Utils::get_sock_path(container_pid) };
 
     unlink(sock_path.c_str());
 
     int sfd{ socket(AF_UNIX, SOCK_STREAM, 0) };
-    if (sfd == -1) Utils::handle_error("TTY Proxy Socket Creation failed");
+    if (sfd == ERR) Utils::handle_error("TTY Proxy Socket Creation failed");
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, sock_path.c_str(), sizeof(addr.sun_path) - 1);
 
-    if (bind(sfd, (sockaddr*)&addr, sizeof(addr)) == -1) {
+    if (bind(sfd, (sockaddr*)&addr, sizeof(addr)) == ERR) {
         close(sfd);
         Utils::handle_error("TTY Proxy Socket binding failed");
     }
 
     chmod(sock_path.c_str(), S_IRUSR | S_IWUSR);
 
-    if (listen(sfd, 1) == -1) {
+    if (listen(sfd, 1) == ERR) {
         close(sfd);
         unlink(sock_path.c_str());
         Utils::handle_error("TTY Proxy listen failed");
     }
 
     m_running = true;
+    m_sfd = sfd;
 
     while (true) {
         int status{};
@@ -84,7 +89,7 @@ void Terminal::start_server(const PtyArgs& args, const std::string& container_id
         }
 
         int cfd{ accept(sfd, NULL, NULL) };
-        if (cfd == -1) {
+        if (cfd == ERR) {
             if (errno == EINTR) continue;
             break;
         }
@@ -260,11 +265,6 @@ void Terminal::connect_to_server(const int& container_pid){
 void Terminal::cleanup(int sfd, int master_fd){
     if (sfd >= 0) close(sfd);
     if (master_fd >= 0) close(master_fd);
-    // pid_t pid{ db.get_container(container_id).pid };
-    // std::string sock_path{ Utils::get_sock_path(pid) };
-    // size_t pos{ sock_path.find_last_of('/') };
-    // rmdir(sock_path.substr(0,pos-1).c_str());
-    // rmdir(Utils::get_filesystem_path(pid).c_str());
     kill(Network::get_net_pid(),SIGTERM);
     m_running = false;
 }

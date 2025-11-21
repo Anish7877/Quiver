@@ -11,7 +11,7 @@ std::vector<std::string> volumes{};
 std::vector<std::string> commands{};
 std::vector<std::pair<int,int>> forward_ports{};
 std::string image_name{""};
-std::string container_name{""};
+std::string container_id{""};
 pid_t container_pid{-1};
 std::string root_fs{""};
 std::string err{""};
@@ -90,7 +90,7 @@ void CommandLineHandler::attach(DatabaseManager& db_manager, const std::vector<s
         Utils::print_usage();
         return;
     }
-    std::string container_id { cmds[0] };
+    container_id = cmds[0];
     container_pid = { db_manager.get_container(container_id).pid };
     Container container;
     container.connect_to_server(container_pid);
@@ -128,17 +128,19 @@ void CommandLineHandler::rm(DatabaseManager& db_manager, const std::vector<std::
         Utils::print_usage();
         return;
     }
-    container_name = cmds[0];
+    container_id = cmds[0];
+    ContainerObject container_obj{ db_manager.get_container(container_id) };
 
-    if (db_manager.remove_container(container_name)) {
-        std::cout << "Container " << container_name << " removed successfully from database.\n";
-    } else {
-        std::cout << "Failed to remove container " << container_name << " from database.\n";
+    if ((container_obj.status == "stopped" || container_obj.status == "exited") && db_manager.remove_container(container_id)) {
+        std::cout << "Container " << container_id << " removed.\n";
+    }
+    else {
+        std::cout << "Error: " << container_id << " is running.\n";
     }
 }
 
 void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_manager, const std::vector<std::string>&  cmds){
-    if (cmds.size() < 1) {        
+    if (cmds.size() < 1) {
         Utils::print_usage();
         return;
     }
@@ -223,7 +225,7 @@ void CommandLineHandler::create(DatabaseManager& db_manager, ImageManager& img, 
         run(db_manager, new_cmds);
     }
     else if(cmds[0] == "volume"){
-        int i = 1;
+        size_t i{ 1 };
         while (true) {
             std::string volume_input{ cmds[i] };
             size_t sep_pos { volume_input.find(':') };
@@ -267,25 +269,47 @@ void CommandLineHandler::pull(DatabaseManager& db_manager, const std::vector<std
 
 void CommandLineHandler::start(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds.size() != 1){
+        std::cout << "Error: Container id is required\n";
         Utils::print_usage();
         return;
     }
-    container_name = cmds[0];
+    container_id = cmds[0];
     if (db_manager.update_container_status(cmds[0], "running")) {
         std::cout << "Container " << cmds[0] << " running successfully.\n";
     } else {
         std::cout << "Failed to update status of " << cmds[0] << " to RUNNING.\n";
+        return;
     }
+    ContainerObject container_obj{ db_manager.get_container(container_id) };
+    std::string container_name{ container_obj.name };
+    image_name = container_obj.image;
+    root_fs = container_obj.filesystem_path;
+    std::vector<VolumeObject> vols{ db_manager.get_container_volumes(container_id) };
+    for(const VolumeObject& vol : vols){
+        volumes.emplace_back(vol.host_path + ":" + vol.container_path);
+    }
+    /*
+     *
+     * forward ports after database of networks
+     *
+     */
+    Container container{ container_name, root_fs, volumes, forward_ports, container_id, db_manager, image_name };
+    container.exec("/bin/bash", commands);
 }
 
 void CommandLineHandler::stop(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds.size() != 1){
+        std::cout << "Error: Container id is required\n";
         Utils::print_usage();
         return;
     }
+    container_pid = db_manager.get_container(cmds[0]).pid;
+    Container container{};
+    container.stop(container_pid);
     if (db_manager.update_container_status(cmds[0], "stopped")) {
         std::cout << "Container " << cmds[0] << " stopped successfully.\n";
     } else {
         std::cout << "Failed to stop container " << cmds[0] << ".\n";
+        exit(EXIT_FAILURE);
     }
 }

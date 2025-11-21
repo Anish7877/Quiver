@@ -18,8 +18,11 @@ class Terminal{
         void redirect_io(const int& slave_fd);
         void start_server(const PtyArgs& args, const std::string& container_id, const pid_t& container_pid);
         void connect_to_server(const pid_t& container_pid);
-    private:
         void cleanup(int sfd, int master_fd);
+        int get_sfd() const;
+    private:
+        static int m_sfd;
+        static std::string m_container_id;
         static termios m_orig_term;
         static pid_t m_container_pid;
         static volatile bool m_running;

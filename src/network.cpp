@@ -9,7 +9,7 @@
 #include <algorithm>
 
 pid_t Network::m_net_pid{-1};
-std::map<pid_t, Network::NetworkConfig> Network::container_networks;
+std::map<pid_t, Network::NetworkConfig> Network::m_container_networks;
 
 int Network::setup_networking(const pid_t& pid){
     std::cout << "Setting Network for PID " << pid << '\n';
@@ -60,7 +60,7 @@ int Network::setup_networking_with_ports(const pid_t& pid,
     if (slirp_pid == 0) {
         if(setsid() == -1){
             std::cerr << "SetSID failed" << '\n';
-            _exit(1);
+            exit(1);
         }
 
         int devnull = open("/dev/null", O_RDWR);
@@ -96,8 +96,8 @@ int Network::setup_networking_with_ports(const pid_t& pid,
         config.slirp_pid = slirp_pid;
         config.api_socket = api_socket;
 
-        container_networks[pid] = config;
-        m_net_pid = slirp_pid;  // Keep for compatibility
+        m_container_networks[pid] = config;
+        m_net_pid = slirp_pid;
 
         if (wait_for_api_socket(api_socket) == 0) {
 
@@ -119,26 +119,25 @@ int Network::setup_networking_with_ports(const pid_t& pid,
 }
 
 int Network::forward_port(const int& host_port, const int& container_port) {
-    if (container_networks.empty()) {
+    if (m_container_networks.empty()) {
         return -1;
     }
-
-    pid_t first_container = container_networks.begin()->first;
+    pid_t first_container{ m_container_networks.begin()->first };
     return add_port_forward(first_container, host_port, container_port);
 }
 
 int Network::add_port_forward(const pid_t& container_pid, int host_port, int container_port) {
-    auto it = container_networks.find(container_pid);
-    if (it == container_networks.end()) {
+    auto it{ m_container_networks.find(container_pid) };
+    if (it == m_container_networks.end()) {
         std::cerr << "Container network not found for PID " << container_pid << '\n';
         return -1;
     }
 
-    std::string api_socket = it->second.api_socket;
+    std::string api_socket{ it->second.api_socket };
 
-    std::string json_cmd = "{\"execute\": \"add_hostfwd\", \"arguments\": {\"proto\": \"tcp\", \"host_addr\": \"0.0.0.0\", \"host_port\": "
+    std::string json_cmd{ "{\"execute\": \"add_hostfwd\", \"arguments\": {\"proto\": \"tcp\", \"host_addr\": \"0.0.0.0\", \"host_port\": "
                           + std::to_string(host_port) + ", \"guest_addr\": \"10.0.2.100\", \"guest_port\": "
-                          + std::to_string(container_port) + "}}";
+                          + std::to_string(container_port) + "}}" };
 
     if (send_api_command(container_pid, json_cmd) == 0) {
         it->second.port_forwards.push_back({host_port, container_port});
@@ -149,16 +148,16 @@ int Network::add_port_forward(const pid_t& container_pid, int host_port, int con
 }
 
 int Network::remove_port_forward(const pid_t& container_pid, int host_port) {
-    auto it = container_networks.find(container_pid);
-    if (it == container_networks.end()) {
+    auto it{ m_container_networks.find(container_pid) };
+    if (it == m_container_networks.end()) {
         return -1;
     }
 
-    std::string json_cmd = "{\"execute\": \"remove_hostfwd\", \"arguments\": {\"proto\": \"tcp\", \"host_port\": "
-                          + std::to_string(host_port) + "}}";
+    std::string json_cmd{ "{\"execute\": \"remove_hostfwd\", \"arguments\": {\"proto\": \"tcp\", \"host_port\": "
+                          + std::to_string(host_port) + "}}" };
 
     if (send_api_command(container_pid, json_cmd) == 0) {
-        auto& forwards = it->second.port_forwards;
+        auto& forwards{ it->second.port_forwards };
         forwards.erase(
             std::remove_if(forwards.begin(), forwards.end(),
                           [host_port](const std::pair<int, int>& p) { return p.first == host_port; }),
@@ -171,40 +170,52 @@ int Network::remove_port_forward(const pid_t& container_pid, int host_port) {
     return -1;
 }
 
+int Network::connect_namespaces(const pid_t &target_pid, int host_port, int target_port) {
+    std::string json_cmd =
+        "{\"execute\": \"add_hostfwd\", \"arguments\": {"
+        "\"proto\": \"tcp\", "
+        "\"host_addr\": \"127.0.0.1\", "
+        "\"host_port\": " + std::to_string(host_port) + ", "
+        "\"guest_addr\": \"10.0.2.100\", "
+        "\"guest_port\": " + std::to_string(target_port) +
+        "}}";
+
+    if (send_api_command(target_pid, json_cmd) == 0) {
+
+        std::cout << "Internal Link Established: Host(127.0.0.1):" << host_port
+                  << " -> Container(" << target_pid << "):" << target_port << '\n';
+        return 0;
+    }
+    std::cerr << "Failed to establish internal link for PID " << target_pid << '\n';
+    return -1;
+}
+
 std::string Network::get_container_ip(const pid_t& container_pid) {
     return "10.0.2.100";
 }
 
 std::string Network::get_api_socket_path(const pid_t& container_pid) {
-    auto it = container_networks.find(container_pid);
-    if (it != container_networks.end()) {
-        return it->second.api_socket;
-    }
-    return "";
+    std::string api_socket { "/tmp/slirp4netns-" + std::to_string(container_pid) + ".sock" };
+    return api_socket;
 }
 
 bool Network::ping_container(const pid_t& container_pid) {
-    std::string container_ip = get_container_ip(container_pid);
+    std::string container_ip{ get_container_ip(container_pid) };
     std::string ping_cmd = "ping -c 1 -W 1 " + container_ip + " > /dev/null 2>&1";
 
     return system(ping_cmd.c_str()) == 0;
 }
 
 int Network::send_api_command(const pid_t& container_pid, const std::string& json_command) {
-    auto it = container_networks.find(container_pid);
-    if (it == container_networks.end()) {
-        return -1;
-    }
+    std::string socket_path{ get_api_socket_path(container_pid) };
 
-    std::string socket_path = it->second.api_socket;
-
-    int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    int sock{ socket(AF_UNIX, SOCK_STREAM, 0) };
     if (sock == -1) {
         std::cerr << "Failed to create socket" << '\n';
         return -1;
     }
 
-    struct sockaddr_un addr;
+    sockaddr_un addr{};
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
@@ -223,7 +234,7 @@ int Network::send_api_command(const pid_t& container_pid, const std::string& jso
     }
 
     char response[1024];
-    ssize_t received = recv(sock, response, sizeof(response) - 1, 0);
+    ssize_t received{ recv(sock, response, sizeof(response) - 1, 0) };
     if (received > 0) {
         response[received] = '\0';
     }
@@ -233,13 +244,13 @@ int Network::send_api_command(const pid_t& container_pid, const std::string& jso
 }
 
 int Network::cleanup_networking(const pid_t& container_pid) {
-    auto it = container_networks.find(container_pid);
-    if (it == container_networks.end()) {
+    auto it{ m_container_networks.find(container_pid) };
+    if (it == m_container_networks.end()) {
         return 0;
     }
 
-    pid_t slirp_pid = it->second.slirp_pid;
-    std::string api_socket = it->second.api_socket;
+    pid_t slirp_pid{ it->second.slirp_pid };
+    std::string api_socket{ it->second.api_socket };
 
     if (slirp_pid > 0) {
         kill(slirp_pid, SIGTERM);
@@ -255,7 +266,7 @@ int Network::cleanup_networking(const pid_t& container_pid) {
 
     unlink(api_socket.c_str());
 
-    container_networks.erase(it);
+    m_container_networks.erase(it);
 
     std::cout << "Network cleanup complete for container " << container_pid << '\n';
     return 0;
@@ -278,7 +289,7 @@ int Network::wait_for_api_socket(const std::string& socket_path, int timeout_ms)
 }
 
 Network::~Network() {
-    for (const auto& pair : container_networks) {
+    for (const auto& pair : m_container_networks) {
         cleanup_networking(pair.first);
     }
 }

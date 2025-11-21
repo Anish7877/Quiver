@@ -5,7 +5,7 @@
 extern std::vector<std::string> volumes;
 extern std::vector<std::string> commands;
 extern std::string image_name;
-extern std::string container_name;
+extern std::string container_id;
 extern pid_t container_pid;
 
 class CommandLineHandler {

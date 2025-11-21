@@ -7,6 +7,7 @@
 #include "../include/container_management.hpp"
 #include <cstdlib>
 #include <iostream>
+#include <sqlite3.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <sys/mount.h>
@@ -20,6 +21,7 @@ std::string Container::m_new_fs{ "" };
 std::vector<std::string> Container::m_volumes{};
 std::vector<std::string> Container::m_commands{};
 std::vector<std::pair<int,int>> Container::m_forward_ports{};
+Network Container::m_network_manager{};
 Terminal Container::m_term{};
 Terminal::PtyArgs Container::m_pty_args{};
 std::string Container::m_image_name{ "" };
@@ -28,7 +30,8 @@ Container::Container(const std::string& hostname,
                      const std::string& new_fs,
                      const std::vector<std::string>& volumes,
                      const std::vector<std::pair<int,int>>& ports,
-                     const std::string& container_id, DatabaseManager& db, 
+                     const std::string& container_id,
+                     DatabaseManager& db,
                      const std::string& image_name)
     : m_db(&db), m_container_id(container_id) {
     m_new_hostname = hostname;
@@ -43,12 +46,24 @@ void Container::exec(const std::string& program_path, const std::vector<std::str
     run(program_path, m_container_id);
 }
 
+int Container::stop(const pid_t& container_pid){
+    m_network_manager.cleanup_networking(container_pid);
+    m_term.cleanup(m_term.get_sfd(), m_pty_args.master_fd);
+    m_db->manual_cleanup();
+    kill(container_pid, SIGTERM);
+    return 0;
+}
+
 void Container::set_filesystem(const std::string& path){
     m_new_fs = path;
 }
 
 void Container::connect_to_server(const pid_t& container_pid){
     m_term.connect_to_server(container_pid);
+}
+
+void Container::connect_to_other_container(const pid_t& target_pid, int host_port, int target_port){
+    m_network_manager.connect_namespaces(target_pid, host_port, target_port);
 }
 
 void Container::manage_container(const std::string& path, const std::string& filesystem_dir) {
@@ -127,12 +142,12 @@ void Container::manage_container(const std::string& path, const std::string& fil
         close(parent_to_child_pipe[1]);
 
         if(m_forward_ports.empty()){
-            if(Network::setup_networking(m_child_pid) != 0){
+            if(m_network_manager.setup_networking(m_child_pid) != 0){
                 Utils::handle_error("Unable to setup networking");
             }
         }
         else{
-            if(Network::setup_networking_with_ports(m_child_pid, m_forward_ports) != 0){
+            if(m_network_manager.setup_networking_with_ports(m_child_pid, m_forward_ports) != 0){
                 Utils::handle_error("Unable to setup networking");
             }
         }
@@ -144,7 +159,6 @@ void Container::manage_container(const std::string& path, const std::string& fil
 
         int status{};
         waitpid(m_child_pid, &status, 0);
-
         m_db->update_container_status(m_container_id, "exited");
         exit(EXIT_SUCCESS);
     }

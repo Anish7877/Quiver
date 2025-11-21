@@ -1,5 +1,6 @@
 #include "../include/database_manager.hpp"
 #include <iostream>
+#include <sqlite3.h>
 #include <stdexcept>
 
 DatabaseManager::DatabaseManager(const std::string& db_path) : m_db(nullptr), m_db_path(db_path) {
@@ -67,6 +68,12 @@ bool DatabaseManager::init_db() {
     }
 
     return true;
+}
+
+void DatabaseManager::manual_cleanup(){
+    if(m_db){
+        sqlite3_close(m_db);
+    }
 }
 
 bool DatabaseManager::add_container(const ContainerObject& container) {

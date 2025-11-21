@@ -38,6 +38,7 @@ public:
     ~DatabaseManager();
 
     bool init_db();
+    void manual_cleanup();
 
     bool add_container(const ContainerObject& container);
     ContainerObject get_container(const std::string& container_id);
