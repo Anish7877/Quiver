@@ -43,7 +43,6 @@ class Container{
         static std::vector<std::string> m_volumes;
         static std::vector<std::string> m_commands;
         static std::vector<std::pair<int,int>> m_forward_ports;
-        static Network m_network_manager;
         static Terminal m_term;
         static Terminal::PtyArgs m_pty_args;
         static std::string m_image_name;

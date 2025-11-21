@@ -21,7 +21,6 @@ std::string Container::m_new_fs{ "" };
 std::vector<std::string> Container::m_volumes{};
 std::vector<std::string> Container::m_commands{};
 std::vector<std::pair<int,int>> Container::m_forward_ports{};
-Network Container::m_network_manager{};
 Terminal Container::m_term{};
 Terminal::PtyArgs Container::m_pty_args{};
 std::string Container::m_image_name{ "" };
@@ -47,7 +46,6 @@ void Container::exec(const std::string& program_path, const std::vector<std::str
 }
 
 int Container::stop(const pid_t& container_pid){
-    m_network_manager.cleanup_networking(container_pid);
     m_term.cleanup(m_term.get_sfd(), m_pty_args.master_fd);
     m_db->manual_cleanup();
     kill(container_pid, SIGTERM);
@@ -63,7 +61,7 @@ void Container::connect_to_server(const pid_t& container_pid){
 }
 
 void Container::connect_to_other_container(const pid_t& target_pid, int host_port, int target_port){
-    m_network_manager.connect_namespaces(target_pid, host_port, target_port);
+    Network::connect_namespaces(target_pid, host_port, target_port);
 }
 
 void Container::manage_container(const std::string& path, const std::string& filesystem_dir) {
@@ -142,12 +140,12 @@ void Container::manage_container(const std::string& path, const std::string& fil
         close(parent_to_child_pipe[1]);
 
         if(m_forward_ports.empty()){
-            if(m_network_manager.setup_networking(m_child_pid) != 0){
+            if(Network::setup_networking(m_child_pid) != 0){
                 Utils::handle_error("Unable to setup networking");
             }
         }
         else{
-            if(m_network_manager.setup_networking_with_ports(m_child_pid, m_forward_ports) != 0){
+            if(Network::setup_networking_with_ports(m_child_pid, m_forward_ports) != 0){
                 Utils::handle_error("Unable to setup networking");
             }
         }
