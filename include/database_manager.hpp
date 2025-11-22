@@ -59,6 +59,8 @@ public:
     bool add_image(const std::string& image_name, const std::string& image_path, long long image_size);
     bool remove_image(const std::string& image_name);
 
+    bool create_ports(const std::string& container_id, const std::vector<std::pair<int, int>>& ports);
+
 private:
     sqlite3* m_db;
     std::string m_db_path;

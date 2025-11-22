@@ -10,7 +10,7 @@
 ContainerManager::ContainerManager(DatabaseManager& db) : m_db(db) {}
 
 // Creates a new container and saves it to the database
-std::string ContainerManager::create_container(const std::string& container_id, const pid_t& container_pid, const std::string& container_name, const std::string& filesystem_path, const std::string& image_name) {
+bool ContainerManager::create_container(const std::string& container_id, const pid_t& container_pid, const std::string& container_name, const std::string& filesystem_path, const std::string& image_name) {
     ContainerObject c;
     c.id = container_id;
     c.pid = container_pid;
@@ -22,10 +22,10 @@ std::string ContainerManager::create_container(const std::string& container_id, 
     c.pty_shell = "/bin/sh";  // TODO: Need to update later based on actual shell used
 
     if (!m_db.add_container(c)) {
-        return "";
+        return false;
     }
 
-    return container_id;
+    return true;
 }
 
 ContainerObject ContainerManager::get_container_info(const std::string& container_id) {

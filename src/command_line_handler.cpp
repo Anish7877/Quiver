@@ -200,6 +200,7 @@ void CommandLineHandler::image(DatabaseManager& db_manager, ImageManager& img_ma
     }
 }
 
+// TODO: Need to TEST
 void CommandLineHandler::volume(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds.size() != 1){
         Utils::print_usage();
@@ -218,6 +219,7 @@ void CommandLineHandler::volume(DatabaseManager& db_manager, const std::vector<s
     // baaki abhi not sure
 }
 
+// TODO: Need to TEST
 void CommandLineHandler::create(DatabaseManager& db_manager, ImageManager& img, const std::vector<std::string>& cmds){
     if(cmds[0] == "container"){
         std::vector<std::string> new_cmds{ cmds };
@@ -267,6 +269,7 @@ void CommandLineHandler::pull(DatabaseManager& db_manager, const std::vector<std
     root_fs = out_path;
 }
 
+// TODO: Need to update container_pid & status
 void CommandLineHandler::start(DatabaseManager& db_manager, const std::vector<std::string>& cmds){
     if(cmds.size() != 1){
         std::cout << "Error: Container id is required\n";
@@ -274,12 +277,13 @@ void CommandLineHandler::start(DatabaseManager& db_manager, const std::vector<st
         return;
     }
     container_id = cmds[0];
-    if (db_manager.update_container_status(cmds[0], "running")) {
-        std::cout << "Container " << cmds[0] << " running successfully.\n";
+    if (db_manager.update_container_status(container_id, "running")) {
+        std::cout << "Container " << container_id << " running successfully.\n";
     } else {
-        std::cout << "Failed to update status of " << cmds[0] << " to RUNNING.\n";
+        std::cout << "Failed to update status of " << container_id << " to RUNNING.\n";
         return;
     }
+
     ContainerObject container_obj{ db_manager.get_container(container_id) };
     std::string container_name{ container_obj.name };
     image_name = container_obj.image;
@@ -288,11 +292,7 @@ void CommandLineHandler::start(DatabaseManager& db_manager, const std::vector<st
     for(const VolumeObject& vol : vols){
         volumes.emplace_back(vol.host_path + ":" + vol.container_path);
     }
-    /*
-     *
-     * forward ports after database of networks
-     *
-     */
+    
     Container container{ container_name, root_fs, volumes, forward_ports, container_id, db_manager, image_name };
     container.exec("/bin/bash", commands);
 }

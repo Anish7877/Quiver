@@ -27,16 +27,18 @@ bool DatabaseManager::init_db() {
         "hostname TEXT,"
         "filesystem_path TEXT,"
         "pty_shell TEXT"
-        ");" };
+        ");" 
+    };
 
     const char* create_volumes_table{
         "CREATE TABLE IF NOT EXISTS volumes ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "container_name TEXT,"
+        "container_id TEXT,"
         "host_path TEXT NOT NULL,"
         "container_path TEXT NOT NULL,"
-        "FOREIGN KEY(container_name) REFERENCES containers(name)"
-        ");" };
+        "FOREIGN KEY(container_id) REFERENCES containers(id)"
+        ");" 
+    };
 
     const char* create_images_table{
         "CREATE TABLE IF NOT EXISTS images ("
@@ -46,7 +48,18 @@ bool DatabaseManager::init_db() {
         "path TEXT NOT NULL,"
         "size INT NOT NULL,"
         "created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
-        ");" };
+        ");" 
+    };
+
+    const char* create_networks_table{
+        "CREATE TABLE IF NOT EXISTS networks ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "container_id TEXT,"
+        "host_port INT NOT NULL,"
+        "container_port INT NOT NULL,"
+        "FOREIGN KEY(container_id) REFERENCES containers(id)"
+        ");"
+    };
 
     char* err_msg{ nullptr };
     if (sqlite3_exec(m_db, create_containers_table, 0, 0, &err_msg) != SQLITE_OK) {
@@ -62,6 +75,12 @@ bool DatabaseManager::init_db() {
     }
 
     if (sqlite3_exec(m_db, create_images_table, 0, 0, &err_msg) != SQLITE_OK) {
+        std::cerr << "SQL error: " << err_msg << std::endl;
+        sqlite3_free(err_msg);
+        return false;
+    }
+
+    if (sqlite3_exec(m_db, create_networks_table, 0, 0, &err_msg) != SQLITE_OK) {
         std::cerr << "SQL error: " << err_msg << std::endl;
         sqlite3_free(err_msg);
         return false;
@@ -85,14 +104,14 @@ bool DatabaseManager::add_container(const ContainerObject& container) {
         return false;
     }
 
-    sqlite3_bind_text(stmt, 1, container.id.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, container.name.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 3, container.image.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 1, container.id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, container.name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, container.image.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 4, container.pid);
-    sqlite3_bind_text(stmt, 5, container.status.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 6, container.hostname.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 7, container.filesystem_path.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 8, container.pty_shell.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 5, container.status.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 6, container.hostname.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 7, container.filesystem_path.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 8, container.pty_shell.c_str(), -1, SQLITE_TRANSIENT);
 
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
@@ -106,7 +125,7 @@ ContainerObject DatabaseManager::get_container(const std::string& container_id) 
     ContainerObject container{};
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, container_id.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 1, container_id.c_str(), -1, SQLITE_TRANSIENT);
         if (sqlite3_step(stmt) == SQLITE_ROW) {
             container.id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
             container.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
@@ -125,18 +144,29 @@ ContainerObject DatabaseManager::get_container(const std::string& container_id) 
 
 bool DatabaseManager::update_container_status(const std::string& container_id, const std::string& status) {
     const char* sql = "UPDATE containers SET status = ? WHERE id = ?;";
-    sqlite3_stmt* stmt;
+    sqlite3_stmt* stmt{nullptr};
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(m_db) << std::endl;
         return false;
     }
 
-    sqlite3_bind_text(stmt, 1, status.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, container_id.c_str(), -1, SQLITE_STATIC);
+    if (sqlite3_bind_text(stmt, 1, status.c_str(), -1, SQLITE_TRANSIENT) != SQLITE_OK ||
+        sqlite3_bind_text(stmt, 2, container_id.c_str(), -1, SQLITE_TRANSIENT) != SQLITE_OK) {
+        std::cerr << "Failed to bind parameters: " << sqlite3_errmsg(m_db) << std::endl;
+        sqlite3_finalize(stmt);
+        return false;
+    }
 
-    bool result = (sqlite3_step(stmt) == SQLITE_DONE);
+    int rc = sqlite3_step(stmt);
+    if (rc != SQLITE_DONE) {
+        std::cerr << "Failed to execute statement: " << sqlite3_errmsg(m_db) << std::endl;
+        sqlite3_finalize(stmt);
+        return false;
+    }
+
     sqlite3_finalize(stmt);
-    return result;
+    return true;
 }
 
 bool DatabaseManager::update_container_pid(const std::string& container_id, pid_t pid) {
@@ -148,7 +178,7 @@ bool DatabaseManager::update_container_pid(const std::string& container_id, pid_
     }
 
     sqlite3_bind_int(stmt, 1, pid);
-    sqlite3_bind_text(stmt, 2, container_id.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, container_id.c_str(), -1, SQLITE_TRANSIENT);
 
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
@@ -162,7 +192,7 @@ bool DatabaseManager::remove_container(const std::string& container_name) {
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         return false;
     }
-    sqlite3_bind_text(stmt, 1, container_name.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 1, container_name.c_str(), -1, SQLITE_TRANSIENT);
 
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
@@ -250,9 +280,9 @@ bool DatabaseManager::add_volume(const VolumeObject& volume) {
         return false;
     }
 
-    sqlite3_bind_text(stmt, 1, volume.container_name.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, volume.host_path.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 3, volume.container_path.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 1, volume.container_name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, volume.host_path.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, volume.container_path.c_str(), -1, SQLITE_TRANSIENT);
 
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
@@ -265,7 +295,7 @@ std::vector<VolumeObject> DatabaseManager::get_container_volumes(const std::stri
     std::vector<VolumeObject> volumes;
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, container_id.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 1, container_id.c_str(), -1, SQLITE_TRANSIENT);
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             VolumeObject v;
             v.id = sqlite3_column_int(stmt, 0);
@@ -319,7 +349,7 @@ bool DatabaseManager::update_container_name_in_volumes(const int& volume_id, con
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         return false;
     }
-    sqlite3_bind_text(stmt, 1, container_name.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 1, container_name.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(stmt, 2, volume_id);
 
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
@@ -346,9 +376,9 @@ bool DatabaseManager::add_image(const std::string& image_name, const std::string
         return false;
     }
 
-    sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, tag.c_str(), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 3, image_path.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, tag.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, image_path.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(stmt, 4, image_size);
 
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
@@ -363,7 +393,7 @@ bool DatabaseManager::remove_image(const std::string& image_name) {
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         return false;
     }
-    sqlite3_bind_text(stmt, 1, image_name.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 1, image_name.c_str(), -1, SQLITE_TRANSIENT);
 
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
@@ -389,6 +419,48 @@ std::vector<ImageObject> DatabaseManager::list_all_images() {
     }
     sqlite3_finalize(stmt);
     return images;
+}
+
+bool DatabaseManager::create_ports(const std::string& container_id, const std::vector<std::pair<int, int>>& ports) {
+    const char* query = "INSERT INTO networks (container_id, host_port, container_port) VALUES (?, ?, ?);";
+    sqlite3_stmt* stmt = nullptr;
+    char* err_msg = nullptr;
+
+    // Start transaction for bulk insert
+    if (sqlite3_exec(m_db, "BEGIN TRANSACTION;", nullptr, nullptr, &err_msg) != SQLITE_OK) {
+        sqlite3_free(err_msg);
+        return false;
+    }
+
+    if (sqlite3_prepare_v2(m_db, query, -1, &stmt, nullptr) != SQLITE_OK) {
+        sqlite3_exec(m_db, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+    }
+
+    for (const auto& pr : ports) {
+        sqlite3_bind_text(stmt, 1, container_id.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 2, pr.first);
+        sqlite3_bind_int(stmt, 3, pr.second);
+
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            sqlite3_finalize(stmt);
+            sqlite3_exec(m_db, "ROLLBACK;", nullptr, nullptr, nullptr);
+            return false;
+        }
+
+        sqlite3_reset(stmt);
+        sqlite3_clear_bindings(stmt);
+    }
+
+    sqlite3_finalize(stmt);
+
+    if (sqlite3_exec(m_db, "COMMIT;", nullptr, nullptr, &err_msg) != SQLITE_OK) {
+        sqlite3_free(err_msg);
+        sqlite3_exec(m_db, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+    }
+
+    return true;
 }
 
 int DatabaseManager::exec_callback(void* data, int argc, char** argv, char** azColName) {

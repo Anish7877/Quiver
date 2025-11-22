@@ -151,13 +151,23 @@ void Container::manage_container(const std::string& path, const std::string& fil
         }
 
         ContainerManager containerManager(*m_db);
-        containerManager.create_container(m_container_id, m_child_pid, "", filesystem_dir, m_image_name);
+        if(!containerManager.create_container(m_container_id, m_child_pid, "", filesystem_dir, m_image_name)) {
+            Utils::handle_error("Unable to log container to database");
+        }
+
+        if (!m_db->create_ports(m_container_id, m_forward_ports)) {
+            Utils::handle_error("Unable to log port forwards to database");
+        }
 
         m_term.start_server(m_pty_args, m_container_id ,m_child_pid);
 
         int status{};
         waitpid(m_child_pid, &status, 0);
-        m_db->update_container_status(m_container_id, "exited");
+
+        if (!m_db->update_container_status(m_container_id, "exited")) {
+            Utils::handle_error("Unable to update container status to EXITED");
+        }
+        
         exit(EXIT_SUCCESS);
     }
 }
