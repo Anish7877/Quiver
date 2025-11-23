@@ -58,9 +58,12 @@ int main(int argc, char* argv[]) {
         commands["volume"] = [](DatabaseManager& db[[maybe_unused]],
                                 ImageManager& img[[maybe_unused]],
                                 const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::volume(db, args); };
+        commands["network"] = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::network(db, args); };
         commands["create"] = [](DatabaseManager& db[[maybe_unused]],
                                 ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::create(db, img, args); };
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::create(db, args); };
         commands["pull"]   = [](DatabaseManager& db[[maybe_unused]],
                                 ImageManager& img[[maybe_unused]],
                                 const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::pull(db, args); };

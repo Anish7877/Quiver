@@ -20,11 +20,9 @@ class Network {
         static int connect_namespaces(const pid_t& target_pid, int host_port, int target_port);
 
         static pid_t get_net_pid() { return m_net_pid; }
-        static std::string get_container_ip(const pid_t& container_pid);
         static std::string get_api_socket_path(const pid_t& container_pid);
         static bool is_running();
 
-        static bool ping_container(const pid_t& container_pid);
         static int send_api_command(const pid_t& container_pid, const std::string& json_command);
 
         static int cleanup_networking(const pid_t& container_pid);

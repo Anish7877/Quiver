@@ -47,11 +47,6 @@ bool ImageManager::remove(const std::string& image_name, std::string& error) {
         return false;
     }
 
-    if (!db_manager.remove_image(image_name)) {
-        error = "Failed to remove image from database: " + image_name;
-        return false;
-    }
-
     std::cout << "Removing image at " << image_path << '\n';
     std::string rm_command = "rm -rf " + image_path;
     if (system(rm_command.c_str()) != 0) {

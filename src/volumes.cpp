@@ -1,6 +1,5 @@
 #include "../include/volumes.hpp"
 #include "../include/utils.hpp"
-#include "../include/mount.hpp"
 #include <iostream>
 
 VolumeManager::VolumeManager(const std::vector<std::string>& volumes,
@@ -33,7 +32,7 @@ void VolumeManager::create_volume(const std::vector<std::string>& volumes, const
             }
 
             VolumeObject v;
-            v.container_name = m_container_id;
+            v.container_id = m_container_id;
             v.host_path = volume_spec.substr(0, pos);
             v.container_path = volume_spec.substr(pos + 1);
 
@@ -42,7 +41,6 @@ void VolumeManager::create_volume(const std::vector<std::string>& volumes, const
             }
         }
     }
-    Mount::volumes(m_rootfs, m_volumes);
 }
 
 void VolumeManager::remove_volume(const std::vector<std::string>& volumes){
@@ -72,7 +70,7 @@ void VolumeManager::link_volume(const std::vector<std::string>& volumes,const st
         }
 
         VolumeObject v;
-        v.container_name = containers[i];
+        v.container_id = containers[i];
         v.host_path = volumes[i].substr(0, pos);
         v.container_path = volumes[i].substr(pos + 1);
 

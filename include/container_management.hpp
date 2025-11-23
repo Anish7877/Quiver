@@ -8,7 +8,15 @@ class ContainerManager {
     public:
         explicit ContainerManager(DatabaseManager& db);
 
-        bool create_container(const std::string& container_id, const pid_t& container_pid, const std::string& container_name, const std::string& filesystem_path, const std::string& image_name);
+        bool create_container(const std::string& container_id,
+                              const pid_t& container_pid,
+                              const pid_t& net_pid,
+                              const std::string& container_name,
+                              const std::string& filesystem_path,
+                              const std::string& image_name,
+                              bool vfs,
+                              bool no_remove,
+                              const std::string& vfs_path);
 
         ContainerObject get_container_info(const std::string& container_id);
 

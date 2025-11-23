@@ -24,7 +24,6 @@ class ImageManager {
         DatabaseManager& db_manager;
         std::string base_cache_path;
 
-        // Progress Tracking
         struct DownloadProgress {
             long long total = 0;
             long long downloaded = 0;

@@ -17,30 +17,37 @@ class Container{
         };
 
         explicit Container() = default;
-        explicit Container(const std::string& hostname,
+        explicit Container(const std::string& container_name,
+                           const std::string& hostname,
                            const std::string& new_fs,
-                           const std::vector<std::string>& volumes,
+                           const std::vector<VolumeObject>& volumes,
                            const std::vector<std::pair<int,int>>& ports,
                            const std::string& container_id,
                            DatabaseManager& db,
-                           const std::string& image_name);
+                           const std::string& image_name,
+                           bool vfs,
+                           bool no_remove);
         ~Container() {};
         void exec(const std::string& program_path, const std::vector<std::string>& commands);
-        int stop(const pid_t& container_pid);
+        void stop(const pid_t& container_pid, const pid_t& net_pid);
         void set_filesystem(const std::string& path);
         void connect_to_server(const pid_t& container_pid);
         void connect_to_other_container(const pid_t& target_pid, int host_port, int target_port);
     private:
+        static void secure_kill(const pid_t& pid);
         void manage_container(const std::string& path, const std::string& filesystem_dir);
         void setup_user_namespace();
         void run(const std::string& path, const std::string& container_id);
         void run_container(const ContainerArgs& args);
-        DatabaseManager* m_db;
-        std::string m_container_id{};
+        static DatabaseManager* m_db;
+        static std::string m_container_id;
+        static std::string m_container_name;
+        static bool m_vfs;
+        static bool m_no_remove;
         static pid_t m_child_pid;
         static std::string m_new_fs;
         static std::string m_new_hostname;
-        static std::vector<std::string> m_volumes;
+        static std::vector<VolumeObject> m_volumes;
         static std::vector<std::string> m_commands;
         static std::vector<std::pair<int,int>> m_forward_ports;
         static Terminal m_term;

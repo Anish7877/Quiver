@@ -1,30 +1,35 @@
 #include "../include/container_management.hpp"
-#include "../include/utils.hpp"
 #include <openssl/sha.h>
-#include <sstream>
-#include <iomanip>
-#include <chrono>
-#include <random>
 #include <iostream>
 
 ContainerManager::ContainerManager(DatabaseManager& db) : m_db(db) {}
 
-// Creates a new container and saves it to the database
-bool ContainerManager::create_container(const std::string& container_id, const pid_t& container_pid, const std::string& container_name, const std::string& filesystem_path, const std::string& image_name) {
-    ContainerObject c;
+bool ContainerManager::create_container(const std::string& container_id,
+                                        const pid_t& container_pid,
+                                        const pid_t& net_pid,
+                                        const std::string& container_name,
+                                        const std::string& filesystem_path,
+                                        const std::string& image_name,
+                                        bool vfs,
+                                        bool no_remove,
+                                        const std::string& vfs_path) {
+    ContainerObject c{};
     c.id = container_id;
     c.pid = container_pid;
+    c.net_pid = net_pid;
     c.name = container_name.empty() ? "quiver-" + container_id.substr(0, 12) : container_name;
     c.image = image_name;
     c.status = "running";
     c.hostname = container_id.substr(0, 6);
     c.filesystem_path = filesystem_path;
     c.pty_shell = "/bin/sh";  // TODO: Need to update later based on actual shell used
+    c.vfs = vfs;
+    c.no_remove = no_remove;
+    c.vfs_path = vfs_path;
 
     if (!m_db.add_container(c)) {
         return false;
     }
-
     return true;
 }
 

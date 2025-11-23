@@ -36,15 +36,14 @@ void Mount::bind_rec_mount(const std::string &src, const std::string &dst, const
         Utils::handle_error("Unable to bind and rec mount " + src + " to " + dst);
 }
 
-void Mount::volumes(const std::string& rootfs, const std::vector<std::string> volumes, const std::string& options){
+void Mount::volumes(const std::string& rootfs, const std::vector<VolumeObject> volumes, const std::string& options){
     size_t no_volumes{ volumes.size() };
     if(no_volumes > 0){
         std::vector<std::string> paths{};
         std::vector<std::string> dirs{};
         for(size_t i{0};i<no_volumes;++i){
-            size_t pos{ volumes[i].find(':') };
-            paths.emplace_back(volumes[i].substr(0,pos));
-            dirs.emplace_back(volumes[i].substr(pos+1));
+            paths.emplace_back(volumes[i].host_path);
+            dirs.emplace_back(volumes[i].container_path);
         }
         for(size_t i{0};i<dirs.size();++i){
             dirs[i] = rootfs + dirs[i];

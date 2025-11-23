@@ -190,20 +190,9 @@ int Network::connect_namespaces(const pid_t &target_pid, int host_port, int targ
     return -1;
 }
 
-std::string Network::get_container_ip(const pid_t& container_pid) {
-    return "10.0.2.100";
-}
-
 std::string Network::get_api_socket_path(const pid_t& container_pid) {
     std::string api_socket { "/tmp/slirp4netns-" + std::to_string(container_pid) + ".sock" };
     return api_socket;
-}
-
-bool Network::ping_container(const pid_t& container_pid) {
-    std::string container_ip{ get_container_ip(container_pid) };
-    std::string ping_cmd = "ping -c 1 -W 1 " + container_ip + " > /dev/null 2>&1";
-
-    return system(ping_cmd.c_str()) == 0;
 }
 
 int Network::send_api_command(const pid_t& container_pid, const std::string& json_command) {

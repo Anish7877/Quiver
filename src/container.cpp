@@ -7,49 +7,81 @@
 #include "../include/container_management.hpp"
 #include <cstdlib>
 #include <iostream>
-#include <sqlite3.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <sys/mount.h>
 #include <sys/sysmacros.h>
 #include <cstring>
-#include <utility>
 
+bool Container::m_vfs{ false };
+bool Container::m_no_remove{ false };
 pid_t Container::m_child_pid{ -1 };
-std::string Container::m_new_hostname{ "container" };
-std::string Container::m_new_fs{ "" };
-std::vector<std::string> Container::m_volumes{};
+DatabaseManager* Container::m_db{nullptr};
+std::string Container::m_container_name{""};
+std::string Container::m_container_id{""};
+std::string Container::m_new_hostname{""};
+std::string Container::m_new_fs{""};
+std::vector<VolumeObject> Container::m_volumes{};
 std::vector<std::string> Container::m_commands{};
 std::vector<std::pair<int,int>> Container::m_forward_ports{};
 Terminal Container::m_term{};
 Terminal::PtyArgs Container::m_pty_args{};
 std::string Container::m_image_name{ "" };
 
-Container::Container(const std::string& hostname,
+Container::Container(const std::string& container_name,
+                     const std::string& hostname,
                      const std::string& new_fs,
-                     const std::vector<std::string>& volumes,
+                     const std::vector<VolumeObject>& volumes,
                      const std::vector<std::pair<int,int>>& ports,
                      const std::string& container_id,
                      DatabaseManager& db,
-                     const std::string& image_name)
-    : m_db(&db), m_container_id(container_id) {
+                     const std::string& image_name,
+                     bool vfs,
+                     bool no_remove){
     m_new_hostname = hostname;
     m_new_fs = new_fs;
     m_volumes = volumes;
     m_forward_ports = ports;
     m_image_name = image_name;
+    m_vfs = vfs;
+    m_no_remove = no_remove;
+    m_db = &db;
+    m_container_id = container_id;
+    m_container_name = container_name;
 }
 
-void Container::exec(const std::string& program_path, const std::vector<std::string>& commands){
+void Container::exec(const std::string& program_path, const std::vector<std::string>& commands) {
     m_commands = commands;
     run(program_path, m_container_id);
 }
 
-int Container::stop(const pid_t& container_pid){
-    m_term.cleanup(m_term.get_sfd(), m_pty_args.master_fd);
-    m_db->manual_cleanup();
-    kill(container_pid, SIGTERM);
-    return 0;
+void Container::secure_kill(const pid_t& pid) {
+    if (pid <= 0) return;
+
+    if (kill(pid, 0) != 0) {
+        if (errno == ESRCH) return;
+    }
+
+    kill(pid, SIGTERM);
+
+    for (int i = 0; i < 10; ++i) {
+        usleep(100000);
+        if (kill(pid, 0) != 0) {
+            if (errno == ESRCH) return;
+        }
+    }
+    kill(pid, SIGKILL);
+}
+
+void Container::stop(const pid_t& container_pid, const pid_t& net_pid) {
+    secure_kill(container_pid);
+    if (net_pid > 0) {
+        secure_kill(net_pid);
+    }
+    std::string api_socket = "/tmp/slirp4netns-" + std::to_string(container_pid) + ".sock";
+    if (unlink(api_socket.c_str()) == 0) {
+        std::cout << "Cleaned up network socket: " << api_socket << '\n';
+    }
 }
 
 void Container::set_filesystem(const std::string& path){
@@ -150,13 +182,41 @@ void Container::manage_container(const std::string& path, const std::string& fil
             }
         }
 
-        ContainerManager containerManager(*m_db);
-        if(!containerManager.create_container(m_container_id, m_child_pid, "", filesystem_dir, m_image_name)) {
-            Utils::handle_error("Unable to log container to database");
-        }
+        std::string db_path{ Utils::get_base_dir() + "/quiver.db" };
+        DatabaseManager local_db{ db_path };
+        ContainerManager containerManager(local_db);
 
-        if (!m_db->create_ports(m_container_id, m_forward_ports)) {
-            Utils::handle_error("Unable to log port forwards to database");
+        if(local_db.container_exists(m_container_id)){
+            if(!local_db.update_container_pid(m_container_id, m_child_pid)){
+                Utils::handle_error("Error: Unable to update container pid");
+            }
+            if(!local_db.update_container_status(m_container_id, "running")){
+                 std::cerr << "Warning: Could not update status to running\n";
+            }
+        }
+        else{
+            if(!containerManager.create_container(m_container_id,
+                                                  m_child_pid,
+                                                  Network::get_net_pid(),
+                                                  m_container_name,
+                                                  m_new_fs,
+                                                  m_image_name,
+                                                  m_vfs,
+                                                  m_no_remove,
+                                                  m_vfs ? filesystem_dir : "")) {
+                Utils::handle_error("Unable to log container to database");
+            }
+
+            for(VolumeObject& volume : m_volumes){
+                volume.container_id = m_container_id;
+                if(!local_db.add_volume(volume)){
+                    Utils::handle_error("Unable to add volume " + volume.host_path + " to " + volume.container_path);
+                }
+            }
+
+            if (!local_db.create_ports(m_container_id, m_forward_ports)) {
+                Utils::handle_error("Unable to log port forwards to database");
+            }
         }
 
         m_term.start_server(m_pty_args, m_container_id ,m_child_pid);
@@ -164,27 +224,41 @@ void Container::manage_container(const std::string& path, const std::string& fil
         int status{};
         waitpid(m_child_pid, &status, 0);
 
-        if (!m_db->update_container_status(m_container_id, "exited")) {
+        if (!local_db.update_container_status(m_container_id, "exited")) {
             Utils::handle_error("Unable to update container status to EXITED");
         }
-        
+        if(m_vfs && !m_no_remove && local_db.container_exists(m_container_id)){
+            std::string command{ "rm -rf " + filesystem_dir };
+            if(system(command.c_str()) != 0){
+                Utils::handle_error("Error: Cannot remove virtual filesystem");
+            }
+        }
+
         exit(EXIT_SUCCESS);
     }
 }
 
 void Container::run(const std::string& path, const std::string& container_id) {
 
+    std::string filesystem_dir{};
     pid_t temp_pid{ getpid() };
-    std::string filesystem_dir{ Utils::get_filesystem_path(temp_pid) };
-    std::string upper { filesystem_dir + "/upper" };
-    std::string merged { filesystem_dir + "/merged" };
-    std::string work  { filesystem_dir + "/work" };
+    if(!m_db->container_exists(container_id)){
+        filesystem_dir =  m_vfs ? Utils::get_vfs_path(temp_pid) : Utils::get_filesystem_path(temp_pid);
+        if(!m_vfs){
+            std::string upper { filesystem_dir + "/upper" };
+            std::string merged { filesystem_dir + "/merged" };
+            std::string work  { filesystem_dir + "/work" };
 
-    Utils::ensure_dirs(upper);
-    Utils::ensure_dirs(work);
-    Utils::ensure_dirs(merged);
+            Utils::ensure_dirs(upper);
+            Utils::ensure_dirs(work);
+            Utils::ensure_dirs(merged);
+        }
+    }
+    else{
+        filesystem_dir = m_vfs ? m_db->get_container(container_id).vfs_path : Utils::get_filesystem_path(temp_pid);
+    }
 
-    std::cerr << "Preparing container filesystem directories..." << '\n';
+    std::cout << filesystem_dir << '\n';
 
     pid_t manager_pid{ fork() };
     if (manager_pid == ERR) {
@@ -198,7 +272,7 @@ void Container::run(const std::string& path, const std::string& container_id) {
         close(m_pty_args.slave_fd);
 
         std::cerr << "Container started." << '\n';
-        std::cerr << "To attach, run: quiver attach " << manager_pid << '\n';
+        std::cerr << "To attach, run: quiver attach " << m_container_id << '\n';
 
         int status{};
         waitpid(manager_pid, &status, 0);
@@ -216,12 +290,18 @@ void Container::run_container(const ContainerArgs& args) {
         Utils::handle_error("Unable to set hostname of container");
 
     std::string filesystem_path{ args.filesystem_dir };
-    std::string merged { filesystem_path + "/merged" };
-    std::string upper { filesystem_path + "/upper" };
-    std::string work { filesystem_path + "/work" };
-    Utils::ensure_dirs(merged);
-    Utils::ensure_dirs(upper);
-    Utils::ensure_dirs(work);
+    std::string final_filesystem{};
+    if(m_vfs){
+        final_filesystem = filesystem_path;
+        Utils::ensure_dirs(final_filesystem);
+        std::string copy_command = "cp -a '" + m_new_fs + "/.' '" + final_filesystem + "'";
+        if(system(copy_command.c_str()) != 0){
+            Utils::handle_error("Error: Cannot copy root filesystem");
+        }
+    }
+    else{
+        final_filesystem = filesystem_path + "/merged";
+    }
 
     std::cerr << "DEBUG: Container init PID: " << getpid() << '\n';
 
@@ -230,32 +310,36 @@ void Container::run_container(const ContainerArgs& args) {
     }
 
     std::cerr << "DEBUG: Mounting overlayfs..." << '\n';
-    std::string overlay_options { "lowerdir=" + args.rootfs_path +
-                                  ",upperdir=" + upper +
-                                  ",workdir=" + work };
+    if(!m_vfs){
+        std::string upper { filesystem_path + "/upper" };
+        std::string work { filesystem_path + "/work" };
+        std::string overlay_options { "lowerdir=" + args.rootfs_path +
+                                      ",upperdir=" + upper +
+                                      ",workdir=" + work };
 
-    if (mount("overlay", merged.c_str(), "overlay", MS_NODEV, overlay_options.c_str()) == ERR) {
-        std::cerr << "ERROR: Failed to mount overlayfs: " << strerror(errno) << '\n';
-        std::cerr << "DEBUG: Options were: " << overlay_options << '\n';
-        Utils::handle_error("Cannot mount overlay filesystem");
+        if (mount("overlay", final_filesystem.c_str(), "overlay", MS_NODEV, overlay_options.c_str()) == ERR) {
+            std::cerr << "ERROR: Failed to mount overlayfs: " << strerror(errno) << '\n';
+            std::cerr << "DEBUG: Options were: " << overlay_options << '\n';
+            Utils::handle_error("Cannot mount overlay filesystem");
+        }
+
+        std::cerr << "DEBUG: Overlay mounted successfully at: " << final_filesystem << '\n';
+        std::cerr << "DEBUG: Setting up merged as mount point..." << '\n';
     }
 
-    std::cerr << "DEBUG: Overlay mounted successfully at: " << merged << '\n';
-    std::cerr << "DEBUG: Setting up merged as mount point..." << '\n';
-
-    if (mount(merged.c_str(), merged.c_str(), NULL, MS_BIND | MS_REC, NULL) == ERR) {
-        Utils::handle_error("Unable to bind mount merged");
+    if (mount(final_filesystem.c_str(), final_filesystem.c_str(), NULL, MS_BIND | MS_REC, NULL) == ERR) {
+        Utils::handle_error("Unable to bind mount final_filesystem");
     }
 
-    if (mount(NULL, merged.c_str(), NULL, MS_PRIVATE | MS_REC, NULL) == ERR) {
-        Utils::handle_error("Unable to make merged private");
+    if (mount(NULL, final_filesystem.c_str(), NULL, MS_PRIVATE | MS_REC, NULL) == ERR) {
+        Utils::handle_error("Unable to make final_filesystem private");
     }
 
-    if (chdir(merged.c_str()) == ERR) {
-        Utils::handle_error("Unable to change directory to " + merged);
+    if (chdir(final_filesystem.c_str()) == ERR) {
+        Utils::handle_error("Unable to change directory to " + final_filesystem);
     }
 
-    Mount::volumes(merged,m_volumes);
+    Mount::volumes(final_filesystem,m_volumes);
     std::cerr << "DEBUG: Creating old_root..." << '\n';
     Utils::ensure_dirs("old_root");
     std::cerr << "DEBUG: Performing pivot_root..." << '\n';
@@ -309,18 +393,18 @@ void Container::run_container(const ContainerArgs& args) {
     setenv("TERM", "xterm", 0);
     setenv("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", 1);
 
+    const char* shell{ nullptr };
+    const char* shells[]{ "/bin/bash", "/bin/sh", "/bin/ash", nullptr };
+
+    for (int i = 0; shells[i] != nullptr; i++) {
+        if(Utils::path_exists(shells[i])){
+            shell = shells[i];
+            break;
+        }
+    }
+
     if (!args.commands.empty()) {
         std::cerr << "DEBUG: Executing " << args.commands.size() << " commands" << '\n';
-
-        const char* shell{ nullptr };
-        const char* shells[]{ "/bin/bash", "/bin/sh", "/bin/ash", nullptr };
-        struct stat st;
-
-        for (int i = 0; shells[i] != nullptr; i++) {
-            if(Utils::path_exists(shell)){
-                shell = shells[i];
-            }
-        }
 
         if (shell == nullptr) {
             Utils::handle_error("No shell found to execute commands");
@@ -330,22 +414,17 @@ void Container::run_container(const ContainerArgs& args) {
         for (size_t i = 0; i < args.commands.size(); i++) {
             cmd_string += args.commands[i];
             if (i < args.commands.size() - 1) {
-                cmd_string += " && ";
+                cmd_string += " ";
             }
         }
-
         std::cerr << "DEBUG: Executing: " << cmd_string << '\n';
-
-        execl(shell, shell, "-c", cmd_string.c_str(), (char*)nullptr);
-
+        execl(shell, shell, "-c", cmd_string.c_str(), (char*)0);
         std::cerr << "ERROR: execl failed, errno=" << errno << " (" << strerror(errno) << ")" << '\n';
         Utils::handle_error("Failed to execute commands");
-    } else {
-        std::cerr << "DEBUG: Executing " << args.program_path << '\n';
-        execl(args.program_path.c_str(), args.program_path.c_str(), (char*)nullptr);
-
-        std::cerr << "ERROR: execl failed, errno=" << errno
-                  << " (" << strerror(errno) << ")" << '\n';
+    }
+    else {
+        execl(shell, shell, (char*)0);
+        std::cerr << "ERROR: execl failed, errno=" << errno << " (" << strerror(errno) << ")" << '\n';
         Utils::handle_error("Failed to execute " + args.program_path);
     }
 }

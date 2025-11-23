@@ -266,6 +266,7 @@ void Terminal::cleanup(int sfd, int master_fd){
     if (sfd >= 0) close(sfd);
     if (master_fd >= 0) close(master_fd);
     kill(Network::get_net_pid(),SIGTERM);
+    std::string api_socket = "/tmp/slirp4netns-" + std::to_string(m_container_pid) + ".sock";
     m_running = false;
 }
 Terminal::~Terminal(){

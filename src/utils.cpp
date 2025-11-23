@@ -68,6 +68,11 @@ std::string Utils::get_filesystem_path(const pid_t& pid){
     return path;
 }
 
+std::string Utils::get_vfs_path(const pid_t &pid){
+    std::string path{ get_base_dir() + "/vfs/" + std::to_string(static_cast<long long>(pid)) };
+    return path;
+}
+
 std::string Utils::get_image_path(const std::string& image_name){
     std::string path{ get_base_dir() + "/images/" + image_name};
     ensure_dirs(path);
@@ -75,24 +80,51 @@ std::string Utils::get_image_path(const std::string& image_name){
 }
 
 std::string Utils::get_logs_path(const pid_t& pid){
-    std::string path{ get_base_dir() + "/logs/" + std::to_string(pid) + "/" };
+    std::string path{ get_base_dir() + "/logs/" + std::to_string(static_cast<long long>(pid)) };
     ensure_dirs(path);
     return path;
 }
 
 void Utils::print_usage(){
-    std::cout << "Usage: quiver <command> [options]\n"
-                 "Commands:\n"
-                 "  run <image> [options]       Run a new container from the specified image\n"
-                 "  ps [options]                List containers\n"
-                 "  stop <container_id>         Stop a running container\n"
-                 "  rm <container_id>           Remove a container\n"
-                 "  images                      List available images\n"
-                 "  rmi <image_name>            Remove an image\n"
-                 "  pull <image_name>           Pull an image from a registry\n"
-                 "  exec <container_id> <cmd>   Execute a command in a running container\n"
-                 "  attach <container_id>       Attach to a running container's console\n"
-                 "  help                        Show this help message\n";
+std::cout << "Usage: quiver <command> [options] [arguments]\n\n"
+              << "Commands:\n"
+              << "  run [options] -i <image> [cmd]   Create and start a new container\n"
+              << "      -i, --image <name>           Image to use (required)\n"
+              << "      -n, --name <name>            Assign a name to the container\n"
+              << "      -p, --port <host:cont>       Publish a container's port(s) to the host\n"
+              << "      -v, --volume <host:cont>     Bind mount a volume\n"
+              << "      --vfs                        Use VFS (copy) instead of OverlayFS for package manager related\n"
+              << "      --no-remove                  Do not remove the filesystem after exit\n\n"
+
+              << "  start <container_id> ...         Start one or more stopped containers\n"
+              << "  stop <container_id> ...          Stop one or more running containers\n"
+              << "  rm <container_id> ...            Remove one or more containers\n"
+              << "  attach <container_id>            Attach local standard input, output, and error to a running container\n\n"
+
+              << "  ps [-a]                          List containers\n"
+              << "      -a                           Show all containers (default shows just running)\n\n"
+
+              << "  pull <image_name>                Pull an image from a registry\n"
+              << "  image <subcommand>               Manage images\n"
+              << "      ls                           List available images\n"
+              << "      rm <image:tag>               Remove an image\n"
+              << "      cls <image_name>             List containers using a specific image\n\n"
+
+              << "  volume <subcommand>              Manage volumes\n"
+              << "      ls                           List all volumes\n"
+              << "      rm <volume_id> ...           remove one or more volume links\n\n"
+
+              << "  network <subcommand>             Manage networks\n"
+              << "      ls                           List all network port mappings\n"
+              << "      rm <network_id> ...          remove one or more network links\n\n"
+
+              << "  create <subcommand>              Create resources\n"
+              << "      volume <container_id> [args]                 \n"
+              << "                  <host:cont> ...  Create a volume link for container\n"
+              << "      network <container_id> [args]                \n"
+              << "                  <host:cont> ...  Create a network link for container\n\n"
+
+              << "  help                             Show this help message\n";
 }
 
 std::string Utils::generate_container_id() {
