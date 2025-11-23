@@ -1,7 +1,7 @@
 <p align="left">
-  <img src="./logo.png" alt="Quiver Logo" width="400" height="400" align="left" style="margin-right: 20px;">
+  <img src="./logo.jpg" alt="Quiver Logo" width="400" height="400" align="left" style="margin-right: 20px;">
 </p>
-<div style="padding-top: 60px;">
+<div style="padding-top: 70px;">
   <h1 style="font-size: 48px; margin: 0;">Quiver</h1>
   <p style="font-size: 20px; margin: 5px 0 0 0;">A Lightweight, Rootless Container Runtime for Linux</p>
 </div>
