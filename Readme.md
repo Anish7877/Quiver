@@ -1,20 +1,10 @@
-<table>
-  <tr>
-    <td style="vertical-align: middle;">
-      <img src="./logo.jpg" alt="Quiver Logo" width="220">
-    </td>
-
-    <td style="vertical-align: middle; padding-left: 20px;">
-      <h1 style="margin: 0; font-size: 52px; font-weight: 800;">
-        Quiver
-      </h1>
-      <h3 style="margin: 8px 0 0 0; font-size: 22px; font-weight: 500;">
-        A Lightweight, Rootless Container Runtime for Linux
-      </h3>
-    </td>
-  </tr>
-</table>
-
+<div align="center">
+  <img src="./logo.jpg" alt="Quiver Logo" width="300">
+  <h1>Quiver</h1>
+  <p>
+    <strong>A Lightweight, Rootless Container Runtime for Linux</strong>
+  </p>
+</div>
 ## Overview
 
 Quiver is a C++ based container runtime designed to manage and execute rootless containers using Linux namespaces and cgroups. It provides a command-line interface similar to Docker, allowing users to pull images, manage container life-cycles, handle networking via slirp4netns, and manage volumes.
