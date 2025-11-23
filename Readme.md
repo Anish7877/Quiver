@@ -1,14 +1,10 @@
-<table border="0">
-<tr>
-<td width="200">
-<img src="path/to/your/logo.png" alt="Quiver Logo" width="300" height="300">
-</td>
-<td>
-<h1 style="font-size: 48px; margin: 0;">Quiver</h1>
-<p style="font-size: 20px;">A Lightweight, Rootless Container Runtime for Linux</p>
-</td>
-</tr>
-</table>
+<div style="display: flex; align-items: center; border: none;">
+  <img src="./logo.png" alt="Quiver Logo" width="400" height="400" style="margin-right: 30px;">
+  <div>
+    <h1 style="font-size: 48px; margin: 0;">Quiver</h1>
+    <p style="font-size: 20px; margin: 10px 0 0 0;">A Lightweight, Rootless Container Runtime for Linux</p>
+  </div>
+</div>
 
 ## Overview
 
