@@ -1,10 +1,9 @@
-<div style="display: flex; align-items: center; border: none;">
-  <img src="./logo.png" alt="Quiver Logo" width="400" height="400" style="margin-right: 30px;">
-  <div>
-    <h1 style="font-size: 48px; margin: 0;">Quiver</h1>
-    <p style="font-size: 20px; margin: 10px 0 0 0;">A Lightweight, Rootless Container Runtime for Linux</p>
-  </div>
-</div>
+<img src="./logo.png" alt="Quiver Logo" width="400" height="400" align="left">
+
+# Quiver
+A Lightweight, Rootless Container Runtime for Linux
+
+<br clear="left">
 
 ## Overview
 
