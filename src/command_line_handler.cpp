@@ -162,14 +162,18 @@ void CommandLineHandler::rm(DatabaseManager& db_manager, const std::vector<std::
         container_id = cmd;
         ContainerObject container_obj{ db_manager.get_container(container_id) };
 
-        if ((container_obj.status == "stopped" || container_obj.status == "exited") && db_manager.remove_container(container_id)) {
-            db_manager.remove_volumes_by_id(container_id);
-            db_manager.remove_networks_by_id(container_id);
-            std::cout << "Container " << container_id << " removed.\n";
+        if(db_manager.container_exists(container_id)){
+            if ((container_obj.status == "stopped" || container_obj.status == "exited") && db_manager.remove_container(container_id)) {
+                db_manager.remove_volumes_by_id(container_id);
+                db_manager.remove_networks_by_id(container_id);
+                std::cout << "Container " << container_id << " removed.\n";
+            }
+            else {
+                Utils::handle_error(container_id + " is running.");
+            }
         }
-        else {
-            Utils::handle_error(container_id + " is running.");
-            exit(EXIT_FAILURE);
+        else{
+            Utils::handle_error(container_id + " doesn't exist");
         }
     }
 }
