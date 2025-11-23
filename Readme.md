@@ -1,11 +1,19 @@
-<p align="left">
-  <img src="./logo.jpg" alt="Quiver Logo" width="400" height="400" align="left" style="margin-right: 20px;">
-</p>
-<div style="padding-top: 70px;">
-  <h1 style="font-size: 48px; margin: 0;">Quiver</h1>
-  <p style="font-size: 20px; margin: 5px 0 0 0;">A Lightweight, Rootless Container Runtime for Linux</p>
-</div>
-<br clear="left">
+<table>
+  <tr>
+    <td style="vertical-align: middle;">
+      <img src="./logo.jpg" alt="Quiver Logo" width="220">
+    </td>
+
+    <td style="vertical-align: middle; padding-left: 20px;">
+      <h1 style="margin: 0; font-size: 52px; font-weight: 800;">
+        Quiver
+      </h1>
+      <h3 style="margin: 8px 0 0 0; font-size: 22px; font-weight: 500;">
+        A Lightweight, Rootless Container Runtime for Linux
+      </h3>
+    </td>
+  </tr>
+</table>
 
 ## Overview
 
@@ -39,7 +47,6 @@ To build and run Quiver, you need a Linux environment with the following depende
 ### Runtime Dependencies
 
 - **slirp4netns**: Required for rootless networking.
-- **uidmap**: For handling user namespace mappings (newuidmap, newgidmap).
 
 ### Install Dependencies (Ubuntu/Debian)
 
