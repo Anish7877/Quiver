@@ -2,20 +2,21 @@ CXX=g++
 STD=-std=c++17
 OPTFLAGS=-O3
 CXXFLAGS=-Wall -Wextra
-DEBUGFLAGS=-g
+LDFLAGS=-lcpr -lcurl -lssl -lcrypto -pthread -lsqlite3 -lutil
+DEBUG_FLAGS=-g
 INCLUDE_DIRS=./include
 SRCDIR=./src
 BINARIES=./bin/release
-DEBUGBINARIES=./bin/debug
+DEBUG_BINARIES=./bin/debug
 BUILDDIR=./build/release
-DEBUGBUILDDIR=./build/debug
+DEBUG_BUILDDIR=./build/debug
 
-DEBUGCPPFLAGS=$(STD) $(CXXFLAGS) $(DEBUGFLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS)
-CPPLAGS=$(STD) $(CXXFLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS)
+DEBUG_CPPFLAGS=$(STD) $(CXXFLAGS) $(DEBUG_FLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS)
+CPPFLAGS=$(STD) $(CXXFLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS)
 
 CPPFILES=$(wildcard $(SRCDIR)/*.cpp)
 OBJECTS=$(patsubst $(SRCDIR)/%.cpp,$(BINARIES)/%.o,$(CPPFILES))
-DEBUGOBJECTS=$(patsubst $(SRCDIR)/%.cpp,$(DEBUGBINARIES)/%.o,$(CPPFILES))
+DEBUG_OBJECTS=$(patsubst $(SRCDIR)/%.cpp,$(DEBUG_BINARIES)/%.o,$(CPPFILES))
 
 all:
 	@echo "Usage: make [options]"
@@ -28,28 +29,28 @@ all:
 
 build-release: $(OBJECTS)
 	@mkdir -p $(BUILDDIR)
-	@$(CXX) -o $(BUILDDIR)/quiver $^
+	@$(CXX) -o $(BUILDDIR)/quiver $^ $(LDFLAGS)
 
 $(BINARIES)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(BINARIES)
 	@echo "Compiling $<"
 	@$(CXX) $(CPPFLAGS) -c $< -o $@
 
-build-debug: $(DEBUGOBJECTS)
-	@mkdir -p $(DEBUGBUILDDIR)
-	@$(CXX) -o $(DEBUGBUILDDIR)quiver $^
+build-debug: $(DEBUG_OBJECTS)
+	@mkdir -p $(DEBUG_BUILDDIR)
+	@$(CXX) -o $(DEBUG_BUILDDIR)/quiver $^ $(LDFLAGS)
 
-$(DEBUGBINARIES)/%.o: $(SRCDIR)/%.cpp
-	@mkdir -p $(DEBUGBINARIES)
+$(DEBUG_BINARIES)/%.o: $(SRCDIR)/%.cpp
+	@mkdir -p $(DEBUG_BINARIES)
 	@echo "Compiling $<"
-	@$(CXX) $(DEBUGCPPFLAGS) -c -o $@ $<
+	@$(CXX) $(DEBUG_CPPFLAGS) -c -o $@ $<
 
 clean:
 	@echo "Cleaning build..."
-	@rm -rf $(BINARIES) $(DEBUGBINARIES) $(BUILDDIR) $(DEBUGBUILDDIR)
+	@rm -rf $(BINARIES) $(DEBUG_BINARIES) $(BUILDDIR) $(DEBUG_BUILDDIR)
 
 run: build-release
 	@$(BUILDDIR)/quiver
 
 run-debug: build-debug
-	@$(BUILDDIR)/quiver
+	@$(DEBUG_BUILDDIR)/quiver
