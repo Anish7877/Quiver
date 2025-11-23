@@ -1,6 +1,6 @@
 <table>
   <tr>
-    <td align="center" width="200px">
+    <td align="center" width="300px">
       <img src="./logo.jpg" alt="Quiver Logo" width="100%"/>
     </td>
     <td align="left">
