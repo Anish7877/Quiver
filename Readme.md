@@ -1,11 +1,11 @@
-<table>
+<table border="0">
 <tr>
-<td width="150">
-<img src="./logo.png" alt="Quiver Logo" width="150" height="150">
+<td width="200">
+<img src="path/to/your/logo.png" alt="Quiver Logo" width="300" height="300">
 </td>
 <td>
-<h1>Quiver</h1>
-<p>A Lightweight, Rootless Container Runtime for Linux</p>
+<h1 style="font-size: 48px; margin: 0;">Quiver</h1>
+<p style="font-size: 20px;">A Lightweight, Rootless Container Runtime for Linux</p>
 </td>
 </tr>
 </table>
