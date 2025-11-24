@@ -99,17 +99,20 @@ int Network::setup_networking_with_ports(const pid_t& pid,
         m_container_networks[pid] = config;
         m_net_pid = slirp_pid;
 
-        if (wait_for_api_socket(api_socket) == 0) {
+        if (wait_for_api_socket(api_socket, 3000) == 0) {
+            usleep(500000);
 
             bool success = true;
             for (const auto& pf : port_forwards) {
                 if (add_port_forward(pid, pf.first, pf.second) != 0) {
                     success = false;
+                } else {
                 }
             }
 
             return success ? 0 : -1;
         } else {
+            std::cerr << "Timeout waiting for slirp4netns API socket" << '\n';
             return -1;
         }
     }
@@ -144,6 +147,7 @@ int Network::add_port_forward(const pid_t& container_pid, int host_port, int con
         return 0;
     }
 
+    std::cerr << "Failed to register port forward" << '\n';
     return -1;
 }
 
@@ -223,9 +227,19 @@ int Network::send_api_command(const pid_t& container_pid, const std::string& jso
     }
 
     char response[1024];
+    memset(response, 0, sizeof(response));
     ssize_t received{ recv(sock, response, sizeof(response) - 1, 0) };
     if (received > 0) {
         response[received] = '\0';
+        if (strstr(response, "\"error\"") != nullptr) {
+            std::cerr << "API command returned error" << '\n';
+            close(sock);
+            return -1;
+        }
+    } else if (received == -1) {
+        std::cerr << "Failed to receive API response: " << strerror(errno) << '\n';
+        close(sock);
+        return -1;
     }
 
     close(sock);
@@ -274,6 +288,7 @@ int Network::wait_for_api_socket(const std::string& socket_path, int timeout_ms)
         elapsed += check_interval;
     }
 
+    std::cerr << "Timeout waiting for API socket: " << socket_path << '\n';
     return -1;
 }
 

@@ -80,6 +80,7 @@ public:
     std::vector<NetworkObject> get_all_networks();
     std::vector<std::pair<int,int>> get_linked_ports(const std::string& container_id);
     void remove_networks_by_id(const std::string& container_id);
+    void remove_network_by_object(const NetworkObject& net_obj);
 
 private:
     sqlite3* m_db;

@@ -141,6 +141,10 @@ void CommandLineHandler::ps(DatabaseManager& db_manager, const std::vector<std::
     else if(cmds.size() == 1 && cmds[0] == "-a"){
         containers = db_manager.list_all_containers();
     }
+    else{
+        Utils::print_usage();
+        return;
+    }
 
     std::cout << "CONTAINER ID\tNAME\tIMAGE\tSTATUS\tCREATED AT\tVFS PATH\n";
     for (const auto& container : containers) {
@@ -337,7 +341,41 @@ void CommandLineHandler::network(DatabaseManager &db_manager, const std::vector<
             }
             ++i;
         }
-   }
+    }
+    else if(cmds[0] == "add"){
+        container_id = cmds.size() >= 2 ? cmds[1] : "";
+        std::string status{};
+        if(container_id.empty()){
+            Utils::print_usage();
+            return;
+        }
+        if(db_manager.container_exists(container_id)){
+            container_pid = db_manager.get_container(container_id).pid;
+            status = db_manager.get_container(container_id).status;
+        }
+        else{
+            Utils::handle_error(container_id + " doesn't exists");
+        }
+        size_t i{ 2 };
+        while(i < cmds.size()){
+            std::string network{ cmds[i] };
+            size_t sep_pos { network.find(':') };
+            if (sep_pos == std::string::npos) {
+                std::cerr << "Invalid network format. Expected host_port:container_port\n";
+                break;
+            }
+            std::string host_port{ network.substr(0, sep_pos) };
+            std::string container_port{ network.substr(sep_pos + 1) };
+            NetworkObject net{};
+            net.container_id = container_id;
+            net.host_port = std::stoi(host_port);
+            net.container_port = std::stoi(container_port);
+            db_manager.add_ports(net);
+            if(status == "running") Network::add_port_forward(container_pid, std::stoi(host_port), std::stoi(container_port));
+            ++i;
+        }
+        if(i == 2) Utils::print_usage();
+    }
     else{
         Utils::print_usage();
     }
@@ -368,31 +406,6 @@ void CommandLineHandler::create(DatabaseManager& db_manager,const std::vector<st
             db_manager.add_volume(volume);
             ++i;
         }
-    }
-    else if(cmds[0] == "network"){
-        size_t i{ 2 };
-        while (i < cmds.size()) {
-            container_id = cmds[1];
-            if(!db_manager.container_exists(container_id)){
-                Utils::handle_error(container_id + " doesn't exists");
-            }
-            std::string network_input{ cmds[i] };
-            size_t sep_pos { network_input.find(':') };
-            if (sep_pos == std::string::npos) {
-                std::cerr << "Invalid network format. Expected host_port:container_port\n";
-                break;
-            }
-            std::string host_port{ network_input.substr(0, sep_pos) };
-            std::string container_port{ network_input.substr(sep_pos + 1) };
-
-            NetworkObject network{};
-            network.container_id = container_id;
-            network.host_port = std::stoi(host_port);
-            network.container_port = std::stoi(container_port);
-            db_manager.add_ports(network);
-            ++i;
-        }
-        if(i == 2) Utils::print_usage();
     }
 }
 

@@ -116,13 +116,12 @@ std::cout << "Usage: quiver <command> [options] [arguments]\n\n"
 
               << "  network <subcommand>             Manage networks\n"
               << "      ls                           List all network port mappings\n"
-              << "      rm <network_id> ...          remove one or more network links\n\n"
-
+              << "      rm <network_id> ...          remove one or more network links\n"
+              << "      add <container_id> [args]                                    \n"
+              << "              <host:cont> ...      add a new network link\n\n"
               << "  create <subcommand>              Create resources\n"
               << "      volume <container_id> [args]                 \n"
               << "                  <host:cont> ...  Create a volume link for container\n"
-              << "      network <container_id> [args]                \n"
-              << "                  <host:cont> ...  Create a network link for container\n\n"
 
               << "  help                             Show this help message\n";
 }

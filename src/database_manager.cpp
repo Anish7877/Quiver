@@ -670,3 +670,24 @@ void DatabaseManager::remove_networks_by_id(const std::string& container_id){
 
     sqlite3_finalize(stmt);
 }
+
+void DatabaseManager::remove_network_by_object(const NetworkObject& net_obj){
+    const char* sql{ "DELETE FROM networks WHERE container_id = ? AND host_port = ? AND container_port = ?;" };
+    sqlite3_stmt* stmt;
+
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare delete volumes statement: " << sqlite3_errmsg(m_db) << '\n';
+        return;
+    }
+
+    sqlite3_bind_text(stmt, 1, net_obj.container_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, net_obj.host_port);
+    sqlite3_bind_int(stmt, 3, net_obj.container_port);
+
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        std::cerr << "Failed to delete volumes for container " << net_obj.container_id << ' ' << net_obj.host_port << ' ' << net_obj.container_port
+                  << ": " << sqlite3_errmsg(m_db) << '\n';
+    }
+
+    sqlite3_finalize(stmt);
+}

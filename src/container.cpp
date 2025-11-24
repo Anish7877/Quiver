@@ -7,11 +7,13 @@
 #include "../include/container_management.hpp"
 #include <cstdlib>
 #include <iostream>
+#include <sched.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <sys/mount.h>
 #include <sys/sysmacros.h>
 #include <cstring>
+#include <net/if.h>
 
 bool Container::m_vfs{ false };
 bool Container::m_no_remove{ false };
@@ -97,6 +99,9 @@ void Container::connect_to_other_container(const pid_t& target_pid, int host_por
 }
 
 void Container::manage_container(const std::string& path, const std::string& filesystem_dir) {
+    if(unshare(CLONE_NEWUSER) == ERR){
+        Utils::handle_error("Unable to clone new usernamespace");
+    }
     ioctl(STDIN_FILENO, TIOCGWINSZ, &m_pty_args.window_size);
     m_term.start_pty_session(m_pty_args);
     if (fork() != 0) {
@@ -121,7 +126,7 @@ void Container::manage_container(const std::string& path, const std::string& fil
         close(parent_to_child_pipe[1]);
         close(child_to_parent_pipe[0]);
 
-        if (unshare(CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNET | CLONE_NEWNS) != 0) {
+        if (unshare(CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNET | CLONE_NEWNS) != 0) {
             Utils::handle_error("unshare failed");
         }
 
@@ -244,21 +249,19 @@ void Container::run(const std::string& path, const std::string& container_id) {
     pid_t temp_pid{ getpid() };
     if(!m_db->container_exists(container_id)){
         filesystem_dir =  m_vfs ? Utils::get_vfs_path(temp_pid) : Utils::get_filesystem_path(temp_pid);
-        if(!m_vfs){
-            std::string upper { filesystem_dir + "/upper" };
-            std::string merged { filesystem_dir + "/merged" };
-            std::string work  { filesystem_dir + "/work" };
-
-            Utils::ensure_dirs(upper);
-            Utils::ensure_dirs(work);
-            Utils::ensure_dirs(merged);
-        }
     }
     else{
         filesystem_dir = m_vfs ? m_db->get_container(container_id).vfs_path : Utils::get_filesystem_path(temp_pid);
     }
+    if(!m_vfs){
+        std::string upper { filesystem_dir + "/upper" };
+        std::string merged { filesystem_dir + "/merged" };
+        std::string work  { filesystem_dir + "/work" };
 
-    std::cout << filesystem_dir << '\n';
+        Utils::ensure_dirs(upper);
+        Utils::ensure_dirs(work);
+        Utils::ensure_dirs(merged);
+    }
 
     pid_t manager_pid{ fork() };
     if (manager_pid == ERR) {
@@ -384,7 +387,14 @@ void Container::run_container(const ContainerArgs& args) {
         resolv << "nameserver 10.0.2.3\n";
         resolv.close();
     }
+    std::ofstream hosts("/etc/hosts");
+    if (hosts.is_open()) {
+        hosts << "127.0.0.1\tlocalhost\n";
+        hosts << "::1\t\tlocalhost ip6-localhost ip6-loopback\n";
+        hosts << "10.0.2.100\t" << args.hostname << "\n";
 
+        hosts.close();
+    }
     if(PackageManager::initialize() == ERR) {
         std::cerr << "Warning: Package manager initialization failed, but continuing..." << '\n';
     }
@@ -430,15 +440,12 @@ void Container::run_container(const ContainerArgs& args) {
 }
 
 void Container::setup_user_namespace() {
-    uid_t host_uid{ getuid() };
-    gid_t host_gid{ getgid() };
+    std::string uid_map{ "0 1000 1\n" };
+    std::string gid_map{ "0 1000 1\n" };
 
-    std::string uid_map{ "0 " + std::to_string(host_uid) + " 1\n" };
-    std::string gid_map{ "0 " + std::to_string(host_gid) + " 1\n" };
-
-    std::string uid_map_path{ "/proc/" + std::to_string(m_child_pid) + "/uid_map" };
-    std::string gid_map_path{ "/proc/" + std::to_string(m_child_pid) + "/gid_map" };
-    std::string setgroups_path{ "/proc/" + std::to_string(m_child_pid) + "/setgroups" };
+    std::string uid_map_path{ "/proc/self/uid_map" };
+    std::string gid_map_path{ "/proc/self/gid_map" };
+    std::string setgroups_path{ "/proc/self/setgroups" };
 
     Utils::write_file(setgroups_path, "deny\n");
     Utils::write_file(gid_map_path, gid_map);
