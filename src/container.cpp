@@ -412,31 +412,9 @@ void Container::run_container(const ContainerArgs& args) {
             break;
         }
     }
-
-    if (!args.commands.empty()) {
-        std::cerr << "DEBUG: Executing " << args.commands.size() << " commands" << '\n';
-
-        if (shell == nullptr) {
-            Utils::handle_error("No shell found to execute commands");
-        }
-
-        std::string cmd_string{};
-        for (size_t i = 0; i < args.commands.size(); i++) {
-            cmd_string += args.commands[i];
-            if (i < args.commands.size() - 1) {
-                cmd_string += " ";
-            }
-        }
-        std::cerr << "DEBUG: Executing: " << cmd_string << '\n';
-        execl(shell, shell, "-c", cmd_string.c_str(), (char*)0);
-        std::cerr << "ERROR: execl failed, errno=" << errno << " (" << strerror(errno) << ")" << '\n';
-        Utils::handle_error("Failed to execute commands");
-    }
-    else {
-        execl(shell, shell, (char*)0);
-        std::cerr << "ERROR: execl failed, errno=" << errno << " (" << strerror(errno) << ")" << '\n';
-        Utils::handle_error("Failed to execute " + args.program_path);
-    }
+    execl(shell, shell, (char*)0);
+    std::cerr << "ERROR: execl failed, errno=" << errno << " (" << strerror(errno) << ")" << '\n';
+    Utils::handle_error("Failed to execute " + args.program_path);
 }
 
 void Container::setup_user_namespace() {
