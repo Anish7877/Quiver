@@ -47,7 +47,17 @@ To build and run Quiver, you need a Linux environment with the following depende
 
 ```bash
 sudo apt update
-sudo apt install build-essential g++ libsqlite3-dev libssl-dev libcurl4-openssl-dev libcpr-dev slirp4netns uidmap
+sudo apt install build-essential g++ libsqlite3-dev libssl-dev libcurl4-openssl-dev slirp4netns nlohmann-json3-dev
+```
+
+### For libcpr
+
+```bash
+git clone https://github.com/libcpr/cpr.git
+cd cpr && mkdir build && cd build
+cmake .. -DCPR_USE_SYSTEM_CURL=ON -DBUILD_SHARED_LIBS=OFF
+cmake --build . --parallel
+sudo cmake --install .
 ```
 
 ## Installation & Build
@@ -167,15 +177,23 @@ echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/00-local-user
 sudo service procps restart
 ```
 
-### 3. AppArmor Errors
+### 3. AppArmor Errors (Must for Ubuntu/Debian)
 
 **Symptom**: Permission denied errors specifically on Ubuntu or Debian-based distributions, referencing AppArmor.
 
 **Fix**: AppArmor profiles may interfere with the container process.
 
+**Temporary Fix**:
+
 ```bash
-sudo systemctl stop apparmor
-sudo systemctl disable apparmor
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+```
+
+**Permanent Fix**:
+
+```bash
+echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/20-apparmor-userns.conf
+sudo sysctl --system
 ```
 
 ## License
