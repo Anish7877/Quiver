@@ -105,7 +105,7 @@ The binary is output to `./build/release/quiver`.
 
 ```bash
 # Run interactive bash shell
-./build/release/quiver run -i ubuntu:latest -n my_container /bin/bash
+./build/release/quiver run -i ubuntu:latest -n my_container
 ```
 
 **List containers**:
