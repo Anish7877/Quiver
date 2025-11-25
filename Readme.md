@@ -27,7 +27,7 @@ Quiver uses SQLite to track container states and supports both OverlayFS and Vir
 
 ## Prerequisites
 
-To build and run Quiver, you need a Linux environment with the following dependencies installed:
+To build and run Quiver, you need a Linux environment or WSL (For Windows) with the following dependencies installed:
 
 ### Build Dependencies
 
@@ -38,6 +38,7 @@ To build and run Quiver, you need a Linux environment with the following depende
   - openssl (libssl, libcrypto)
   - sqlite3 (libsqlite3)
   - libutil
+  - cmake
 
 ### Runtime Dependencies
 
@@ -47,7 +48,7 @@ To build and run Quiver, you need a Linux environment with the following depende
 
 ```bash
 sudo apt update
-sudo apt install build-essential g++ libsqlite3-dev libssl-dev libcurl4-openssl-dev slirp4netns nlohmann-json3-dev
+sudo apt install build-essential g++ libsqlite3-dev libssl-dev libcurl4-openssl-dev slirp4netns nlohmann-json3-dev cmake
 ```
 
 ### For libcpr
