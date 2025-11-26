@@ -34,21 +34,26 @@ void CommandLineHandler::run(DatabaseManager& db, const std::vector<std::string>
                 std::string vol_str{ cmds[++i] };
                 size_t pos{ vol_str.find(':') };
                 if (pos != std::string::npos) {
-                    try {
-                        std::string host{ vol_str.substr(0, pos) };
-                        std::string cont{ vol_str.substr(pos + 1) };
-                        VolumeObject vol{};
-                        vol.host_path = host;
-                        vol.container_path = cont;
-                        volumes.emplace_back(vol);
-                    } catch (...) {
-                        std::cerr << "Error: Invalid port format " << vol_str << "\n";
-                        return;
+                    std::string host_str{ vol_str.substr(0, pos) };
+                    std::string cont_str{ vol_str.substr(pos + 1) };
+
+                    if (host_str.empty() || cont_str.empty()) {
+                        Utils::handle_error("Empty paths cannot be mounted");
                     }
+
+                    if (host_str.front() != '/' || cont_str.front() != '/') {
+                        Utils::handle_error("Paths must be absolute");
+                    }
+
+                    VolumeObject vol{};
+                    vol.host_path = host_str;
+                    vol.container_path = cont_str;
+                    volumes.emplace_back(vol);
                 }
-            } else {
-                std::cerr << "Error: -v or --volume requires an argument\n";
-                return;
+                else {
+                    std::cerr << "Error: -v or --volume requires an argument\n";
+                    return;
+                }
             }
         }
         else if (arg == "-p" || arg == "--port") {
@@ -88,16 +93,8 @@ void CommandLineHandler::run(DatabaseManager& db, const std::vector<std::string>
         else if (arg == "-i" || arg == "--image") {
             if (i + 1 < cmds.size()) {
                 image_name = cmds[++i];
-
-                i++;
-                while(i < cmds.size()) {
-                    commands.emplace_back(cmds[i++]);
-                }
-                break;
-            } else {
-                std::cerr << "Error: -i requires an image name\n";
-                return;
             }
+
         }
         else {
             std::cerr << "Unknown argument: " << arg << "\n";
@@ -451,15 +448,15 @@ void CommandLineHandler::start(DatabaseManager& db_manager, const std::vector<st
 
     Container container{
         container_name,
-        container_id.substr(0,6),
-        container_obj.filesystem_path,
-        vols,
-        forward_ports,
-        container_id,
-        db_manager,
-        image_name,
-        container_obj.vfs,
-        container_obj.no_remove
+            container_id.substr(0,6),
+            container_obj.filesystem_path,
+            vols,
+            forward_ports,
+            container_id,
+            db_manager,
+            image_name,
+            container_obj.vfs,
+            container_obj.no_remove
     };
 
     if (db_manager.update_container_status(container_id, "running")) {
