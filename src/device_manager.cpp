@@ -5,6 +5,7 @@
 #include <cstring>
 #include <unistd.h>
 #include <sys/sysmacros.h>
+#include <fcntl.h>
 #include <iostream>
 
 void DeviceManager::create_terminal_devices(){
