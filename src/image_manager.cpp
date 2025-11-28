@@ -11,7 +11,7 @@
 
 ImageManager::ImageManager(DatabaseManager& db_manager)
     : db_manager(db_manager) {
-    const char* home_dir = std::getenv("HOME");
+    const char* home_dir{ std::getenv("HOME") };
     if (home_dir != nullptr) {
         base_cache_path = std::string(home_dir) + "/.quiver/images";
     }
@@ -27,7 +27,6 @@ bool ImageManager::pull(const std::string& image_name, std::string& out_path, st
         return false;
     }
 
-    // Add image to database
     long long image_size = get_directory_size(out_path);
     if (!db_manager.add_image(image_name, out_path, image_size)) {
         error = "Failed to register image in database: " + image_name;
@@ -48,11 +47,8 @@ bool ImageManager::remove(const std::string& image_name, std::string& error) {
     }
 
     std::cout << "Removing image at " << image_path << '\n';
-    std::string rm_command = "rm -rf " + image_path;
-    if (system(rm_command.c_str()) != 0) {
-        error = "Error removing image.";
-        db_manager.add_image(image_name, image_path, get_directory_size(image_path));
-        return false;
+    if(Utils::remove_directory_recursively(image_path) == ERR){
+        Utils::handle_error("Unable to remove " + image_name);
     }
     std::cout << "Image removed successfully." << '\n';
     return true;
@@ -68,8 +64,9 @@ bool ImageManager::get_image(const std::string& image_name, std::string& out_pat
     std::cout << "Image not in local storage. Pulling from registry..." << '\n';
     if (!pull_image_from_registry(image_name, out_path, error)) {
         if (Utils::path_exists(out_path)) {
-            std::string rm_command = "rm -rf " + out_path;
-            system(rm_command.c_str());
+            if(Utils::remove_directory_recursively(out_path) == ERR){
+                Utils::handle_error("Unable to remove "+out_path);
+            }
         }
         error = "Failed to pull image. Reason: " + error;
         return false;
@@ -254,16 +251,15 @@ void ImageManager::print_progress() {
 }
 
 bool ImageManager::extract_layer(const std::string& tarball_path, const std::string& destination_path, std::string& error) {
-    std::string command = "tar -xzf " + tarball_path + " -C " + destination_path;
-    if (system(command.c_str()) != 0) {
-        error = "Failed to extract layer " + tarball_path;
+    if(!Utils::extract_tarball(tarball_path, destination_path)){
+        error = "Unable to extract layer " + tarball_path;
         return false;
     }
     return true;
 }
 
 bool ImageManager::download_and_extract_layers(const json& manifest, const std::string& repo, const std::string& token, const std::string& destination_path, std::string& error) {
-    system(("mkdir -p " + destination_path).c_str());
+    Utils::ensure_dirs(destination_path);
 
     if (!manifest.contains("layers") || manifest["layers"].empty()) {
         error = "Manifest does not contain any 'layers'.";

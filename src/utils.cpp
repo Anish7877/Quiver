@@ -9,6 +9,8 @@
 #include <openssl/sha.h>
 #include <random>
 #include <chrono>
+#include <dirent.h>
+#include <sys/wait.h>
 
 bool Utils::path_exists(const std::string& path){
     struct stat st{};
@@ -104,7 +106,7 @@ std::cout << "Usage: quiver <command> [options] [arguments]\n\n"
               << "  ps [-a]                          List containers\n"
               << "      -a                           Show all containers (default shows just running)\n\n"
 
-              << "  pull <image_name>                Pull an image from a registry\n"
+              << "  pull <image_name>                Pull an image from a registry\n\n"
               << "  image <subcommand>               Manage images\n"
               << "      ls                           List available images\n"
               << "      rm <image:tag>               Remove an image\n"
@@ -121,7 +123,8 @@ std::cout << "Usage: quiver <command> [options] [arguments]\n\n"
               << "              <host:cont> ...      add a new network link\n\n"
               << "  create <subcommand>              Create resources\n"
               << "      volume <container_id> [args]                 \n"
-              << "                  <host:cont> ...  Create a volume link for container\n"
+              << "                  <host:cont> ...  Create a volume link for container\n\n"
+              << "  cache remove                     remove cache for all container [ Note : use this with sudo ]\n\n"
 
               << "  help                             Show this help message\n";
 }
@@ -144,4 +147,60 @@ std::string Utils::generate_container_id() {
     }
 
     return hexString;
+}
+
+int Utils::remove_directory_recursively(const std::string& path) {
+    DIR* dir = opendir(path.c_str());
+    if (!dir) {
+        return ERR;
+    }
+    dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        std::string full_path{ path + "/" + entry->d_name };
+        struct stat statbuf;
+        if (lstat(full_path.c_str(), &statbuf) == ERR) {
+            continue;
+        }
+        if (S_ISDIR(statbuf.st_mode)) {
+            if (remove_directory_recursively(full_path) == ERR) {
+            }
+        } else {
+            unlink(full_path.c_str());
+        }
+    }
+    closedir(dir);
+
+    return rmdir(path.c_str());
+}
+
+bool Utils::extract_tarball(const std::string& tarball_path, const std::string& destination_path) {
+    pid_t pid{ fork() };
+
+    if (pid == ERR) {
+        perror("fork failed");
+        return false;
+    }
+    else if (pid == 0) {
+        execlp("tar", "tar", "-xzf", tarball_path.c_str(), "-C", destination_path.c_str(), NULL);
+        perror("execlp failed");
+        exit(ERR);
+    }
+    else {
+        int status{};
+        waitpid(pid, &status, 0);
+
+        if (WIFEXITED(status)) {
+            int exit_code = WEXITSTATUS(status);
+            if (exit_code == 0) {
+                return true;
+            } else {
+                std::cerr << "Tar exited with error code: " << exit_code << std::endl;
+                return false;
+            }
+        }
+    }
+    return false;
 }

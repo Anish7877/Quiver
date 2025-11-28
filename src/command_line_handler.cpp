@@ -4,6 +4,7 @@
 #include "../include/command_line_handler.hpp"
 #include "../include/container.hpp"
 #include <cstdlib>
+#include <unistd.h>
 #include <vector>
 #include <iostream>
 

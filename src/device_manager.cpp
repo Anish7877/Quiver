@@ -47,16 +47,16 @@ void DeviceManager::create_terminal_devices(){
     unlink("/dev/ptmx");
     if (symlink("pts/ptmx", "/dev/ptmx") == ERR) {
         std::cerr << "DEBUG: symlink /dev/ptmx failed, trying bind mount: " << strerror(errno) << '\n';
-        // Try bind mounting from old root
         int fd{ open("/dev/ptmx", O_CREAT | O_RDONLY, 0666) };
         if (fd >= 0) close(fd);
         Mount::bind_mount("/old_root/dev/ptmx", "/dev/ptmx");
     }
 
-    symlink("/proc/self/fd", "/dev/fd");
-    symlink("/proc/self/fd/0", "/dev/stdin");
-    symlink("/proc/self/fd/1", "/dev/stdout");
-    symlink("/proc/self/fd/2", "/dev/stderr");
+    if(symlink("/proc/self/fd", "/dev/fd") == ERR) Utils::handle_error("Unable to create symlink for /proc/self/fd");
+    if(symlink("/proc/self/fd/0", "/dev/stdin") == ERR) Utils::handle_error("Unable to create symlink for /proc/self/fd/0");
+    if(symlink("/proc/self/fd/1", "/dev/stdout") == ERR) Utils::handle_error("Unable to create symlink for /proc/self/fd/1");
+    if(symlink("/proc/self/fd/2", "/dev/stderr") == ERR) Utils::handle_error("Unable to create symlink for /proc/self/fd/2");
+;
 
     Utils::ensure_dirs("/dev/shm");
     if (mount("shm", "/dev/shm", "tmpfs", MS_NOSUID | MS_NODEV, "mode=1777") == ERR) {

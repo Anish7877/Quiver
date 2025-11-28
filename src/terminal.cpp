@@ -2,6 +2,7 @@
 #include "../include/utils.hpp"
 #include "../include/network.hpp"
 #include "../include/database_manager.hpp"
+#include "../include/container.hpp"
 #include <cstdlib>
 #include <pty.h>
 #include <termios.h>
@@ -265,8 +266,6 @@ void Terminal::connect_to_server(const int& container_pid){
 void Terminal::cleanup(int sfd, int master_fd){
     if (sfd >= 0) close(sfd);
     if (master_fd >= 0) close(master_fd);
-    kill(Network::get_net_pid(),SIGTERM);
-    std::string api_socket = "/tmp/slirp4netns-" + std::to_string(m_container_pid) + ".sock";
     m_running = false;
 }
 Terminal::~Terminal(){

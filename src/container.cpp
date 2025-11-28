@@ -232,13 +232,12 @@ void Container::manage_container(const std::string& path, const std::string& fil
         if (!local_db.update_container_status(m_container_id, "exited")) {
             Utils::handle_error("Unable to update container status to EXITED");
         }
-        if(m_vfs && !m_no_remove && local_db.container_exists(m_container_id)){
-            std::string command{ "rm -rf " + filesystem_dir };
-            if(system(command.c_str()) != 0){
-                Utils::handle_error("Error: Cannot remove virtual filesystem");
+        if(!m_no_remove && local_db.container_exists(m_container_id)){
+            if(Utils::remove_directory_recursively(filesystem_dir) == ERR){
+                Utils::handle_error("Unable to remove overlayfs dir");
             }
         }
-
+        secure_kill(Network::get_net_pid());
         exit(EXIT_SUCCESS);
     }
 }
@@ -251,7 +250,7 @@ void Container::run(const std::string& path, const std::string& container_id) {
         filesystem_dir =  m_vfs ? Utils::get_vfs_path(temp_pid) : Utils::get_filesystem_path(temp_pid);
     }
     else{
-        filesystem_dir = m_vfs ? m_db->get_container(container_id).vfs_path : Utils::get_filesystem_path(temp_pid);
+        filesystem_dir = m_vfs ? (m_no_remove ? m_db->get_container(container_id).vfs_path : Utils::get_vfs_path(temp_pid)) : Utils::get_filesystem_path(temp_pid);
     }
     if(!m_vfs){
         std::string upper { filesystem_dir + "/upper" };
