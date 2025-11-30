@@ -1,4 +1,5 @@
 #include "../include/database_manager.hpp"
+#include "../include/utils.hpp"
 #include <iostream>
 #include <sqlite3.h>
 #include <stdexcept>
@@ -157,7 +158,7 @@ ContainerObject DatabaseManager::get_container(const std::string& container_id) 
 }
 
 bool DatabaseManager::update_container_status(const std::string& container_id, const std::string& status) {
-    const char* sql = "UPDATE containers SET status = ? WHERE id = ?;";
+    const char* sql = "update containers set status = ? where id = ?;";
     sqlite3_stmt* stmt{nullptr};
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
@@ -689,5 +690,21 @@ void DatabaseManager::remove_network_by_object(const NetworkObject& net_obj){
                   << ": " << sqlite3_errmsg(m_db) << '\n';
     }
 
+    sqlite3_finalize(stmt);
+}
+
+void DatabaseManager::remove_vfs(const std::string& container_id){
+    const char* sql = "update containers set vfs_path = NULL where id = ?;";
+    sqlite3_stmt* stmt;
+
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        Utils::handle_error("Failed to prepre statements to remove vfs");
+    }
+
+    sqlite3_bind_text(stmt, 1, container_id.c_str(), -1, SQLITE_TRANSIENT);
+
+    if(sqlite3_step(stmt) == SQLITE_DONE){
+        Utils::handle_error("Failed to remove vfs path");
+    }
     sqlite3_finalize(stmt);
 }

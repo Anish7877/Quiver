@@ -124,8 +124,7 @@ std::cout << "Usage: quiver <command> [options] [arguments]\n\n"
               << "  create <subcommand>              Create resources\n"
               << "      volume <container_id> [args]                 \n"
               << "                  <host:cont> ...  Create a volume link for container\n\n"
-              << "  cache remove                     remove cache for all container [ Note : use this with sudo ]\n\n"
-
+              << "  vfs rm <container_id>            remove vfs for a container\n\n"
               << "  help                             Show this help message\n";
 }
 
@@ -150,7 +149,7 @@ std::string Utils::generate_container_id() {
 }
 
 int Utils::remove_directory_recursively(const std::string& path) {
-    DIR* dir = opendir(path.c_str());
+    DIR* dir{ opendir(path.c_str()) };
     if (!dir) {
         return ERR;
     }

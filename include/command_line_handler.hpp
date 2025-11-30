@@ -24,4 +24,5 @@ public:
     static void pull(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
     static void start(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
     static void stop(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
+    static void vfs(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
 };

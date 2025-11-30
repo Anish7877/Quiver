@@ -82,6 +82,8 @@ public:
     void remove_networks_by_id(const std::string& container_id);
     void remove_network_by_object(const NetworkObject& net_obj);
 
+    void remove_vfs(const std::string& container_id);
+
 private:
     sqlite3* m_db;
     std::string m_db_path;

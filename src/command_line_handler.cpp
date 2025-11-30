@@ -17,7 +17,7 @@ std::string container_name{""};
 pid_t container_pid{-1};
 std::string root_fs{""};
 std::string err{""};
-bool vfs{false};
+bool vfs_f{false};
 bool no_remove{false};
 
 
@@ -44,6 +44,9 @@ void CommandLineHandler::run(DatabaseManager& db, const std::vector<std::string>
 
                     if (host_str.front() != '/' || cont_str.front() != '/') {
                         Utils::handle_error("Paths must be absolute");
+                    }
+                    if (!Utils::path_exists(host_str)){
+                        Utils::handle_error("Host path " + host_str + " doesn't exist");
                     }
 
                     VolumeObject vol{};
@@ -86,7 +89,7 @@ void CommandLineHandler::run(DatabaseManager& db, const std::vector<std::string>
             }
         }
         else if(arg == "--vfs"){
-            vfs = true;
+            vfs_f = true;
         }
         else if(arg == "--no-remove"){
             no_remove = true;
@@ -112,7 +115,7 @@ void CommandLineHandler::run(DatabaseManager& db, const std::vector<std::string>
 
     CommandLineHandler::pull(db, {image_name});
     container_id = Utils::generate_container_id();
-    Container container{ container_name, container_id.substr(0,6), root_fs, volumes, forward_ports, container_id, db, image_name, vfs, no_remove };
+    Container container{ container_name, container_id.substr(0,6), root_fs, volumes, forward_ports, container_id, db, image_name, vfs_f, no_remove };
     container.exec("/bin/bash", commands);
 }
 
@@ -165,6 +168,11 @@ void CommandLineHandler::rm(DatabaseManager& db_manager, const std::vector<std::
         ContainerObject container_obj{ db_manager.get_container(container_id) };
 
         if(db_manager.container_exists(container_id)){
+            if(!container_obj.vfs_path.empty()){
+                if(Utils::remove_directory_recursively(container_obj.vfs_path) == ERR){
+                    Utils::handle_error("Unable to remove container");
+                }
+            }
             if ((container_obj.status == "stopped" || container_obj.status == "exited") && db_manager.remove_container(container_id)) {
                 db_manager.remove_volumes_by_id(container_id);
                 db_manager.remove_networks_by_id(container_id);
@@ -494,5 +502,38 @@ void CommandLineHandler::stop(DatabaseManager& db_manager, const std::vector<std
         std::cout << "Container " << container_id << " stopped successfully.\n";
     } else {
         std::cout << "Failed to update status of " << container_id << " in database.\n";
+    }
+}
+
+void CommandLineHandler::vfs(DatabaseManager &db_manager, const std::vector<std::string> &cmds){
+    if(cmds.size() != 2){
+        Utils::print_usage();
+        return;
+    }
+    if(cmds[0] == "rm"){
+        container_id = cmds[1];
+        if(db_manager.container_exists(container_id)){
+            if(db_manager.get_container(container_id).no_remove){
+                std::string vfs_path{ db_manager.get_container(container_id).vfs };
+                if(!vfs_path.empty()){
+                    if(Utils::remove_directory_recursively(vfs_path) == ERR){
+                        Utils::handle_error("Unable to remove vfs path");
+                    }
+                    db_manager.remove_vfs(container_id);
+                }
+                else{
+                    Utils::handle_error(container_id + " have no vfs linked");
+                }
+            }
+            else{
+                Utils::handle_error("--no-remove flag was not specified while starting container");
+            }
+        }
+        else{
+            Utils::handle_error("Provided " + container_id + " doesn't exist");
+        }
+    }
+    else{
+        Utils::print_usage();
     }
 }

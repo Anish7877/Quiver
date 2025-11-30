@@ -296,7 +296,7 @@ void Container::run_container(const ContainerArgs& args) {
     if(m_vfs){
         final_filesystem = filesystem_path;
         Utils::ensure_dirs(final_filesystem);
-        std::string copy_command = "cp -a '" + m_new_fs + "/.' '" + final_filesystem + "'";
+        std::string copy_command{ "cp -a '" + m_new_fs + "/.' '" + final_filesystem + "'" };
         if(system(copy_command.c_str()) != 0){
             Utils::handle_error("Error: Cannot copy root filesystem");
         }

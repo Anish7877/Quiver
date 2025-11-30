@@ -66,6 +66,9 @@ int main(int argc, char* argv[]) {
         commands["pull"]   = [](DatabaseManager& db[[maybe_unused]],
                                 ImageManager& img[[maybe_unused]],
                                 const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::pull(db, args); };
+        commands["vfs"]   = [](DatabaseManager& db[[maybe_unused]],
+                                ImageManager& img[[maybe_unused]],
+                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::vfs(db, args); };
         commands["help"]   = [](DatabaseManager& db[[maybe_unused]],
                                 ImageManager& img[[maybe_unused]],
                                 const std::vector<std::string>& args[[maybe_unused]]){ Utils::print_usage(); };
