@@ -45,5 +45,4 @@ class ImageManager {
         std::string get_image_path(const std::string& imageName) const;
         bool path_exists(const std::string& path) const;
         std::string parse_auth_header(const std::string& header, const std::string& key);
-        static long long get_directory_size(const std::string& path);
 };

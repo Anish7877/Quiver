@@ -27,11 +27,10 @@ bool ImageManager::pull(const std::string& image_name, std::string& out_path, st
         return false;
     }
 
-    long long image_size = get_directory_size(out_path);
-    if (!db_manager.add_image(image_name, out_path, image_size)) {
+    if (!db_manager.add_image(image_name, out_path)) {
         error = "Failed to register image in database: " + image_name;
+        return false;
     }
-
     return true;
 }
 
@@ -312,25 +311,6 @@ std::string ImageManager::get_image_path(const std::string& image_name) const {
     std::replace(safe_image_name.begin(), safe_image_name.end(), ':', '_');
     std::replace(safe_image_name.begin(), safe_image_name.end(), '/', '_');
     return this->base_cache_path + "/" + safe_image_name;
-}
-
-long long ImageManager::get_directory_size(const std::string& path) {
-    long long size = 0;
-    DIR* dir = opendir(path.c_str());
-    if (!dir) return 0;
-
-    struct dirent* entry;
-    struct stat stat_buf;
-    while ((entry = readdir(dir)) != nullptr) {
-        std::string full_path = path + "/" + entry->d_name;
-        if (stat(full_path.c_str(), &stat_buf) == 0) {
-            if (S_ISREG(stat_buf.st_mode)) {
-                size += stat_buf.st_size;
-            }
-        }
-    }
-    closedir(dir);
-    return size;
 }
 
 ImageManager::~ImageManager() {}

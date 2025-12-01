@@ -70,7 +70,7 @@ public:
     void remove_volumes_by_id(const std::string& container_id);
 
     std::vector<ImageObject> list_all_images();
-    bool add_image(const std::string& image_name, const std::string& image_path, long long image_size);
+    bool add_image(const std::string& image_name, const std::string& image_path);
     bool remove_image(const std::string& image_name, const std::string& tag);
 
     bool network_exists(const int& network_id);

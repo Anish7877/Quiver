@@ -39,11 +39,11 @@ bool DatabaseManager::init_db() {
     const char* create_images_table{
         "CREATE TABLE IF NOT EXISTS images ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "name TEXT NOT NULL UNIQUE,"
-        "tag TEXT NOT NULL UNIQUE,"
+        "name TEXT NOT NULL,"
+        "tag TEXT NOT NULL,"
         "path TEXT NOT NULL,"
-        "size INT NOT NULL,"
-        "created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+        "created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+        "CONSTRAINT img_unique UNIQUE(name, tag)"
         ");"
     };
     const char* create_volumes_table{
@@ -441,18 +441,19 @@ void DatabaseManager::remove_volumes_by_id(const std::string& container_id){
     sqlite3_finalize(stmt);
 }
 
-bool DatabaseManager::add_image(const std::string& image_name, const std::string& image_path, long long image_size) {
+bool DatabaseManager::add_image(const std::string& image_name, const std::string& image_path) {
     std::string name, tag;
     size_t pos = image_name.find(':');
     if (pos != std::string::npos) {
         name = image_name.substr(0, pos);
         tag = image_name.substr(pos + 1);
+        tag = tag.empty() ? "latest" : tag;
     } else {
         name = image_name;
         tag = "latest";
     }
 
-    const char* sql = "INSERT INTO images (name, tag, path, size) VALUES (?, ?, ?, ?);";
+    const char* sql = "INSERT INTO images (name, tag, path) VALUES (?, ?, ?);";
     sqlite3_stmt* stmt;
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
@@ -462,7 +463,6 @@ bool DatabaseManager::add_image(const std::string& image_name, const std::string
     sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, tag.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 3, image_path.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(stmt, 4, image_size);
 
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
@@ -494,7 +494,7 @@ bool DatabaseManager::remove_image(const std::string& image_name, const std::str
 }
 
 std::vector<ImageObject> DatabaseManager::list_all_images() {
-    const char* sql = "SELECT id, name, tag, path, size, created_at FROM images;";
+    const char* sql = "SELECT id, name, tag, path, created_at FROM images;";
     sqlite3_stmt* stmt;
     std::vector<ImageObject> images;
 
@@ -505,8 +505,7 @@ std::vector<ImageObject> DatabaseManager::list_all_images() {
             img.name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
             img.tag = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
             img.path = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
-            img.size = sqlite3_column_int64(stmt, 4);
-            img.created_at = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5));
+            img.created_at = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
             images.push_back(img);
         }
     }
