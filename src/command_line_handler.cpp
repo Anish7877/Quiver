@@ -426,10 +426,7 @@ void CommandLineHandler::pull(DatabaseManager& db_manager, const std::vector<std
     std::string out_path{};
     std::string err{};
     if (!img_manager.pull(image_name, out_path, err)) {
-        std::cout << "Failed to pull image: " << err << std::endl;
         exit(EXIT_FAILURE);
-    } else {
-        std::cout << "Image pulled successfully to: " << out_path << std::endl;
     }
     root_fs = out_path;
 }

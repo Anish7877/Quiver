@@ -441,25 +441,13 @@ void DatabaseManager::remove_volumes_by_id(const std::string& container_id){
     sqlite3_finalize(stmt);
 }
 
-bool DatabaseManager::add_image(const std::string& image_name, const std::string& image_path) {
-    std::string name, tag;
-    size_t pos = image_name.find(':');
-    if (pos != std::string::npos) {
-        name = image_name.substr(0, pos);
-        tag = image_name.substr(pos + 1);
-        tag = tag.empty() ? "latest" : tag;
-    } else {
-        name = image_name;
-        tag = "latest";
-    }
-
+bool DatabaseManager::add_image(const std::string& name, const std::string& tag, const std::string& image_path) {
     const char* sql = "INSERT INTO images (name, tag, path) VALUES (?, ?, ?);";
     sqlite3_stmt* stmt;
 
     if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         return false;
     }
-
     sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, tag.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 3, image_path.c_str(), -1, SQLITE_TRANSIENT);
@@ -467,6 +455,24 @@ bool DatabaseManager::add_image(const std::string& image_name, const std::string
     bool result = (sqlite3_step(stmt) == SQLITE_DONE);
     sqlite3_finalize(stmt);
     return result;
+}
+
+bool DatabaseManager::image_exists(const std::string& name, const std::string& tag){
+    const char* sql{ "SELECT EXISTS(SELECT 1 FROM images WHERE name = ? AND tag = ?);" };
+    sqlite3_stmt* stmt{};
+    bool exists{ false };
+
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, tag.c_str(), -1, SQLITE_STATIC);
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        exists = sqlite3_column_int(stmt, 0) != 0;
+    }
+
+    sqlite3_finalize(stmt);
+    return exists;
 }
 
 bool DatabaseManager::remove_image(const std::string& image_name, const std::string& tag) {

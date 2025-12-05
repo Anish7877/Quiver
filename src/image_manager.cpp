@@ -18,6 +18,20 @@ ImageManager::ImageManager(DatabaseManager& db_manager)
 }
 
 bool ImageManager::pull(const std::string& image_name, std::string& out_path, std::string& error) {
+    std::string name, tag;
+    size_t pos = image_name.find(':');
+    if (pos != std::string::npos) {
+        name = image_name.substr(0, pos);
+        tag = image_name.substr(pos + 1);
+        tag = tag.empty() ? "latest" : tag;
+    } else {
+        name = image_name;
+        tag = "latest";
+    }
+    if(name.empty()){
+        std::cerr << "Image name cannot be empty\n";
+        return false;
+    }
     if (base_cache_path.empty()) {
         error = "CRITICAL: HOME environment variable is not set.";
         return false;
@@ -27,9 +41,11 @@ bool ImageManager::pull(const std::string& image_name, std::string& out_path, st
         return false;
     }
 
-    if (!db_manager.add_image(image_name, out_path)) {
-        error = "Failed to register image in database: " + image_name;
-        return false;
+    if(!db_manager.image_exists(name, tag)){
+        if (!db_manager.add_image(name, tag, out_path)) {
+            error = "Failed to register image in database: " + image_name;
+            return false;
+        }
     }
     return true;
 }
