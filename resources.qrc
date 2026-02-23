@@ -1,0 +1,15 @@
+<RCC>
+    <qresource prefix="/">
+        <file>assets/style.qss</file>
+        <file>assets/light_style.qss</file>
+        <file>assets/icons/menu.svg</file>
+        <file>assets/icons/home.svg</file>
+        <file>assets/icons/containers.svg</file>
+        <file>assets/icons/images.svg</file>
+        <file>assets/icons/volumes.svg</file>
+        <file>assets/icons/ports.svg</file>
+        <file>assets/icons/devices.svg</file>
+        <file>assets/icons/moon.svg</file>
+        <file>assets/icons/sun.svg</file>
+    </qresource>
+</RCC>
