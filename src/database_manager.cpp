@@ -9,6 +9,11 @@ DatabaseManager::DatabaseManager(const std::string& db_path) : m_db(nullptr), m_
     if (sqlite3_open(m_db_path.c_str(), &m_db) != SQLITE_OK) {
         throw std::runtime_error("Cannot open database: " + std::string(sqlite3_errmsg(m_db)));
     }
+    char* err_msg{};
+    if(int rc{sqlite3_exec(m_db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, &err_msg)}; rc != SQLITE_OK){
+        throw std::runtime_error("Failed to enable journal mode");
+        sqlite3_free(err_msg);
+    }
 }
 
 DatabaseManager::~DatabaseManager() {

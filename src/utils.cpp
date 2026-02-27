@@ -1,6 +1,8 @@
-#include "../include/utils.hpp"
 #include <cstdlib>
 #include <fcntl.h>
+#include <filesystem>
+#include <fstream>
+#include <stdexcept>
 #include <string>
 #include <sys/stat.h>
 #include <string.h>
@@ -11,46 +13,51 @@
 #include <chrono>
 #include <dirent.h>
 #include <sys/wait.h>
+#include <format>
+#include "utils.hpp"
 
-bool Utils::path_exists(const std::string& path){
-    struct stat st{};
-    return stat(path.c_str(), &st) == 0;
+auto Utils::dir_exists(const fs::path& path) -> bool {
+        return fs::is_directory(path);
 }
 
-void Utils::ensure_dirs(const std::string& path, const mode_t& mode){
-    if (path.empty()) handle_error("Empty path");
-    std::string partial{};
-    if (path[0] == '/')
-        partial = "/";
-    size_t start{ 0 };
-    while (start < path.size()) {
-        size_t pos { path.find('/', start) };
-        std::string dir { (pos == std::string::npos) ? path : path.substr(0, pos) };
-        if (!dir.empty() && dir != "/") {
-            if (mkdir(dir.c_str(), mode) == ERR) {
-                if (errno != EEXIST) {
-                    handle_error("Unable to create " + dir);
-                }
-            }
+auto Utils::path_exists(const fs::path& path) -> bool {
+        return fs::exists(path);
+}
+
+auto Utils::ensure_dir(const fs::path& path, mode_t mode) -> void {
+        if(!dir_exists(path)) {
+                fs::create_directories(path);
+                fs::permissions(path, static_cast<fs::perms>(mode), fs::perm_options::replace);
         }
-        if (pos == std::string::npos) break;
-        start = pos + 1;
-    }
+        if(!dir_exists(path)) [[unlikely]] {
+                throw std::runtime_error(std::format("Directory Error: couldn't create '{}'", path.string()));
+        }
 }
 
-void Utils::handle_error(const std::string& err){
-    std::cerr << "Error: " << err << '\n';
-    exit(EXIT_FAILURE);
+auto Utils::ensure_file(const fs::path& path) -> void {
+        if(!path_exists(path)) {
+                fs::path parent_path{path.parent_path()};
+                if(!parent_path.empty() && !dir_exists(parent_path)) ensure_dir(parent_path);
+                std::ofstream file{path};
+                if(!file) [[unlikely]] {
+                        throw std::runtime_error(std::format("File Error: failed to create '{}'", path.string()));
+                }
+        }
 }
 
-void Utils::write_file(const std::string& path,const std::string& buffer){
-    int fd{ open(path.c_str(), O_WRONLY) };
-    if(fd == ERR) handle_error("Bad file descriptor for " + path);
-    if(write(fd, buffer.c_str(), buffer.length()) == ERR){
-        close(fd);
-        handle_error("Unable to write to file " + path);
-    }
-    close(fd);
+auto Utils::write_file(const fs::path& path, std::string_view buffer) -> void {
+        fs::path parent_path{path.parent_path()};
+        if(!parent_path.empty() && !dir_exists(parent_path)) ensure_dir(parent_path);
+        std::ofstream file{path, std::ios::app};
+
+        if (!file.is_open()) [[unlikely]] {
+                throw std::runtime_error(std::format("File Error: couldn't open '{}'", path.string()));
+        }
+
+        file << buffer;
+        if (!file) [[unlikely]] {
+                throw std::runtime_error(std::format("File Error: failed to write data to '{}'", path.string()));
+        }
 }
 
 std::string Utils::get_base_dir(){
@@ -58,15 +65,16 @@ std::string Utils::get_base_dir(){
     std::string base{ home ? std::string(home) : "/tmp" };
     return base + "/.quiver";
 }
+
 std::string Utils::get_sock_path(const pid_t& pid){
     std::string path{ get_base_dir() + "/containers/" + std::to_string(static_cast<long long>(pid)) };
-    ensure_dirs(path);
+    ensure_dir(path);
     return path + "/attach.sock";
 }
 
 std::string Utils::get_filesystem_path(const pid_t& pid){
     std::string path{ get_base_dir() + "/filesystems/" + std::to_string(static_cast<long long>(pid)) };
-    ensure_dirs(path);
+    ensure_dir(path);
     return path;
 }
 
@@ -77,13 +85,13 @@ std::string Utils::get_vfs_path(const pid_t &pid){
 
 std::string Utils::get_image_path(const std::string& image_name){
     std::string path{ get_base_dir() + "/images/" + image_name};
-    ensure_dirs(path);
+    ensure_dir(path);
     return path;
 }
 
 std::string Utils::get_logs_path(const pid_t& pid){
     std::string path{ get_base_dir() + "/logs/" + std::to_string(static_cast<long long>(pid)) };
-    ensure_dirs(path);
+    ensure_dir(path);
     return path;
 }
 
@@ -151,7 +159,7 @@ std::string Utils::generate_container_id() {
 int Utils::remove_directory_recursively(const std::string& path) {
     DIR* dir{ opendir(path.c_str()) };
     if (!dir) {
-        return ERR;
+        return CERR;
     }
     dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
@@ -160,11 +168,11 @@ int Utils::remove_directory_recursively(const std::string& path) {
         }
         std::string full_path{ path + "/" + entry->d_name };
         struct stat statbuf;
-        if (lstat(full_path.c_str(), &statbuf) == ERR) {
+        if (lstat(full_path.c_str(), &statbuf) == CERR) {
             continue;
         }
         if (S_ISDIR(statbuf.st_mode)) {
-            if (remove_directory_recursively(full_path) == ERR) {
+            if (remove_directory_recursively(full_path) == CERR) {
             }
         } else {
             unlink(full_path.c_str());
@@ -178,14 +186,14 @@ int Utils::remove_directory_recursively(const std::string& path) {
 bool Utils::extract_tarball(const std::string& tarball_path, const std::string& destination_path) {
     pid_t pid{ fork() };
 
-    if (pid == ERR) {
+    if (pid == CERR) {
         perror("fork failed");
         return false;
     }
     else if (pid == 0) {
         execlp("tar", "tar", "-xzf", tarball_path.c_str(), "-C", destination_path.c_str(), NULL);
         perror("execlp failed");
-        exit(ERR);
+        exit(CERR);
     }
     else {
         int status{};

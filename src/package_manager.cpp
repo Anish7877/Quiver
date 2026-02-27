@@ -6,8 +6,6 @@
 #include <algorithm>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <string.h>
-#include <errno.h>
 #include <unistd.h>
 
 int PackageManager::initialize(){

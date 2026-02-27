@@ -1,8 +1,8 @@
-#include "../include/utils.hpp"
-#include "../include/database_manager.hpp"
-#include "../include/image_manager.hpp"
-#include "../include/command_line_handler.hpp"
-#include "../include/container.hpp"
+#include "utils.hpp"
+#include "database_manager.hpp"
+#include "image_manager.hpp"
+#include "command_line_handler.hpp"
+#include "container.hpp"
 #include <cstdlib>
 #include <unistd.h>
 #include <vector>

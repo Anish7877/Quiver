@@ -1,21 +1,21 @@
 #pragma once
-#define ERR -1
-#include <string>
-#include <unistd.h>
+#define CERR -1
+namespace fs = std::filesystem;
 
-namespace Utils{
-    bool path_exists(const std::string& path);
-    void ensure_dirs(const std::string& path,const mode_t& mode = 0755);
-    void handle_error(const std::string& err);
-    void write_file(const std::string& path,const std::string& buffer);
-    void print_usage();
-    std::string get_base_dir();
-    std::string get_sock_path(const pid_t& pid);
-    std::string get_filesystem_path(const pid_t& pid);
-    std::string get_vfs_path(const pid_t& pid);
-    std::string get_image_path(const std::string& image_name);
-    std::string get_logs_path(const pid_t& pid);
-    std::string generate_container_id();
-    int remove_directory_recursively(const std::string& path);
-    bool extract_tarball(const std::string& tarball_path, const std::string& destination_path);
+namespace Utils {
+    auto dir_exists(const fs::path& path) -> bool;
+    auto path_exists(const fs::path& path) -> bool;
+    auto ensure_dir(const fs::path& path, mode_t mode = 0755) -> void;
+    auto ensure_file(const fs::path& path) -> void;
+    auto write_file(const fs::path& path, std::string_view buffer) -> void;
+    auto print_usage() -> void;
+    auto get_base_dir() -> std::string;
+    auto get_sock_path(const pid_t& pid) -> std::string;
+    auto get_filesystem_path(const pid_t& pid) -> std::string;
+    auto get_vfs_path(const pid_t& pid) -> std::string;
+    auto get_image_path(const std::string& image_name) -> std::string;
+    auto get_logs_path(const pid_t& pid) -> std::string;
+    auto generate_container_id() -> std::string;
+    auto remove_directory_recursively(const std::string& path) -> int;
+    auto extract_tarball(const std::string& tarball_path, const std::string& destination_path) -> bool;
 }

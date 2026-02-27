@@ -19,7 +19,7 @@ int main(int argc, char* argv[]) {
 
         std::string db_path{ base_dir + "/quiver.db" };
         DatabaseManager db{ db_path };
-        if (!db.init_db()) {
+        if (!db.init_db()) [[unlikely]] {
             std::cerr << "Failed to initialize the database. Exiting." << '\n';
             return EXIT_FAILURE;
         }
@@ -78,7 +78,7 @@ int main(int argc, char* argv[]) {
             cmds.emplace_back(argv[i]);
         }
 
-        auto it = commands.find(argv[1]);
+        auto it{commands.find(argv[1])};
         if (it == commands.end()) {
             Utils::print_usage();
             return EXIT_FAILURE;

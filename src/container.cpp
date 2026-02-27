@@ -289,6 +289,9 @@ void Container::run_container(const ContainerArgs& args) {
     close(args.slave_fd);
 
     if (sethostname(args.hostname.c_str(), args.hostname.size()) == ERR)
+        Utils::handle_error("Unable to set hostname");
+
+    if (sethostname(args.hostname.c_str(), args.hostname.size()) == ERR)
         Utils::handle_error("Unable to set hostname of container");
 
     std::string filesystem_path{ args.filesystem_dir };
