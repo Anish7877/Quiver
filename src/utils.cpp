@@ -1,41 +1,36 @@
-#include <cstdlib>
-#include <fcntl.h>
 #include <filesystem>
-#include <fstream>
-#include <stdexcept>
-#include <string>
-#include <sys/stat.h>
-#include <string.h>
 #include <iostream>
-#include <unistd.h>
-#include <openssl/sha.h>
-#include <random>
-#include <chrono>
-#include <dirent.h>
-#include <sys/wait.h>
+#include <fstream>
 #include <format>
+#include <random>
 #include "utils.hpp"
 
 auto Utils::dir_exists(const fs::path& path) -> bool {
         return fs::is_directory(path);
 }
 
-auto Utils::path_exists(const fs::path& path) -> bool {
-        return fs::exists(path);
+auto Utils::file_exists(const fs::path& path) -> bool {
+        return fs::is_regular_file(path);
 }
 
 auto Utils::ensure_dir(const fs::path& path, mode_t mode) -> void {
         if(!dir_exists(path)) {
-                fs::create_directories(path);
-                fs::permissions(path, static_cast<fs::perms>(mode), fs::perm_options::replace);
-        }
-        if(!dir_exists(path)) [[unlikely]] {
-                throw std::runtime_error(std::format("Directory Error: couldn't create '{}'", path.string()));
+                std::error_code error_code{};
+                fs::create_directories(path, error_code);
+
+                if (error_code) [[unlikely]] {
+                        throw std::runtime_error(std::format("Directory Error: couldn't create '{}' - {}", path.string(), error_code.message()));
+                }
+
+                fs::permissions(path, static_cast<fs::perms>(mode), fs::perm_options::replace, error_code);
+                if (error_code) [[unlikely]] {
+                        throw std::runtime_error(std::format("Permissions Error: couldn't set permissions for '{}' - {}", path.string(), error_code.message()));
+                }
         }
 }
 
 auto Utils::ensure_file(const fs::path& path) -> void {
-        if(!path_exists(path)) {
+        if(!file_exists(path)) {
                 fs::path parent_path{path.parent_path()};
                 if(!parent_path.empty() && !dir_exists(parent_path)) ensure_dir(parent_path);
                 std::ofstream file{path};
@@ -45,169 +40,144 @@ auto Utils::ensure_file(const fs::path& path) -> void {
         }
 }
 
-auto Utils::write_file(const fs::path& path, std::string_view buffer) -> void {
+auto Utils::write_file(const fs::path& path, std::string_view buffer, bool append_mode) -> void {
         fs::path parent_path{path.parent_path()};
         if(!parent_path.empty() && !dir_exists(parent_path)) ensure_dir(parent_path);
-        std::ofstream file{path, std::ios::app};
+
+        std::ios_base::openmode mode{std::ios::out};
+        if (append_mode) {
+                mode |= std::ios::app;
+        }
+        std::ofstream file{path, mode};
 
         if (!file.is_open()) [[unlikely]] {
                 throw std::runtime_error(std::format("File Error: couldn't open '{}'", path.string()));
         }
-
         file << buffer;
         if (!file) [[unlikely]] {
                 throw std::runtime_error(std::format("File Error: failed to write data to '{}'", path.string()));
         }
 }
 
-std::string Utils::get_base_dir(){
-    const char* home{ getenv("HOME") };
-    std::string base{ home ? std::string(home) : "/tmp" };
-    return base + "/.quiver";
+auto Utils::get_base_dir() noexcept -> std::string {
+        const char* home{getenv("HOME")};
+        std::string base{home ? std::string(home) : "/tmp"};
+        return base + "/.quiver";
 }
 
-std::string Utils::get_sock_path(const pid_t& pid){
-    std::string path{ get_base_dir() + "/containers/" + std::to_string(static_cast<long long>(pid)) };
-    ensure_dir(path);
-    return path + "/attach.sock";
+auto Utils::get_sock_path(pid_t pid) noexcept -> std::string {
+        std::string path{get_base_dir() + "/containers/" + std::to_string(static_cast<long long>(pid))};
+        return path;
 }
 
-std::string Utils::get_filesystem_path(const pid_t& pid){
-    std::string path{ get_base_dir() + "/filesystems/" + std::to_string(static_cast<long long>(pid)) };
-    ensure_dir(path);
-    return path;
+auto Utils::get_filesystem_path(pid_t pid) noexcept -> std::string {
+        std::string path{get_base_dir() + "/filesystems/" + std::to_string(static_cast<long long>(pid))};
+        return path;
 }
 
-std::string Utils::get_vfs_path(const pid_t &pid){
-    std::string path{ get_base_dir() + "/vfs/" + std::to_string(static_cast<long long>(pid)) };
-    return path;
+auto Utils::get_vfs_path(pid_t pid) noexcept -> std::string {
+        std::string path{get_base_dir() + "/vfs/" + std::to_string(static_cast<long long>(pid))};
+        return path;
 }
 
-std::string Utils::get_image_path(const std::string& image_name){
-    std::string path{ get_base_dir() + "/images/" + image_name};
-    ensure_dir(path);
-    return path;
+auto Utils::get_image_path(const std::string& image_name) noexcept -> std::string {
+        std::string path{get_base_dir() + "/images/" + image_name};
+        return path;
 }
 
-std::string Utils::get_logs_path(const pid_t& pid){
-    std::string path{ get_base_dir() + "/logs/" + std::to_string(static_cast<long long>(pid)) };
-    ensure_dir(path);
-    return path;
+auto Utils::get_logs_path(pid_t pid) noexcept -> std::string {
+        std::string path{get_base_dir() + "/logs/" + std::to_string(static_cast<long long>(pid))};
+        return path;
 }
 
-void Utils::print_usage(){
-std::cout << "Usage: quiver <command> [options] [arguments]\n\n"
-              << "Commands:\n"
-              << "  run [options] -i <image> [cmd]   Create and start a new container\n"
-              << "      -i, --image <name>           Image to use (required)\n"
-              << "      -n, --name <name>            Assign a name to the container\n"
-              << "      -p, --port <host:cont>       Publish a container's port(s) to the host\n"
-              << "      -v, --volume <host:cont>     Bind mount a volume\n"
-              << "      --vfs                        Use VFS (copy) instead of OverlayFS for package manager related\n"
-              << "      --no-remove                  Do not remove the filesystem after exit\n\n"
+auto Utils::generate_container_id() -> std::string {
+        auto now{std::chrono::high_resolution_clock::now().time_since_epoch().count()};
+        std::random_device rd{};
+        std::string input{std::to_string(now) + ":" + std::to_string(rd())};
 
-              << "  start <container_id> ...         Start one or more stopped containers\n"
-              << "  stop <container_id> ...          Stop one or more running containers\n"
-              << "  rm <container_id> ...            Remove one or more containers\n"
-              << "  attach <container_id>            Attach local standard input, output, and error to a running container\n\n"
+        unsigned char hash[SHA256_DIGEST_LENGTH]{};
+        SHA256(reinterpret_cast<const unsigned char*>(input.c_str()), input.size(), hash);
 
-              << "  ps [-a]                          List containers\n"
-              << "      -a                           Show all containers (default shows just running)\n\n"
+        std::string hexString{};
+        hexString.reserve(SHA256_DIGEST_LENGTH * 2);
+        static const char hexDigits[]{"0123456789abcdef"};
 
-              << "  pull <image_name>                Pull an image from a registry\n\n"
-              << "  image <subcommand>               Manage images\n"
-              << "      ls                           List available images\n"
-              << "      rm <image:tag>               Remove an image\n"
-              << "      cls <image_name>             List containers using a specific image\n\n"
-
-              << "  volume <subcommand>              Manage volumes\n"
-              << "      ls                           List all volumes\n"
-              << "      rm <volume_id> ...           remove one or more volume links\n\n"
-
-              << "  network <subcommand>             Manage networks\n"
-              << "      ls                           List all network port mappings\n"
-              << "      rm <network_id> ...          remove one or more network links\n"
-              << "      add <container_id> [args]                                    \n"
-              << "              <host:cont> ...      add a new network link\n\n"
-              << "  create <subcommand>              Create resources\n"
-              << "      volume <container_id> [args]                 \n"
-              << "                  <host:cont> ...  Create a volume link for container\n\n"
-              << "  vfs rm <container_id>            remove vfs for a container\n\n"
-              << "  help                             Show this help message\n";
-}
-
-std::string Utils::generate_container_id() {
-    auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-    std::random_device rd;
-    std::string input = std::to_string(now) + ":" + std::to_string(rd());
-
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const unsigned char*>(input.c_str()), input.size(), hash);
-
-    std::string hexString;
-    hexString.reserve(SHA256_DIGEST_LENGTH * 2);
-    static const char hexDigits[] = "0123456789abcdef";
-
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
-        hexString += hexDigits[(hash[i] >> 4) & 0xF];
-        hexString += hexDigits[hash[i] & 0xF];
-    }
-
-    return hexString;
-}
-
-int Utils::remove_directory_recursively(const std::string& path) {
-    DIR* dir{ opendir(path.c_str()) };
-    if (!dir) {
-        return CERR;
-    }
-    dirent* entry;
-    while ((entry = readdir(dir)) != nullptr) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
+        for (int i{0}; i < SHA256_DIGEST_LENGTH; i++) {
+                hexString += hexDigits[(hash[i] >> 4) & 0xF];
+                hexString += hexDigits[hash[i] & 0xF];
         }
-        std::string full_path{ path + "/" + entry->d_name };
-        struct stat statbuf;
-        if (lstat(full_path.c_str(), &statbuf) == CERR) {
-            continue;
-        }
-        if (S_ISDIR(statbuf.st_mode)) {
-            if (remove_directory_recursively(full_path) == CERR) {
-            }
-        } else {
-            unlink(full_path.c_str());
-        }
-    }
-    closedir(dir);
-
-    return rmdir(path.c_str());
+        return hexString;
 }
 
-bool Utils::extract_tarball(const std::string& tarball_path, const std::string& destination_path) {
-    pid_t pid{ fork() };
-
-    if (pid == CERR) {
-        perror("fork failed");
-        return false;
-    }
-    else if (pid == 0) {
-        execlp("tar", "tar", "-xzf", tarball_path.c_str(), "-C", destination_path.c_str(), NULL);
-        perror("execlp failed");
-        exit(CERR);
-    }
-    else {
-        int status{};
-        waitpid(pid, &status, 0);
-
-        if (WIFEXITED(status)) {
-            int exit_code = WEXITSTATUS(status);
-            if (exit_code == 0) {
-                return true;
-            } else {
-                std::cerr << "Tar exited with error code: " << exit_code << std::endl;
-                return false;
-            }
+auto Utils::remove_directory_recursively(const fs::path& path) -> bool {
+        std::error_code error_code{};
+        fs::remove_all(path, error_code);
+        if(error_code) [[unlikely]] {
+                throw std::runtime_error(std::format("Directory Error: couldn't remove '{}' - {}", path.string(), error_code.message()));
         }
-    }
-    return false;
+        return true;
+}
+
+auto Utils::extract_tarball(const std::string& tarball_path, const std::string& destination_path) -> void {
+        pid_t pid{fork()};
+
+        if (pid == CERR) [[unlikely]] {
+                throw std::runtime_error("Tar Error: fork failed");
+        }
+        else if (pid == 0) {
+                execlp("tar", "tar", "-xzf", tarball_path.c_str(), "-C", destination_path.c_str(), NULL);
+                throw std::runtime_error("Tar Error: execlp failed");
+                exit(CERR);
+        }
+        else {
+                int status{};
+                waitpid(pid, &status, 0);
+                if (WIFEXITED(status)) {
+                        int exit_code{WEXITSTATUS(status)};
+                        if (exit_code != 0) [[unlikely]] {
+                                throw std::runtime_error(std::format("Tar Error: exited with error code: {}", exit_code));
+                        }
+                }
+        }
+}
+
+auto Utils::print_usage() -> void {
+        std::cout << "Usage: quiver <command> [options] [arguments]\n\n"
+                << "Commands:\n"
+                << "  run [options] -i <image> [cmd]   Create and start a new container\n"
+                << "      -i, --image <name>           Image to use (required)\n"
+                << "      -n, --name <name>            Assign a name to the container\n"
+                << "      -p, --port <host:cont>       Publish a container's port(s) to the host\n"
+                << "      -v, --volume <host:cont>     Bind mount a volume\n"
+                << "      --vfs                        Use VFS (copy) instead of OverlayFS for package manager related\n"
+                << "      --no-remove                  Do not remove the filesystem after exit\n\n"
+
+                << "  start <container_id> ...         Start one or more stopped containers\n"
+                << "  stop <container_id> ...          Stop one or more running containers\n"
+                << "  rm <container_id> ...            Remove one or more containers\n"
+                << "  attach <container_id>            Attach local standard input, output, and error to a running container\n\n"
+
+                << "  ps [-a]                          List containers\n"
+                << "      -a                           Show all containers (default shows just running)\n\n"
+
+                << "  pull <image_name>                Pull an image from a registry\n\n"
+                << "  image <subcommand>               Manage images\n"
+                << "      ls                           List available images\n"
+                << "      rm <image:tag>               Remove an image\n"
+                << "      cls <image_name>             List containers using a specific image\n\n"
+
+                << "  volume <subcommand>              Manage volumes\n"
+                << "      ls                           List all volumes\n"
+                << "      rm <volume_id> ...           remove one or more volume links\n\n"
+
+                << "  network <subcommand>             Manage networks\n"
+                << "      ls                           List all network port mappings\n"
+                << "      rm <network_id> ...          remove one or more network links\n"
+                << "      add <container_id> [args]                                    \n"
+                << "              <host:cont> ...      add a new network link\n\n"
+                << "  create <subcommand>              Create resources\n"
+                << "      volume <container_id> [args]                 \n"
+                << "                  <host:cont> ...  Create a volume link for container\n\n"
+                << "  vfs rm <container_id>            remove vfs for a container\n\n"
+                << "  help                             Show this help message\n";
 }

@@ -38,7 +38,7 @@ Monitor::Monitor() {
                                 }
                                 if (!current_path.empty()) {
                                         try {
-                                                Utils::write_file(current_path, current_buffer);
+                                                Utils::write_file(current_path, current_buffer, true);
                                         }
                                         catch(const std::exception& e) {
                                                 std::cout << "Monitor write error due to:\n\t" << e.what() << '\n';
