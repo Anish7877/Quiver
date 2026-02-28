@@ -41,3 +41,8 @@ auto test(Func&& F, Args&&... args) -> void {
         std::cout << "Test Failed with unknown exception\n";
     }
 }
+
+namespace Tests {
+        auto test_utils() -> void;
+        auto test_monitor() -> void;
+}

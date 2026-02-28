@@ -17,18 +17,22 @@ BUILDDIR = ./build/release
 DEBUG_BUILDDIR = ./build/debug
 TEST_OUT = ./test_out
 
-DEBUG_CPPFLAGS = $(STD) $(CXXFLAGS) $(DEBUG_FLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS)
-CPPFLAGS = $(STD) $(CXXFLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS)
+DEPFLAGS = -MMD -MP
+DEBUG_CPPFLAGS = $(STD) $(CXXFLAGS) $(DEBUG_FLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS) $(DEPFLAGS)
+CPPFLAGS = $(STD) $(CXXFLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS) $(DEPFLAGS)
 
 CPPFILES = $(wildcard $(SRCDIR)/*.cpp)
 OBJECTS = $(CPPFILES:$(SRCDIR)/%.cpp=$(BINARIES)/%.o)
 DEBUG_OBJECTS = $(CPPFILES:$(SRCDIR)/%.cpp=$(DEBUG_BINARIES)/%.o)
 
-TEST_FILES = $(wildcard $(TEST_DIR)/test_*.cpp)
-TEST_OBJS = $(TEST_FILES:$(TEST_DIR)/%.cpp=$(TEST_BINARIES)/%.o)
-TEST_EXECS = $(TEST_FILES:$(TEST_DIR)/%.cpp=$(TEST_OUT)/%)
+MAIN_OBJ = $(BINARIES)/main.o
+TESTABLE_OBJS = $(filter-out $(MAIN_OBJ), $(OBJECTS))
 
-all: test build-release
+TEST_FILES = $(wildcard $(TEST_DIR)/*.cpp)
+TEST_OBJS = $(TEST_FILES:$(TEST_DIR)/%.cpp=$(TEST_BINARIES)/%.o)
+TEST_EXEC = $(TEST_OUT)/run_tests
+
+all: build-release test
 
 build-release: $(OBJECTS)
 	@mkdir -p $(BUILDDIR)
@@ -48,18 +52,17 @@ $(DEBUG_BINARIES)/%.o: $(SRCDIR)/%.cpp
 	@echo "Compiling $<"
 	@$(CXX) $(DEBUG_CPPFLAGS) -c $< -o $@
 
-test: $(TEST_EXECS)
+test: $(TEST_EXEC)
 	@echo "Running all tests..."
-	@for test_exe in $(TEST_EXECS); do \
-		./$$test_exe; \
-	done
+	@./$(TEST_EXEC)
 
-$(TEST_OUT)/test_%: $(TEST_BINARIES)/test_%.o $(BINARIES)/%.o
+$(TEST_EXEC): $(TEST_OBJS) $(TESTABLE_OBJS)
 	@mkdir -p $(TEST_OUT)
 	@$(CXX) $(CPPFLAGS) $^ -o $@ $(LDFLAGS)
 
 $(TEST_BINARIES)/%.o: $(TEST_DIR)/%.cpp
 	@mkdir -p $(TEST_BINARIES)
+	@echo "Compiling Test: $<"
 	@$(CXX) $(CPPFLAGS) -c $< -o $@
 
 clean:
@@ -73,3 +76,7 @@ run-debug: build-debug
 	@$(DEBUG_BUILDDIR)/quiver
 
 .PHONY: all build-release build-debug test clean run run-debug
+
+-include $(OBJECTS:.o=.d)
+-include $(DEBUG_OBJECTS:.o=.d)
+-include $(TEST_OBJS:.o=.d)
