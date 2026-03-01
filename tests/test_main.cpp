@@ -2,6 +2,6 @@
 
 auto main() -> int {
         Tests::test_utils();
-        Tests::test_monitor();
+        Tests::test_container_monitor();
         return 0;
 }

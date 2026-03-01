@@ -88,5 +88,4 @@ public:
 private:
     sqlite3* m_db;
     std::string m_db_path;
-
 };

@@ -44,5 +44,5 @@ auto test(Func&& F, Args&&... args) -> void {
 
 namespace Tests {
         auto test_utils() -> void;
-        auto test_monitor() -> void;
+        auto test_container_monitor() -> void;
 }

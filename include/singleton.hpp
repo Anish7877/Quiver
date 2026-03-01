@@ -10,7 +10,7 @@ class Singleton {
                 Singleton(Singleton&&) = delete;
                 auto operator=(const Singleton&) -> Singleton& = delete;
                 auto operator=(Singleton&&) -> Singleton& = delete;
-                static auto get_instance() noexcept -> T& {
+                static auto get_instance(bool predicate) noexcept -> T& {
                         static T instance{};
                         return instance;
                 }

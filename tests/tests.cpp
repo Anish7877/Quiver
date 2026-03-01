@@ -1,6 +1,6 @@
 #include "tests.hpp"
 #include "utils.hpp"
-#include "monitor.hpp"
+#include "container_monitor.hpp"
 
 auto Tests::test_utils() -> void {
         test(Utils::dir_exists, true, "/home");
@@ -16,14 +16,14 @@ auto Tests::test_utils() -> void {
         test(Utils::get_logs_path, "/home/anish/.quiver/logs/123", 123);
 }
 
-auto Tests::test_monitor() -> void {
+auto Tests::test_container_monitor() -> void {
         using namespace std::chrono_literals;
-        auto set_log_path_func{&Monitor::set_log_path};
-        auto log_func{&Monitor::log};
-        test(set_log_path_func, Monitor::get_instance(), fs::path("/home/anish/Desktop/test_log.log"));
+        auto set_log_path_func{&ContainerMonitor::set_log_path};
+        auto log_func{&ContainerMonitor::log};
+        test(set_log_path_func, ContainerMonitor::get_instance(), fs::path("/home/anish/Desktop/test_log.log"));
         for(int i{0}; i<10;++i){
                 std::string msg{std::to_string(i) + "\n"};
-                test(log_func, Monitor::get_instance(), msg);
+                test(log_func, ContainerMonitor::get_instance(), msg);
                 std::this_thread::sleep_for(1000ms);
         }
 }

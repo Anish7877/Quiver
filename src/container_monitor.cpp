@@ -1,9 +1,9 @@
 #include <iostream>
 #include <format>
 #include "utils.hpp"
-#include "monitor.hpp"
+#include "container_monitor.hpp"
 
-Monitor::Monitor() {
+ContainerMonitor::ContainerMonitor() {
         using namespace std::string_literals;
         m_worker = std::thread([this]() -> void {
                         while (true) {
@@ -29,7 +29,7 @@ Monitor::Monitor() {
                         }
                 });
 }
-Monitor::~Monitor() {
+ContainerMonitor::~ContainerMonitor() {
         m_running.store(false);
         m_cv.notify_all();
         if(m_worker.joinable()) {
@@ -37,7 +37,7 @@ Monitor::~Monitor() {
         }
 }
 
-auto Monitor::set_log_path(const fs::path& log_path) -> void {
+auto ContainerMonitor::set_log_path(const fs::path& log_path) -> void {
         std::lock_guard<std::mutex> lock(m_mtx);
         m_log_path = log_path;
         try {
@@ -48,11 +48,11 @@ auto Monitor::set_log_path(const fs::path& log_path) -> void {
         }
         m_log_file.open(m_log_path, std::ios::app);
         if(!m_log_file.is_open()) [[unlikely]] {
-                throw std::runtime_error(std::format("Monitor Error: couldn't open '{}'", m_log_path.string()));
+                throw std::runtime_error(std::format("ContainerMonitor Error: couldn't open '{}'", m_log_path.string()));
         }
 }
 
-auto Monitor::log(std::string buffer) -> void {
+auto ContainerMonitor::log(std::string buffer) -> void {
         {
                 std::lock_guard<std::mutex> lock(m_mtx);
                 m_queue.push(std::move(buffer));

@@ -7,11 +7,11 @@
 #include <thread>
 #include "singleton.hpp"
 
-class Monitor : public Singleton<Monitor> {
-        friend class Singleton<Monitor>;
+class ContainerMonitor : public Singleton<ContainerMonitor> {
+        friend class Singleton<ContainerMonitor>;
         private:
-                Monitor();
-                ~Monitor();
+                ContainerMonitor();
+                ~ContainerMonitor();
         public:
                 auto set_log_path(const fs::path& path) -> void;
                 auto log(std::string buffer) -> void;
