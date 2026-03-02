@@ -1,5 +1,5 @@
 #pragma once
-#include "db_job_types.hpp"
+#include "db_types.hpp"
 #include "singleton.hpp"
 #include <string>
 
@@ -7,7 +7,7 @@ class DatabaseValueHeap : public Singleton<DatabaseValueHeap> {
         friend class Singleton<DatabaseValueHeap>;
         private:
                 DatabaseValueHeap() = default;
-                ~DatabaseValueHeap() = default;
+                ~DatabaseValueHeap();
         public:
                 DatabaseValueHeap(const DatabaseValueHeap&) = delete;
                 DatabaseValueHeap(DatabaseValueHeap&&) = delete;

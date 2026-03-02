@@ -1,14 +1,6 @@
 #pragma once
 #include <cstdint>
 #include <atomic>
-constexpr std::size_t QUEUE_SIZE{25000};
-
-template<typename T>
-struct RingBuffer{
-        alignas(64) std::atomic<std::size_t> head{};
-        alignas(64) std::atomic<std::size_t> tail{};
-        T slots[QUEUE_SIZE];
-};
 
 enum class JobType : std::uint8_t {
         GET = 0,
@@ -36,6 +28,12 @@ struct JobData {
         JobType type{};
         std::uint64_t value_offset{};
         std::uint32_t value_length{};
+};
+
+struct CommandQueueHeader {
+        std::atomic<std::uint64_t> tail{0};
+        std::atomic<std::uint64_t> head{0};
+        std::atomic<std::uint64_t> connections{0};
 };
 
 struct ValueHeapHeader {

@@ -32,7 +32,7 @@ TEST_FILES = $(wildcard $(TEST_DIR)/*.cpp)
 TEST_OBJS = $(TEST_FILES:$(TEST_DIR)/%.cpp=$(TEST_BINARIES)/%.o)
 TEST_EXEC = $(TEST_OUT)/run_tests
 
-all: build-release test
+all: build-release
 
 build-release: $(OBJECTS)
 	@mkdir -p $(BUILDDIR)

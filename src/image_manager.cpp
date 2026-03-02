@@ -56,7 +56,7 @@ bool ImageManager::remove(const std::string& image_name, std::string& error) {
         return false;
     }
     std::string image_path = get_image_path(image_name);
-    if (!Utils::path_exists(image_path)) {
+    if (!Utils::dir_exists(image_path)) {
         error = "Image not found locally: " + image_name;
         return false;
     }
