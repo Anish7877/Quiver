@@ -15,7 +15,7 @@ auto test(Func&& F, const T& expected, Args&&... args) -> void {
         if (actual == expected) {
             std::cout << "Test Passed!\n";
         } else {
-            std::cout << std::format("Test Failed: Expected -> {} got -> {}\n", expected, actual);
+        std::cout << "Test Failed: Expected -> " << expected << " got -> " << actual << '\n';
         }
     }
     catch(const std::exception& e) {
@@ -45,4 +45,6 @@ auto test(Func&& F, Args&&... args) -> void {
 namespace Tests {
         auto test_utils() -> void;
         auto test_container_monitor() -> void;
+        auto test_serialization() -> void;
+        auto test_deserialization() -> void;
 }

@@ -5,19 +5,19 @@
 #include <sqlite3.h>
 
 struct ContainerObject {
-    std::string id;
-    std::string name;
-    std::string image;
-    pid_t pid;
-    pid_t net_pid;
-    std::string status;
-    std::string created_at;
-    std::string hostname;
-    std::string filesystem_path;
-    std::string pty_shell;
-    bool vfs;
-    bool no_remove;
-    std::string vfs_path;
+        pid_t pid{};
+        pid_t net_pid{};
+        bool vfs{};
+        bool no_remove{};
+        std::string id{};
+        std::string name{};
+        std::string image{};
+        std::string status{};
+        std::string created_at{};
+        std::string hostname{};
+        std::string filesystem_path{};
+        std::string pty_shell{};
+        std::string vfs_path{};
 };
 
 struct VolumeObject {

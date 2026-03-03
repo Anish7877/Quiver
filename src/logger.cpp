@@ -1,9 +1,9 @@
 #include <iostream>
 #include <format>
 #include "utils.hpp"
-#include "container_monitor.hpp"
+#include "logger.hpp"
 
-ContainerMonitor::ContainerMonitor() {
+Logger::Logger() {
         using namespace std::string_literals;
         m_worker = std::thread([this]() -> void {
                         while (true) {
@@ -29,15 +29,8 @@ ContainerMonitor::ContainerMonitor() {
                         }
                 });
 }
-ContainerMonitor::~ContainerMonitor() {
-        m_running.store(false);
-        m_cv.notify_all();
-        if(m_worker.joinable()) {
-                m_worker.join();
-        }
-}
 
-auto ContainerMonitor::set_log_path(const fs::path& log_path) -> void {
+auto Logger::set_log_path(const fs::path& log_path) -> void {
         std::lock_guard<std::mutex> lock(m_mtx);
         m_log_path = log_path;
         try {
@@ -48,14 +41,22 @@ auto ContainerMonitor::set_log_path(const fs::path& log_path) -> void {
         }
         m_log_file.open(m_log_path, std::ios::app);
         if(!m_log_file.is_open()) [[unlikely]] {
-                throw std::runtime_error(std::format("ContainerMonitor Error: couldn't open '{}'", m_log_path.string()));
+                throw std::runtime_error(std::format("Logger Error: couldn't open '{}'", m_log_path.string()));
         }
 }
 
-auto ContainerMonitor::log(std::string buffer) -> void {
+auto Logger::log(std::string buffer) -> void {
         {
                 std::lock_guard<std::mutex> lock(m_mtx);
                 m_queue.push(std::move(buffer));
         }
         m_cv.notify_one();
+}
+
+Logger::~Logger() {
+        m_running.store(false);
+        m_cv.notify_all();
+        if(m_worker.joinable()) {
+                m_worker.join();
+        }
 }

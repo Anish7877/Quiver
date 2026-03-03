@@ -2,7 +2,7 @@ CXX = g++
 STD = -std=c++20
 OPTFLAGS = -O3
 CXXFLAGS = -Wall -Wextra -Wpedantic -march=native
-LDFLAGS = -lcpr -lcurl -lssl -lcrypto -pthread -lsqlite3 -lutil
+LDFLAGS = -lcpr -lcurl -lssl -lcrypto -pthread -lsqlite3 -lutil -lrocksdb
 DEBUG_FLAGS = -g
 
 INCLUDE_DIRS = ./include

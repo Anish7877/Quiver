@@ -1,6 +1,10 @@
 #pragma once
 #include <cstdint>
 #include <atomic>
+#include <string>
+#include <new>
+#include <utility>
+#include <vector>
 
 enum class JobType : std::uint8_t {
         GET = 0,
@@ -15,29 +19,72 @@ enum class SlotState : std::uint32_t {
         READY = 2
 };
 
-struct alignas(64) JobSlot {
+enum class TargetDB : std::uint8_t {
+        CONTAINER = 0,
+        VOLUME = 1,
+        DEVICE = 2,
+        NETWORK = 3,
+        IMAGE = 4
+};
+
+struct alignas(std::hardware_destructive_interference_size) JobSlot {
         std::atomic<SlotState> state{};
         char key[32]{};
         JobType type{};
+        TargetDB target{};
         std::uint64_t value_offset{};
-        std::uint32_t value_length{};
+        std::uint64_t value_length{};
 };
 
 struct JobData {
         char key[32]{};
         JobType type{};
+        TargetDB target{};
         std::uint64_t value_offset{};
-        std::uint32_t value_length{};
+        std::uint64_t value_length{};
 };
 
 struct CommandQueueHeader {
-        std::atomic<std::uint64_t> tail{0};
-        std::atomic<std::uint64_t> head{0};
-        std::atomic<std::uint64_t> connections{0};
+        alignas(std::hardware_destructive_interference_size) std::atomic<std::uint64_t> head{0};
+        alignas(std::hardware_destructive_interference_size) std::atomic<std::uint64_t> tail{0};
+        alignas(std::hardware_destructive_interference_size) std::atomic<std::uint64_t> connections{0};
 };
 
 struct ValueHeapHeader {
-        std::atomic<std::uint64_t> data_tail{0};
-        std::atomic<std::uint64_t> data_head{0};
+        alignas(std::hardware_destructive_interference_size) std::atomic<std::uint64_t> data_head{0};
+        alignas(std::hardware_destructive_interference_size) std::atomic<std::uint64_t> data_tail{0};
 };
 
+struct ContainerType {
+        pid_t pid{};
+        pid_t net_pid{};
+        bool vfs{};
+        bool no_remove{};
+        std::string id{};
+        std::string name{};
+        std::string image{};
+        std::string status{};
+        std::string created_at{};
+        std::string hostname{};
+        std::string filesystem_path{};
+        std::string pty_shell{};
+        std::string vfs_path{};
+};
+
+struct VolumeType {
+        std::string container_id{};
+        std::vector<std::pair<std::string, std::string>> host_container_map{};
+};
+
+struct ImageType {
+        std::string id{};
+        std::string name{};
+        std::string tag{};
+        std::string path{};
+        std::string created_at{};
+};
+
+struct NetworkType{
+        std::vector<std::pair<int, int>> host_container_map{};
+        std::string container_id{};
+};

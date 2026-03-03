@@ -1,6 +1,18 @@
 #include "tests.hpp"
+#include "json_serialization.hpp"
 #include "utils.hpp"
 #include "container_monitor.hpp"
+#include <nlohmann/detail/macro_scope.hpp>
+#include <nlohmann/json.hpp>
+
+struct Test{
+        std::string msg{};
+        auto operator==(const Test&) const -> bool = default;
+        friend auto operator<<(std::ostream& os, const Test& t) -> std::ostream& {
+                return os << "Test{message: " << t.msg << "}";
+        }
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Test, msg)
 
 auto Tests::test_utils() -> void {
         test(Utils::dir_exists, true, "/home");
@@ -26,4 +38,22 @@ auto Tests::test_container_monitor() -> void {
                 test(log_func, ContainerMonitor::get_instance(), msg);
                 std::this_thread::sleep_for(1000ms);
         }
+}
+
+auto Tests::test_serialization() -> void {
+        Test msg{"hello"};
+        std::string expected_string{json(msg).dump()};
+        auto serialize_wrapper{[](const auto& val) {
+                return JsonSerialization::serialize_data(val);
+        }};
+        test(serialize_wrapper, expected_string, msg);
+}
+
+auto Tests::test_deserialization() -> void {
+        Test msg{"hello"};
+        std::string json_string{json(msg).dump()};
+        auto deserialize_wrapper{[](const std::string& val) {
+                return JsonSerialization::deserialize_data<Test>(val);
+        }};
+        test(deserialize_wrapper, msg, json_string);
 }
