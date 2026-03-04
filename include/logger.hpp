@@ -5,7 +5,8 @@
 #include <mutex>
 #include <queue>
 #include <thread>
-#include "singleton.hpp"
+#include <filesystem>
+namespace fs = std::filesystem;
 
 class Logger{
         public:

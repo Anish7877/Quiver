@@ -55,6 +55,28 @@ struct ValueHeapHeader {
         alignas(std::hardware_destructive_interference_size) std::atomic<std::uint64_t> data_tail{0};
 };
 
+struct Status {
+        public:
+                auto ok() -> bool {
+                        return m_ok;
+                }
+                auto get_error() -> std::string {
+                        return m_error;
+                }
+                auto get_result() -> std::string {
+                        return m_result;
+                }
+        private:
+                friend class ContainerManager;
+                friend class VolumeManager;
+                friend class DeviceManager;
+                friend class NetworkManager;
+                friend class ImageManager;
+                bool m_ok{false};
+                std::string m_result{};
+                std::string m_error{};
+};
+
 struct ContainerType {
         pid_t pid{};
         pid_t net_pid{};

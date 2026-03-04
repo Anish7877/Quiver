@@ -2,7 +2,6 @@
 #include "db_types.hpp"
 #include "utils.hpp"
 #include <atomic>
-#include <fmt/base.h>
 #include <cstring>
 #include <iostream>
 #include <sys/mman.h>

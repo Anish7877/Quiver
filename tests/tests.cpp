@@ -1,7 +1,7 @@
 #include "tests.hpp"
 #include "json_serialization.hpp"
 #include "utils.hpp"
-#include "container_monitor.hpp"
+#include "logger.hpp"
 #include <nlohmann/detail/macro_scope.hpp>
 #include <nlohmann/json.hpp>
 
@@ -28,15 +28,16 @@ auto Tests::test_utils() -> void {
         test(Utils::get_logs_path, "/home/anish/.quiver/logs/123", 123);
 }
 
-auto Tests::test_container_monitor() -> void {
+auto Tests::test_logger() -> void {
         using namespace std::chrono_literals;
-        auto set_log_path_func{&ContainerMonitor::set_log_path};
-        auto log_func{&ContainerMonitor::log};
-        test(set_log_path_func, ContainerMonitor::get_instance(), fs::path("/home/anish/Desktop/test_log.log"));
+        Logger logger{};
+        auto set_log_path_func{&Logger::set_log_path};
+        auto log_func{&Logger::log};
+        test(set_log_path_func, logger, fs::path("/home/anish/Desktop/test_log.log"));
         for(int i{0}; i<10;++i){
-                std::string msg{std::to_string(i) + "\n"};
-                test(log_func, ContainerMonitor::get_instance(), msg);
-                std::this_thread::sleep_for(1000ms);
+                std::string msg{std::to_string(i)};
+                test(log_func, logger, msg);
+                std::this_thread::sleep_for(500ms);
         }
 }
 

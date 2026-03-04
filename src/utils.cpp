@@ -4,7 +4,6 @@
 #include <format>
 #include <random>
 #include "utils.hpp"
-#include "db_types.hpp"
 
 auto Utils::dir_exists(const fs::path& path) -> bool {
         return fs::is_directory(path);
@@ -60,59 +59,84 @@ auto Utils::write_file(const fs::path& path, std::string_view buffer, bool appen
         }
 }
 
-auto Utils::get_base_dir() -> std::string {
+auto Utils::get_base_dir() -> fs::path {
         const char* home{getenv("HOME")};
         std::string base{home ? std::string(home) : "/tmp"};
         return base + "/.quiver";
 }
 
-auto Utils::get_sock_path(pid_t pid) -> std::string {
-        std::string path{get_base_dir() + "/containers/" + std::to_string(static_cast<long long>(pid))};
+auto Utils::get_sock_path(pid_t pid) -> fs::path {
+        std::string path{get_base_dir().string() + "/containers/" + std::to_string(static_cast<long long>(pid))};
         return path;
 }
 
-auto Utils::get_filesystem_path(pid_t pid) -> std::string {
-        std::string path{get_base_dir() + "/filesystems/" + std::to_string(static_cast<long long>(pid))};
+auto Utils::get_filesystem_path(pid_t pid) -> fs::path {
+        std::string path{get_base_dir().string() + "/filesystems/" + std::to_string(static_cast<long long>(pid))};
         return path;
 }
 
-auto Utils::get_vfs_path(pid_t pid) -> std::string {
-        std::string path{get_base_dir() + "/vfs/" + std::to_string(static_cast<long long>(pid))};
+auto Utils::get_vfs_path(pid_t pid) -> fs::path {
+        std::string path{get_base_dir().string() + "/vfs/" + std::to_string(static_cast<long long>(pid))};
         return path;
 }
 
-auto Utils::get_image_path(const std::string& image_name) -> std::string {
-        std::string path{get_base_dir() + "/images/" + image_name};
+auto Utils::get_image_path(const std::string& image_name) -> fs::path {
+        std::string path{get_base_dir().string() + "/images/" + image_name};
         return path;
 }
 
-auto Utils::get_logs_path(pid_t pid) -> std::string {
-        std::string path{get_base_dir() + "/logs/" + std::to_string(static_cast<long long>(pid))};
+auto Utils::get_logs_path(pid_t pid) -> fs::path {
+        std::string path{get_base_dir().string() + "/logs/" + std::to_string(static_cast<long long>(pid))};
         return path;
 }
 
-auto Utils::get_container_db_path() -> std::string {
-        std::string path{get_base_dir() + "/db/container_db"};
+auto Utils::get_container_db_path() -> fs::path {
+        std::string path{get_base_dir().string() + "/db/container_db"};
         return path;
 }
 
-auto Utils::get_volume_db_path() -> std::string {
-        std::string path{get_base_dir() + "/db/volume_db"};
+auto Utils::get_volume_db_path() -> fs::path {
+        std::string path{get_base_dir().string() + "/db/volume_db"};
         return path;
 }
 
-auto Utils::get_device_db_path() -> std::string {
-        std::string path{get_base_dir() + "/db/device_db"};
+auto Utils::get_device_db_path() -> fs::path {
+        std::string path{get_base_dir().string() + "/db/device_db"};
         return path;
 }
 
-auto Utils::get_network_db_path() -> std::string {
-        std::string path{get_base_dir() + "/db/network_db"};
+auto Utils::get_network_db_path() -> fs::path {
+        std::string path{get_base_dir().string() + "/db/network_db"};
         return path;
 }
 
-auto Utils::get_image_db_path() -> std::string {
-        std::string path{get_base_dir() + "/db/image_db"};
+auto Utils::get_image_db_path() -> fs::path {
+        std::string path{get_base_dir().string() + "/db/image_db"};
+        return path;
+}
+
+auto Utils::get_container_db_log_path() -> fs::path {
+        std::string path{get_base_dir().string() + "/db_logs/container_db.log"};
+        return path;
+}
+
+auto Utils::get_volume_db_log_path() -> fs::path {
+        std::string path{get_base_dir().string() + "/db_logs/volume_db.log"};
+        return path;
+}
+
+auto Utils::get_device_db_log_path() -> fs::path {
+        std::string path{get_base_dir().string() + "/db_logs/device_db.log"};
+        return path;
+}
+
+auto Utils::get_network_db_log_path() -> fs::path {
+        std::string path{get_base_dir().string() + "/db_logs/network_db.log"};
+        return path;
+}
+
+auto Utils::get_image_db_log_path() -> fs::path {
+        std::string path{get_base_dir().string() + "/db_logs/image_db.log"};
         return path;
 }
 
@@ -133,29 +157,6 @@ auto Utils::generate_container_id() -> std::string {
                 hexString += hexDigits[hash[i] & 0xF];
         }
         return hexString;
-}
-
-auto Utils::TargetDB_to_string(TargetDB db) -> std::string {
-        std::string db_string{};
-        switch (db) {
-                case TargetDB::CONTAINER:
-                        db_string = "Container";
-                        break;
-                case TargetDB::VOLUME:
-                        db_string = "Volume";
-                        break;
-                case TargetDB::DEVICE:
-                        db_string = "Device";
-                        break;
-                case TargetDB::NETWORK:
-                        db_string = "Network";
-                case TargetDB::IMAGE:
-                        db_string = "Image";
-                        break;
-                default:
-                        db_string = "Unknown";
-        }
-        return db_string;
 }
 
 auto Utils::remove_directory_recursively(const fs::path& path) -> bool {
