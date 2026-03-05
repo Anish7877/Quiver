@@ -1,0 +1,13 @@
+namespace Types;
+
+table PairString {
+        host_path: string;
+        container_path: string;
+}
+
+table Volume {
+        container_id: string;
+        paths: [PairString];
+}
+
+root_type Volume;

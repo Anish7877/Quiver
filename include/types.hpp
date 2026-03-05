@@ -77,6 +77,10 @@ struct Status {
                 std::string m_error{};
 };
 
+struct ContainerConfig {
+        //TODO: parsed manifest information
+};
+
 struct ContainerType {
         pid_t pid{};
         pid_t net_pid{};
@@ -98,6 +102,14 @@ struct VolumeType {
         std::vector<std::pair<std::string, std::string>> host_container_map{};
 };
 
+struct DeviceType {
+};
+
+struct NetworkType{
+        std::vector<std::pair<int, int>> host_container_map{};
+        std::string container_id{};
+};
+
 struct ImageType {
         std::string id{};
         std::string name{};
@@ -106,7 +118,3 @@ struct ImageType {
         std::string created_at{};
 };
 
-struct NetworkType{
-        std::vector<std::pair<int, int>> host_container_map{};
-        std::string container_id{};
-};

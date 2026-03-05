@@ -1,5 +1,5 @@
 #pragma once
-#include "db_types.hpp"
+#include "types.hpp"
 #include "logger.hpp"
 #include "new_database_manager.hpp"
 #include "singleton.hpp"
@@ -17,6 +17,7 @@ class ContainerManager : public DatabaseManager, public Singleton<ContainerManag
                 ContainerManager(ContainerManager&&) = delete;
                 auto operator=(const ContainerManager&) -> ContainerManager& = delete;
                 auto operator=(ContainerManager&&) -> ContainerManager& = delete;
+
                 auto init() -> void override;
                 auto process_job(const JobData&, const std::string& value, Status&) -> void override;
         private:

@@ -1,5 +1,5 @@
 #pragma once
-#include "db_types.hpp"
+#include "types.hpp"
 #include "singleton.hpp"
 #include <optional>
 #include <string>

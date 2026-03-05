@@ -5,6 +5,9 @@ CXXFLAGS = -Wall -Wextra -Wpedantic -march=native
 LDFLAGS = -lcpr -lcurl -lssl -lcrypto -pthread -lsqlite3 -lutil -lrocksdb
 DEBUG_FLAGS = -g
 
+FLATC_CC = flatc
+FLATC_CCFLAGS = --cpp
+
 INCLUDE_DIRS = ./include
 SRCDIR = ./src
 TEST_DIR = ./tests
@@ -17,9 +20,14 @@ BUILDDIR = ./build/release
 DEBUG_BUILDDIR = ./build/debug
 TEST_OUT = ./test_out
 
+FLATBUFFERS_SCHEMAS_DIR = ./flatbuffer_schemas
+GENERATED_SCHEMAS_DIR = ./gen_schemas
+
 DEPFLAGS = -MMD -MP
 DEBUG_CPPFLAGS = $(STD) $(CXXFLAGS) $(DEBUG_FLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS) $(DEPFLAGS)
 CPPFLAGS = $(STD) $(CXXFLAGS) -I$(INCLUDE_DIRS) $(OPTFLAGS) $(DEPFLAGS)
+
+FLATBUFFERS_SCHEMAS = $(wildcard $(FLATBUFFERS_SCHEMAS_DIR)/*.fbs)
 
 CPPFILES = $(wildcard $(SRCDIR)/*.cpp)
 OBJECTS = $(CPPFILES:$(SRCDIR)/%.cpp=$(BINARIES)/%.o)
@@ -32,48 +40,47 @@ TEST_FILES = $(wildcard $(TEST_DIR)/*.cpp)
 TEST_OBJS = $(TEST_FILES:$(TEST_DIR)/%.cpp=$(TEST_BINARIES)/%.o)
 TEST_EXEC = $(TEST_OUT)/run_tests
 
-all: build-release
+all: generate_schemas build-release
 
 build-release: $(OBJECTS)
 	@mkdir -p $(BUILDDIR)
-	@$(CXX) -o $(BUILDDIR)/quiver $^ $(LDFLAGS)
+	$(CXX) -o $(BUILDDIR)/quiver $^ $(LDFLAGS)
 
 $(BINARIES)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(BINARIES)
-	@echo "Compiling $<"
-	@$(CXX) $(CPPFLAGS) -c $< -o $@
+	$(CXX) $(CPPFLAGS) -c $< -o $@
 
 build-debug: $(DEBUG_OBJECTS)
 	@mkdir -p $(DEBUG_BUILDDIR)
-	@$(CXX) -o $(DEBUG_BUILDDIR)/quiver $^ $(LDFLAGS)
+	$(CXX) -o $(DEBUG_BUILDDIR)/quiver $^ $(LDFLAGS)
 
 $(DEBUG_BINARIES)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(DEBUG_BINARIES)
-	@echo "Compiling $<"
-	@$(CXX) $(DEBUG_CPPFLAGS) -c $< -o $@
+	$(CXX) $(DEBUG_CPPFLAGS) -c $< -o $@
 
 test: $(TEST_EXEC)
-	@echo "Running all tests..."
 	@./$(TEST_EXEC)
 
 $(TEST_EXEC): $(TEST_OBJS) $(TESTABLE_OBJS)
 	@mkdir -p $(TEST_OUT)
-	@$(CXX) $(CPPFLAGS) $^ -o $@ $(LDFLAGS)
+	$(CXX) $(CPPFLAGS) $^ -o $@ $(LDFLAGS)
 
 $(TEST_BINARIES)/%.o: $(TEST_DIR)/%.cpp
 	@mkdir -p $(TEST_BINARIES)
-	@echo "Compiling Test: $<"
-	@$(CXX) $(CPPFLAGS) -c $< -o $@
+	$(CXX) $(CPPFLAGS) -c $< -o $@
+
+generate_schemas: $(FLATBUFFERS_SCHEMAS)
+	@mkdir -p $(GENERATED_SCHEMAS_DIR)
+	$(FLATC_CC) $(FLATC_CCFLAGS) -o $(GENERATED_SCHEMAS_DIR) $^
 
 clean:
-	@echo "Cleaning build..."
-	@rm -rf ./bin ./build $(TEST_OUT)
+	rm -rf ./bin ./build $(TEST_OUT) $(GENERATED_SCHEMAS_DIR)
 
 run: build-release
-	@$(BUILDDIR)/quiver
+	$(BUILDDIR)/quiver
 
 run-debug: build-debug
-	@$(DEBUG_BUILDDIR)/quiver
+	$(DEBUG_BUILDDIR)/quiver
 
 .PHONY: all build-release build-debug test clean run run-debug
 

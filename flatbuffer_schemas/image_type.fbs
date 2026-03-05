@@ -1,0 +1,11 @@
+namespace Types;
+
+table Image {
+	id: string;
+	name: string;
+	tag: string;
+	path: string;
+	created_at: string;
+}
+
+root_type Image;

@@ -1,0 +1,24 @@
+include "volume_type.fbs";
+include "network_type.fbs";
+namespace Types;
+
+table Container {
+        pid: uint32;
+        net_pid: uint32;
+        vfs: bool;
+        no_remove: bool;
+        id: string;
+        name: string;
+        image: string;
+        status: string;
+        created_at: string;
+        hostname: string;
+        filesystem_path: string;
+        pty_shell: string;
+        vfs_path: string;
+        volumes: [PairString];
+        devices: [string];
+        ports: [PairInt32];
+}
+
+root_type Container;

@@ -1,5 +1,5 @@
 #include "database_command_queue.hpp"
-#include "db_types.hpp"
+#include "types.hpp"
 #include "utils.hpp"
 #include <atomic>
 #include <cstring>

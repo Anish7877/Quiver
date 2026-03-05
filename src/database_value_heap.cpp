@@ -1,5 +1,5 @@
 #include "database_value_heap.hpp"
-#include "db_types.hpp"
+#include "types.hpp"
 #include "utils.hpp"
 #include <iostream>
 #include <atomic>
