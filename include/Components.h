@@ -15,8 +15,10 @@
 #include <QStackedWidget>
 #include <QListWidget>
 #include <QMenu>
+#include <QTableWidget>
 
 namespace Quiver {
+
 
 class ToggleSwitch : public QCheckBox {
     Q_OBJECT
@@ -30,6 +32,7 @@ private:
     std::unique_ptr<Impl> pimpl_ {};
 };
 
+
 class ActivityGraph : public QWidget {
     Q_OBJECT
 public:
@@ -41,6 +44,7 @@ private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_ {};
 };
+
 
 class ContainerCard : public QFrame {
     Q_OBJECT
@@ -61,15 +65,32 @@ private:
     std::unique_ptr<Impl> pimpl_ {};
 };
 
+
 class StatCard : public QFrame {
     Q_OBJECT
 public:
-    explicit StatCard(const QString& title, const QString& value, const QString& color, QWidget* parent = nullptr);
+    explicit StatCard(const QString& title, const QString& value,
+                      const QString& color, QWidget* parent = nullptr);
     ~StatCard() override;
 private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_ {};
 };
+
+
+class ResourceTable : public QTableWidget {
+    Q_OBJECT
+public:
+    explicit ResourceTable(const QStringList& headers, QWidget* parent = nullptr);
+    ~ResourceTable() override;
+
+    auto add_status_badge(int row, int col, const QString& status) -> void;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pimpl_ {};
+};
+
 
 class CreateDialog : public QDialog {
     Q_OBJECT

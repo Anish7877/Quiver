@@ -7,6 +7,11 @@ class FlowLayout;
 namespace Quiver {
 
 
+class ImagesPage;
+class VolumesPage;
+class PortsPage;
+class DevicesPage;
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 

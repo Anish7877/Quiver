@@ -83,3 +83,79 @@ QDialog#SubDialog QListWidget::item { padding: 8px; }
 QDialog#SubDialog QListWidget::item:selected { background: #3B82F6; color: white; border-radius: 4px; }
 QDialog#SubDialog QPushButton { background: #1e293b; color: white; border: 1px solid #334155; border-radius: 4px; padding: 6px 16px; font-weight: bold; }
 QDialog#SubDialog QPushButton:hover { border-color: #3B82F6; }
+
+/* ── Resource Table (Dark) ─────────────────────────────────────────────────── */
+/* ── Tables (Dark) ─────────────────────────────────────────────────────────── */
+QTableWidget {
+    background-color: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 10px;
+    gridline-color: transparent;
+    color: #cbd5e1;
+    font-size: 13px;
+    selection-background-color: transparent;
+    selection-color: #f8fafc;
+    outline: none;
+}
+QTableWidget::item {
+    padding: 0px 16px;
+    border-bottom: 1px solid #1e293b;
+    background-color: transparent;
+}
+QTableWidget::item:selected {
+    background-color: rgba(59,130,246,0.10);
+    color: #f8fafc;
+}
+QTableWidget::item:hover {
+    background-color: rgba(255,255,255,0.03);
+}
+QHeaderView { background-color: transparent; }
+QHeaderView::section {
+    background-color: #0b0f19;
+    color: #475569;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 0px 16px;
+    height: 40px;
+    border: none;
+    border-bottom: 2px solid #1e293b;
+    border-right: 1px solid #1e293b;
+}
+QHeaderView::section:first { border-top-left-radius: 10px; }
+QHeaderView::section:last  { border-right: none; border-top-right-radius: 10px; }
+
+/* ── Scrollbars ─────────────────────────────────────────────────────────────── */
+QScrollBar:vertical   { background: transparent; width: 4px;  border-radius: 2px; }
+QScrollBar:horizontal { background: transparent; height: 4px; border-radius: 2px; }
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    background: #334155; border-radius: 2px; min-height: 30px; min-width: 30px;
+}
+QScrollBar::add-line:vertical,  QScrollBar::sub-line:vertical  { height: 0px; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
+
+/* ── FAB Button ─────────────────────────────────────────────────────────────── */
+QPushButton#FabButton {
+    background-color: #3B82F6;
+    color: white;
+    border-radius: 26px;
+    font-size: 26px;
+    font-weight: bold;
+    border: none;
+    padding-bottom: 2px;
+}
+QPushButton#FabButton:hover  { background-color: #60A5FA; color: #0f172a; }
+QPushButton#FabButton:pressed { background-color: #2563EB; color: white; }
+
+/* ── Action button ──────────────────────────────────────────────────────────── */
+QPushButton#TableDangerBtn {
+    background-color: rgba(239,68,68,0.10);
+    color: #ef4444;
+    border: 1px solid rgba(239,68,68,0.40);
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+QPushButton#TableDangerBtn:hover  { background-color: #ef4444; color: white; border-color: #ef4444; }
+QPushButton#TableDangerBtn:pressed { background-color: #dc2626; color: white; }

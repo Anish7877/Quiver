@@ -2,6 +2,7 @@
     <qresource prefix="/">
         <file>assets/style.qss</file>
         <file>assets/light_style.qss</file>
+        <file>assets/icons/logo.svg</file>
         <file>assets/icons/menu.svg</file>
         <file>assets/icons/home.svg</file>
         <file>assets/icons/containers.svg</file>
