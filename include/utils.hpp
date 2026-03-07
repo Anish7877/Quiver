@@ -1,13 +1,16 @@
 #pragma once
-#define CERR -1
+#define ERR -1
+#include <string>
+#include <filesystem>
 namespace fs = std::filesystem;
 
 namespace Utils {
     auto dir_exists(const fs::path& path) -> bool;
     auto path_exists(const fs::path& path) -> bool;
-    auto ensure_dir(const fs::path& path, mode_t mode = 0755) -> void;
+    auto ensure_dirs(const fs::path& path, mode_t mode = 0755) -> void;
     auto ensure_file(const fs::path& path) -> void;
     auto write_file(const fs::path& path, std::string_view buffer) -> void;
+    auto handle_error(const std::string&) -> void;
     auto print_usage() -> void;
     auto get_base_dir() -> std::string;
     auto get_sock_path(const pid_t& pid) -> std::string;

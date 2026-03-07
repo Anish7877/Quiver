@@ -24,7 +24,7 @@ auto Utils::path_exists(const fs::path& path) -> bool {
         return fs::exists(path);
 }
 
-auto Utils::ensure_dir(const fs::path& path, mode_t mode) -> void {
+auto Utils::ensure_dirs(const fs::path& path, mode_t mode) -> void {
         if(!dir_exists(path)) {
                 fs::create_directories(path);
                 fs::permissions(path, static_cast<fs::perms>(mode), fs::perm_options::replace);
@@ -37,7 +37,7 @@ auto Utils::ensure_dir(const fs::path& path, mode_t mode) -> void {
 auto Utils::ensure_file(const fs::path& path) -> void {
         if(!path_exists(path)) {
                 fs::path parent_path{path.parent_path()};
-                if(!parent_path.empty() && !dir_exists(parent_path)) ensure_dir(parent_path);
+                if(!parent_path.empty() && !dir_exists(parent_path)) ensure_dirs(parent_path);
                 std::ofstream file{path};
                 if(!file) [[unlikely]] {
                         throw std::runtime_error(std::format("File Error: failed to create '{}'", path.string()));
@@ -47,7 +47,7 @@ auto Utils::ensure_file(const fs::path& path) -> void {
 
 auto Utils::write_file(const fs::path& path, std::string_view buffer) -> void {
         fs::path parent_path{path.parent_path()};
-        if(!parent_path.empty() && !dir_exists(parent_path)) ensure_dir(parent_path);
+        if(!parent_path.empty() && !dir_exists(parent_path)) ensure_dirs(parent_path);
         std::ofstream file{path, std::ios::app};
 
         if (!file.is_open()) [[unlikely]] {
@@ -60,6 +60,11 @@ auto Utils::write_file(const fs::path& path, std::string_view buffer) -> void {
         }
 }
 
+auto Utils::handle_error(const std::string& err) -> void {
+        std::cerr << err << '\n';
+        exit(EXIT_FAILURE);
+}
+
 std::string Utils::get_base_dir(){
     const char* home{ getenv("HOME") };
     std::string base{ home ? std::string(home) : "/tmp" };
@@ -68,13 +73,13 @@ std::string Utils::get_base_dir(){
 
 std::string Utils::get_sock_path(const pid_t& pid){
     std::string path{ get_base_dir() + "/containers/" + std::to_string(static_cast<long long>(pid)) };
-    ensure_dir(path);
+    ensure_dirs(path);
     return path + "/attach.sock";
 }
 
 std::string Utils::get_filesystem_path(const pid_t& pid){
     std::string path{ get_base_dir() + "/filesystems/" + std::to_string(static_cast<long long>(pid)) };
-    ensure_dir(path);
+    ensure_dirs(path);
     return path;
 }
 
@@ -85,13 +90,12 @@ std::string Utils::get_vfs_path(const pid_t &pid){
 
 std::string Utils::get_image_path(const std::string& image_name){
     std::string path{ get_base_dir() + "/images/" + image_name};
-    ensure_dir(path);
     return path;
 }
 
 std::string Utils::get_logs_path(const pid_t& pid){
     std::string path{ get_base_dir() + "/logs/" + std::to_string(static_cast<long long>(pid)) };
-    ensure_dir(path);
+    ensure_dirs(path);
     return path;
 }
 
@@ -159,7 +163,7 @@ std::string Utils::generate_container_id() {
 int Utils::remove_directory_recursively(const std::string& path) {
     DIR* dir{ opendir(path.c_str()) };
     if (!dir) {
-        return CERR;
+        return ERR;
     }
     dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
@@ -168,11 +172,11 @@ int Utils::remove_directory_recursively(const std::string& path) {
         }
         std::string full_path{ path + "/" + entry->d_name };
         struct stat statbuf;
-        if (lstat(full_path.c_str(), &statbuf) == CERR) {
+        if (lstat(full_path.c_str(), &statbuf) == ERR) {
             continue;
         }
         if (S_ISDIR(statbuf.st_mode)) {
-            if (remove_directory_recursively(full_path) == CERR) {
+            if (remove_directory_recursively(full_path) == ERR) {
             }
         } else {
             unlink(full_path.c_str());
@@ -186,14 +190,14 @@ int Utils::remove_directory_recursively(const std::string& path) {
 bool Utils::extract_tarball(const std::string& tarball_path, const std::string& destination_path) {
     pid_t pid{ fork() };
 
-    if (pid == CERR) {
+    if (pid == ERR) {
         perror("fork failed");
         return false;
     }
     else if (pid == 0) {
-        execlp("tar", "tar", "-xzf", tarball_path.c_str(), "-C", destination_path.c_str(), NULL);
+        execlp("tar", "tar", "-xzf", tarball_path.c_str(), "-", destination_path.c_str(), NULL);
         perror("execlp failed");
-        exit(CERR);
+        exit(ERR);
     }
     else {
         int status{};
