@@ -103,11 +103,13 @@ struct VolumeType {
 };
 
 struct DeviceType {
+        std::string container_id{};
+        std::vector<std::pair<std::string, std::string>> host_container_map{};
 };
 
 struct NetworkType{
-        std::vector<std::pair<int, int>> host_container_map{};
         std::string container_id{};
+        std::vector<std::pair<int, int>> host_container_map{};
 };
 
 struct ImageType {

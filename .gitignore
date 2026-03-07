@@ -1,6 +1,7 @@
 /build/**
 /bin/**
 /test_out/*
+/gen_schemas/*
 *.txt
 
 .vscode/**

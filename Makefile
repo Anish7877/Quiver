@@ -58,6 +58,10 @@ $(DEBUG_BINARIES)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(DEBUG_BINARIES)
 	$(CXX) $(DEBUG_CPPFLAGS) -c $< -o $@
 
+generate_schemas: $(FLATBUFFERS_SCHEMAS)
+	@mkdir -p $(GENERATED_SCHEMAS_DIR)
+	$(FLATC_CC) $(FLATC_CCFLAGS) -o $(GENERATED_SCHEMAS_DIR) $^
+
 test: $(TEST_EXEC)
 	@./$(TEST_EXEC)
 
@@ -69,9 +73,6 @@ $(TEST_BINARIES)/%.o: $(TEST_DIR)/%.cpp
 	@mkdir -p $(TEST_BINARIES)
 	$(CXX) $(CPPFLAGS) -c $< -o $@
 
-generate_schemas: $(FLATBUFFERS_SCHEMAS)
-	@mkdir -p $(GENERATED_SCHEMAS_DIR)
-	$(FLATC_CC) $(FLATC_CCFLAGS) -o $(GENERATED_SCHEMAS_DIR) $^
 
 clean:
 	rm -rf ./bin ./build $(TEST_OUT) $(GENERATED_SCHEMAS_DIR)
@@ -82,7 +83,7 @@ run: build-release
 run-debug: build-debug
 	$(DEBUG_BUILDDIR)/quiver
 
-.PHONY: all build-release build-debug test clean run run-debug
+.PHONY: all build-release build-debug generate_schemas test clean run run-debug
 
 -include $(OBJECTS:.o=.d)
 -include $(DEBUG_OBJECTS:.o=.d)

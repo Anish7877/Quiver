@@ -19,9 +19,9 @@ class DatabaseValueHeap : public Singleton<DatabaseValueHeap> {
                 auto get_job_data_pointer(std::size_t offset) const -> const char*;
                 auto commit_read_head(std::size_t bytes_processed) -> void;
         private:
-                char* m_mapped_mirror_address{nullptr};
                 std::size_t m_physical_size{};
                 std::string m_buf_name{};
                 bool m_is_consumer{};
+                char* m_mapped_mirror_address{nullptr};
                 ValueHeapHeader* m_header{nullptr};
 };

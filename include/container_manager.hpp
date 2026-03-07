@@ -7,7 +7,7 @@
 #include <rocksdb/db.h>
 namespace fs = std::filesystem;
 
-class ContainerManager : public DatabaseManager, public Singleton<ContainerManager> {
+class ContainerManager : public DatabaseManager<ContainerType>, public Singleton<ContainerManager> {
         friend class Singleton<ContainerManager>;
         private:
                 ContainerManager() = default;
@@ -19,11 +19,11 @@ class ContainerManager : public DatabaseManager, public Singleton<ContainerManag
                 auto operator=(ContainerManager&&) -> ContainerManager& = delete;
 
                 auto init() -> void override;
-                auto process_job(const JobData&, const std::string& value, Status&) -> void override;
+                auto process_job(const JobData&, const ContainerType& value, Status&) -> void override;
         private:
                 auto process_get_job(const JobData&, Status&) -> void override;
-                auto process_put_job(const JobData&, const std::string&, Status&) -> void override;
-                auto process_update_job(const JobData&, const std::string&, Status&) -> void override;
+                auto process_put_job(const JobData&, const ContainerType&, Status&) -> void override;
+                auto process_update_job(const JobData&, const ContainerType&, Status&) -> void override;
                 auto process_delete_job(const JobData&, Status&) -> void override;
                 Logger m_logger{};
                 fs::path m_db_path{};

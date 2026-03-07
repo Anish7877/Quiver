@@ -1,5 +1,6 @@
 #include "container_manager.hpp"
 #include "utils.hpp"
+#include "serialization.hpp"
 #include <chrono>
 #include <format>
 namespace chrono = std::chrono;
@@ -17,12 +18,12 @@ auto ContainerManager::init() -> void {
         }
 }
 
-auto ContainerManager::process_job(const JobData& job, const std::string& value, Status& stat) -> void {
+auto ContainerManager::process_job(const JobData& job, const ContainerType& obj, Status& stat) -> void {
         stat.m_ok = false;
         switch (job.type) {
                 case JobType::GET: process_get_job(job, stat); break;
-                case JobType::PUT: process_put_job(job, value, stat); break;
-                case JobType::UPDATE: process_update_job(job, value, stat); break;
+                case JobType::PUT: process_put_job(job, obj, stat); break;
+                case JobType::UPDATE: process_update_job(job, obj, stat); break;
                 case JobType::DELETE: process_delete_job(job, stat); break;
                 default:
                         m_logger.log(std::format("[{}] Container Manager Error: Unknown job type found.",
@@ -59,7 +60,7 @@ auto ContainerManager::process_get_job(const JobData& job, Status& stat) -> void
         }
 }
 
-auto ContainerManager::process_put_job(const JobData& job, const std::string& value, Status& stat) -> void {
+auto ContainerManager::process_put_job(const JobData& job, const ContainerType& obj, Status& stat) -> void {
         if (m_db == nullptr) [[unlikely]] {
                 m_logger.log(std::format("[{}] Container Manager Error: Manager not initialized.",
                                         chrono::high_resolution_clock::now()));
@@ -68,7 +69,8 @@ auto ContainerManager::process_put_job(const JobData& job, const std::string& va
         }
 
         rocksdb::Slice db_key{job.key};
-        rocksdb::Status status{m_db->Put(rocksdb::WriteOptions(), db_key, value)};
+        std::string serialized_value{};
+        rocksdb::Status status{m_db->Put(rocksdb::WriteOptions(), db_key, serialized_value)};
 
         if (!status.ok()) [[unlikely]] {
                 m_logger.log(std::format("[{}] Container Manager Error: Write error -> {}.",
@@ -83,8 +85,8 @@ auto ContainerManager::process_put_job(const JobData& job, const std::string& va
         }
 }
 
-auto ContainerManager::process_update_job(const JobData& job, const std::string& value, Status& stat) -> void {
-        process_put_job(job, value, stat);
+auto ContainerManager::process_update_job(const JobData& job, const ContainerType& obj, Status& stat) -> void {
+        process_put_job(job, obj, stat);
 }
 
 auto ContainerManager::process_delete_job(const JobData& job, Status& stat) -> void {

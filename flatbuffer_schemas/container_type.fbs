@@ -14,7 +14,6 @@ table Container {
         created_at: string;
         hostname: string;
         filesystem_path: string;
-        pty_shell: string;
         vfs_path: string;
         volumes: [PairString];
         devices: [string];
