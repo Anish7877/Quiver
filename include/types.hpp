@@ -82,8 +82,8 @@ struct ContainerConfig {
 };
 
 struct ContainerType {
-        pid_t pid{};
-        pid_t net_pid{};
+        std::uint32_t pid{};
+        std::uint32_t net_pid{};
         bool vfs{};
         bool no_remove{};
         std::string id{};
@@ -95,21 +95,27 @@ struct ContainerType {
         std::string filesystem_path{};
         std::string pty_shell{};
         std::string vfs_path{};
+        std::vector<std::pair<std::string, std::string>> volumes{};
+        std::vector<std::string> devices{};
+        std::vector<std::pair<int, int>> ports{};
 };
 
 struct VolumeType {
         std::string container_id{};
-        std::vector<std::pair<std::string, std::string>> host_container_map{};
+        std::string created_at{};
+        std::vector<std::pair<std::string, std::string>> volumes{};
 };
 
 struct DeviceType {
         std::string container_id{};
-        std::vector<std::pair<std::string, std::string>> host_container_map{};
+        std::string created_at{};
+        std::vector<std::string> devices{};
 };
 
 struct NetworkType{
         std::string container_id{};
-        std::vector<std::pair<int, int>> host_container_map{};
+        std::string created_at{};
+        std::vector<std::pair<int, int>> ports{};
 };
 
 struct ImageType {

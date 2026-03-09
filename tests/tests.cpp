@@ -1,18 +1,9 @@
 #include "tests.hpp"
-#include "json_serialization.hpp"
 #include "utils.hpp"
 #include "logger.hpp"
-#include <nlohmann/detail/macro_scope.hpp>
-#include <nlohmann/json.hpp>
-
-struct Test{
-        std::string msg{};
-        auto operator==(const Test&) const -> bool = default;
-        friend auto operator<<(std::ostream& os, const Test& t) -> std::ostream& {
-                return os << "Test{message: " << t.msg << "}";
-        }
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Test, msg)
+#include <flatbuffers/flatbuffers.h>
+#include "container_type_generated.h"
+#include "serialization.hpp"
 
 auto Tests::test_utils() -> void {
         test(Utils::dir_exists, true, "/home");
@@ -42,19 +33,41 @@ auto Tests::test_logger() -> void {
 }
 
 auto Tests::test_serialization() -> void {
-        Test msg{"hello"};
-        std::string expected_string{json(msg).dump()};
-        auto serialize_wrapper{[](const auto& val) {
-                return JsonSerialization::serialize_data(val);
+        ContainerType c{};
+        c.id = "quiver_test_1";
+        c.pid = 1234;
+        c.image = "ubuntu:22.04";
+        c.vfs = true;
+        c.devices = {"/dev/null", "/dev/zero"};
+        c.volumes = {{"/host/data", "/container/data"}};
+
+        auto serialize_and_verify{[](const ContainerType& obj) -> bool {
+                flatbuffers::FlatBufferBuilder builder{};
+                auto offset{Serialization::serialize(builder, obj)};
+                builder.Finish(offset);
+                flatbuffers::Verifier verifier(builder.GetBufferPointer(), builder.GetSize());
+                return verifier.VerifyBuffer<Types::Container>(nullptr);
         }};
-        test(serialize_wrapper, expected_string, msg);
+        test(serialize_and_verify, true, c);
 }
 
 auto Tests::test_deserialization() -> void {
-        Test msg{"hello"};
-        std::string json_string{json(msg).dump()};
-        auto deserialize_wrapper{[](const std::string& val) {
-                return JsonSerialization::deserialize_data<Test>(val);
+        ContainerType original{};
+        original.id = "quiver_test_2";
+        original.pid = 9000;
+        original.name = "my_database_container";
+        original.devices = {"/dev/tty"};
+        original.volumes = {{"/tmp", "/var/tmp"}};
+        auto serialize_deserialize{[](const ContainerType& obj) -> ContainerType {
+                flatbuffers::FlatBufferBuilder builder{};
+                auto offset{Serialization::serialize(builder, obj)};
+                builder.Finish(offset);
+                const auto* fb_root{flatbuffers::GetRoot<Types::Container>(builder.GetBufferPointer())};
+                return Serialization::deserialize(fb_root);
         }};
-        test(deserialize_wrapper, msg, json_string);
+        ContainerType restored{serialize_deserialize(original)};
+        auto check_id{[](const ContainerType& c) { return c.id; }};
+        test(check_id, std::string("quiver_test_2"), restored);
+        auto check_pid{[](const ContainerType& c) { return c.pid; }};
+        test(check_pid, 9000u, restored);
 }
