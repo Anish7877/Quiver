@@ -24,6 +24,7 @@ class Logger{
                 std::mutex m_mtx{};
                 std::condition_variable m_cv{};
                 std::atomic<bool> m_running{true};
+                std::atomic<bool> m_is_log_path_set{false};
                 std::ofstream m_log_file{};
                 fs::path m_log_path{};
 };
