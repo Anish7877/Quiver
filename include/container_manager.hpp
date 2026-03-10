@@ -19,7 +19,8 @@ class ContainerManager : public DatabaseManager<ContainerType>, public Singleton
                 auto operator=(ContainerManager&&) -> ContainerManager& = delete;
 
                 auto init() -> void override;
-                auto process_job(const JobData&, const ContainerType& value, Status&) -> void override;
+                auto process_job(const JobData&, const ContainerType&, Status&) -> void override;
+                auto extract_container(const std::string&, Status&) -> ContainerType;
         private:
                 auto process_get_job(const JobData&, Status&) -> void override;
                 auto process_put_job(const JobData&, const ContainerType&, Status&) -> void override;

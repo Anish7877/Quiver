@@ -1,7 +1,11 @@
 #include "container_manager.hpp"
+#include "container_type_generated.h"
+#include "types.hpp"
 #include "utils.hpp"
 #include "serialization.hpp"
 #include <chrono>
+#include <flatbuffers/buffer.h>
+#include <flatbuffers/verifier.h>
 #include <format>
 namespace chrono = std::chrono;
 
@@ -32,6 +36,23 @@ auto ContainerManager::process_job(const JobData& job, const ContainerType& obj,
         }
 }
 
+auto ContainerManager::extract_container(const std::string& raw_data, Status& stat) -> ContainerType {
+        ContainerType obj{};
+        flatbuffers::Verifier verifier{reinterpret_cast<const uint8_t*>(raw_data.data()), raw_data.size()};
+
+        if (verifier.VerifyBuffer<Types::Container>(nullptr)) {
+                m_logger.log(std::format("[{}] Container Manager Error: Data is corrupted or invalid flatbuffer data.",
+                                        chrono::high_resolution_clock::now()));
+                stat.m_ok = false;
+                stat.m_error = "Container Manager Error: Data is corrupted or invalid flatbuffer data.";
+                return obj;
+        }
+
+        const auto* fb_root{flatbuffers::GetRoot<Types::Container>(raw_data.data())};
+        obj = Serialization::deserialize(fb_root);
+        return obj;
+}
+
 auto ContainerManager::process_get_job(const JobData& job, Status& stat) -> void {
         if (m_db == nullptr) [[unlikely]] {
                 m_logger.log(std::format("[{}] Container Manager Error: Manager not initialized.",
@@ -40,8 +61,8 @@ auto ContainerManager::process_get_job(const JobData& job, Status& stat) -> void
                 return;
         }
         rocksdb::Slice db_key{job.key};
-        std::string fetched_data{};
-        rocksdb::Status status{m_db->Get(rocksdb::ReadOptions(), db_key, &fetched_data)};
+        std::string fetched_raw_bytes{};
+        rocksdb::Status status{m_db->Get(rocksdb::ReadOptions(), db_key, &fetched_raw_bytes)};
 
         if (status.IsNotFound()) [[unlikely]] {
                 m_logger.log(std::format("[{}] Container Manager Error: Key [{}] not found in database.",
@@ -56,7 +77,7 @@ auto ContainerManager::process_get_job(const JobData& job, Status& stat) -> void
         else {
                 m_logger.log(std::format("[{}] Container Manager: Get job success.", chrono::high_resolution_clock::now()));
                 stat.m_ok = true;
-                stat.m_result = std::move(fetched_data);
+                stat.m_result = std::move(fetched_raw_bytes);
         }
 }
 
@@ -69,7 +90,10 @@ auto ContainerManager::process_put_job(const JobData& job, const ContainerType& 
         }
 
         rocksdb::Slice db_key{job.key};
-        std::string serialized_value{};
+        flatbuffers::FlatBufferBuilder builder{};
+        flatbuffers::Offset<Types::Container> offset{Serialization::serialize(builder, obj)};
+        builder.Finish(offset);
+        std::string serialized_value{reinterpret_cast<const char*>(builder.GetBufferPointer()), builder.GetSize()};
         rocksdb::Status status{m_db->Put(rocksdb::WriteOptions(), db_key, serialized_value)};
 
         if (!status.ok()) [[unlikely]] {
