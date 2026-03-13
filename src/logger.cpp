@@ -4,9 +4,6 @@
 #include "utils.hpp"
 #include "logger.hpp"
 
-Logger::Logger() {
-}
-
 auto Logger::set_log_path(const fs::path& log_path) -> void {
         std::lock_guard<std::mutex> lock{m_mtx};
         m_log_path = log_path;

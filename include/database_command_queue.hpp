@@ -16,7 +16,7 @@ class DatabaseCommandQueue : public Singleton<DatabaseCommandQueue> {
                 auto operator=(const DatabaseCommandQueue&) -> DatabaseCommandQueue& = delete;
                 auto operator=(DatabaseCommandQueue&&) -> DatabaseCommandQueue& = delete;
 
-                auto map_buffer(const std::string& buf_name, bool is_consumer) -> void;
+                auto map_buffer(const std::string&, bool) -> void;
                 auto atomic_push(const JobData&) -> bool;
                 auto atomic_pop() -> std::optional<JobData>;
                 auto get_active_connections() const -> std::size_t;

@@ -1,4 +1,5 @@
-CXX = g++
+CXX ?= g++
+MIN_CXX_VER = 15
 STD = -std=c++20
 OPTFLAGS = -O3
 CXXFLAGS = -Wall -Wextra -Wpedantic -march=native
@@ -40,6 +41,23 @@ TEST_FILES = $(wildcard $(TEST_DIR)/*.cpp)
 TEST_OBJS = $(TEST_FILES:$(TEST_DIR)/%.cpp=$(TEST_BINARIES)/%.o)
 TEST_EXEC = $(TEST_OUT)/run_tests
 
+CXX_PATH = $(shell command -v $(CXX) 2> /dev/null)
+CXX_VERSION := $(shell $(CXX) -dumpversion | cut -f1 -d.)
+IS_SUPPORTED := $(shell [ "$(CXX_VERSION)" -ge "$(MIN_CXX_VER)" ] && echo true || echo false)
+FLATC_CC_PATH = $(shell command -v $(FLATC_CC) 2> /dev/null)
+
+ifeq ($(CXX_PATH),)
+	$(error "Error: '$(CXX)' not found.")
+endif
+
+ifeq ($(IS_SUPPORTED),false)
+	$(error "Error: '$(CXX)' >= $(MIN_CXX_VER)")
+endif
+
+ifeq ($(FLATC_CC_PATH),)
+	$(error "Error: '$(FLATC_CC)' not found.")
+endif
+
 all: generate_schemas build-release
 
 build-release: $(OBJECTS)
@@ -72,7 +90,6 @@ $(TEST_EXEC): $(TEST_OBJS) $(TESTABLE_OBJS)
 $(TEST_BINARIES)/%.o: $(TEST_DIR)/%.cpp
 	@mkdir -p $(TEST_BINARIES)
 	$(CXX) $(CPPFLAGS) -c $< -o $@
-
 
 clean:
 	rm -rf ./bin ./build $(TEST_OUT) $(GENERATED_SCHEMAS_DIR)

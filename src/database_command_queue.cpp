@@ -16,41 +16,39 @@ auto DatabaseCommandQueue::map_buffer(const std::string& buf_name, bool is_consu
 
         long page_size{sysconf(_SC_PAGESIZE)};
         if (page_size == CERR) [[unlikely]] {
-                throw std::runtime_error("Value Heap Error: Failed to get system page size.");
+                throw std::runtime_error("Database Command Queue Error: Failed to get system page size.");
         }
-        std::size_t remainder{m_buf_size % page_size};
-        m_buf_size = remainder == 0 ? m_buf_size : m_buf_size + (page_size - remainder);
         std::size_t total_file_size{m_buf_size + page_size};
 
         if (m_is_consumer) {
                 shm_unlink(m_buf_name.c_str());
                 fd = shm_open(m_buf_name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0660);
                 if (fd == CERR) [[unlikely]] {
-                        throw std::runtime_error("Value Heap Error: failed to create shared memory.");
+                        throw std::runtime_error("Database Command Queue Error: failed to create shared memory.");
                 }
 
                 if (ftruncate(fd, total_file_size) == CERR) [[unlikely]] {
                         close(fd);
-                        throw std::runtime_error("Value Heap Error: failed to set shared memory size.");
+                        throw std::runtime_error("Database Command Queue Error: failed to set shared memory size.");
                 }
         }
         else {
                 fd = shm_open(m_buf_name.c_str(), O_RDWR, 0660);
                 if (fd == CERR) [[unlikely]] {
-                        throw std::runtime_error("Value Heap Error: Worker failed to connect.");
+                        throw std::runtime_error("Database Command Queue Error: Worker failed to connect.");
                 }
         }
 
         void* header_addr{mmap(nullptr, page_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)};
         if (header_addr == MAP_FAILED) [[unlikely]] {
                 close(fd);
-                throw std::runtime_error("Value Heap Error: failed to map header memory.");
+                throw std::runtime_error("Database Command Queue Error: failed to map header memory.");
         }
 
         void* virtual_addr{mmap(nullptr, m_buf_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, page_size)};
         if (virtual_addr == MAP_FAILED) [[unlikely]] {
                 close(fd);
-                throw std::runtime_error("Value Heap Error: failed to reserve virtual memory.");
+                throw std::runtime_error("Database Command Queue Error: failed to reserve virtual memory.");
         }
         close(fd);
 
@@ -143,8 +141,8 @@ DatabaseCommandQueue::~DatabaseCommandQueue() {
 
         if (m_header != nullptr) {
                 long page_size{sysconf(_SC_PAGESIZE)};
-                if (munmap(m_header, page_size) == -1) { // Assuming CERR is -1
-                        std::cerr << "Command Queue Error: failed to unmap header.\n";
+                if (munmap(m_header, page_size) == -1) {
+                        std::cerr << "Database Command Queue Error: failed to unmap header.\n";
                 }
                 m_header = nullptr;
         }
