@@ -57,13 +57,13 @@ struct ValueHeapHeader {
 
 struct Status {
         public:
-                auto ok() -> bool {
+                auto ok() const -> bool {
                         return m_ok;
                 }
-                auto get_error() -> std::string {
+                auto get_error() const -> std::string {
                         return m_error;
                 }
-                auto get_result() -> std::string {
+                auto get_result() const -> std::string {
                         return m_result;
                 }
         private:

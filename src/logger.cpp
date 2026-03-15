@@ -11,7 +11,7 @@ auto Logger::set_log_path(const fs::path& log_path) -> void {
                 Utils::ensure_file(log_path);
         }
         catch(const std::exception& e) {
-                std::cout << e.what() << '\n';
+                std::cerr << e.what() << '\n';
         }
         m_log_file.open(m_log_path, std::ios::app);
         if(!m_log_file.is_open()) [[unlikely]] {

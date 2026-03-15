@@ -5,6 +5,7 @@ OPTFLAGS = -O3
 CXXFLAGS = -Wall -Wextra -Wpedantic -march=native
 LDFLAGS = -lcpr -lcurl -lssl -lcrypto -pthread -lsqlite3 -lutil -lrocksdb
 DEBUG_FLAGS = -g
+DEPFLAGS = -MMD -MP
 
 FLATC_CC = flatc
 FLATC_CCFLAGS = --cpp
@@ -24,8 +25,7 @@ TEST_OUT = ./test_out
 FLATBUFFERS_SCHEMAS_DIR = ./flatbuffer_schemas
 GENERATED_SCHEMAS_DIR = ./gen_schemas
 
-DEPFLAGS = -MMD -MP
-DEBUG_CPPFLAGS = $(STD) $(CXXFLAGS) $(DEBUG_FLAGS) -I$(INCLUDE_DIRS) -I$(GENERATED_SCHEMAS_DIR) $(OPTFLAGS) $(DEPFLAGS)
+DEBUG_CPPFLAGS = $(STD) $(CXXFLAGS) $(DEBUG_FLAGS) -I$(INCLUDE_DIRS) -I$(GENERATED_SCHEMAS_DIR) $(DEPFLAGS)
 CPPFLAGS = $(STD) $(CXXFLAGS) -I$(INCLUDE_DIRS) -I$(GENERATED_SCHEMAS_DIR) $(OPTFLAGS) $(DEPFLAGS)
 
 FLATBUFFERS_SCHEMAS = $(wildcard $(FLATBUFFERS_SCHEMAS_DIR)/*.fbs)
@@ -94,13 +94,7 @@ $(TEST_BINARIES)/%.o: $(TEST_DIR)/%.cpp
 clean:
 	rm -rf ./bin ./build $(TEST_OUT) $(GENERATED_SCHEMAS_DIR)
 
-run: build-release
-	$(BUILDDIR)/quiver
-
-run-debug: build-debug
-	$(DEBUG_BUILDDIR)/quiver
-
-.PHONY: all build-release build-debug generate_schemas test clean run run-debug
+.PHONY: all build-release build-debug generate_schemas test clean
 
 -include $(OBJECTS:.o=.d)
 -include $(DEBUG_OBJECTS:.o=.d)
