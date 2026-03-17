@@ -27,6 +27,11 @@ enum class TargetDB : std::uint8_t {
         IMAGE = 4
 };
 
+enum class TargetLog : std::uint8_t {
+        DBLOG = 0,
+        CONTAINERLOG = 1
+};
+
 struct alignas(std::hardware_destructive_interference_size) JobSlot {
         std::atomic<SlotState> state{};
         char key[32]{};
@@ -36,10 +41,23 @@ struct alignas(std::hardware_destructive_interference_size) JobSlot {
         std::uint64_t value_length{};
 };
 
-struct JobData {
+struct alignas(std::hardware_destructive_interference_size) LogSlot {
+        std::atomic<SlotState> state{};
+        TargetLog target_log{};
+        std::uint64_t value_offset{};
+        std::uint64_t value_length{};
+};
+
+struct DatabaseJobData {
         char key[32]{};
         JobType type{};
         TargetDB target{};
+        std::uint64_t value_offset{};
+        std::uint64_t value_length{};
+};
+
+struct LogJobData {
+        TargetLog target_log{};
         std::uint64_t value_offset{};
         std::uint64_t value_length{};
 };
@@ -72,9 +90,9 @@ struct Status {
                 friend class DeviceManager;
                 friend class NetworkManager;
                 friend class ImageManager;
-                bool m_ok{false};
                 std::string m_result{};
                 std::string m_error{};
+                bool m_ok{false};
 };
 
 struct ContainerConfig {

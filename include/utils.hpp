@@ -1,5 +1,4 @@
 #pragma once
-#define CERR -1
 #include <filesystem>
 #include <string>
 #include <sys/wait.h>
@@ -17,17 +16,14 @@ namespace Utils {
     auto get_filesystem_path(pid_t pid) -> fs::path;
     auto get_vfs_path(pid_t pid) -> fs::path;
     auto get_image_path(const std::string& image_name) -> fs::path;
-    auto get_logs_path(pid_t pid) -> fs::path;
     auto get_container_db_path() -> fs::path;
     auto get_volume_db_path() -> fs::path;
     auto get_device_db_path() -> fs::path;
     auto get_network_db_path() -> fs::path;
     auto get_image_db_path() -> fs::path;
-    auto get_container_db_log_path() -> fs::path;
-    auto get_volume_db_log_path() -> fs::path;
-    auto get_device_db_log_path() -> fs::path;
-    auto get_network_db_log_path() -> fs::path;
-    auto get_image_db_log_path() -> fs::path;
+    auto get_logger_command_queue_buf_name() -> std::string;
+    auto get_database_command_queue_buf_name() -> std::string;
+    auto get_value_heap_buf_name() -> std::string;
     auto generate_container_id() -> std::string;
     auto remove_directory_recursively(const fs::path& path) -> bool;
     auto extract_tarball(const std::string& tarball_path, const std::string& destination_path) -> void;

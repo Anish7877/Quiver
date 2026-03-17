@@ -1,8 +1,10 @@
 #include "container_manager.hpp"
 #include "container_type_generated.h"
+#include "logger_command_queue.hpp"
+#include "value_heap.hpp"
 #include "types.hpp"
-#include "utils.hpp"
 #include "serialization.hpp"
+#include "utils.hpp"
 #include <chrono>
 #include <flatbuffers/buffer.h>
 #include <flatbuffers/verifier.h>
@@ -10,9 +12,16 @@
 namespace chrono = std::chrono;
 
 auto ContainerManager::init() -> void {
-        m_db_path = Utils::get_container_db_path();
-        Utils::ensure_dir(m_db_path.parent_path());
-        m_logger.set_log_path(Utils::get_container_db_log_path());
+        m_value_heap = &ValueHeap::get_instance();
+        m_log_cmd_queue = &LoggerCommandQueue::get_instance();
+        m_value_heap->map_buffer(Utils::get_value_heap_buf_name(), ValueHeap::VALUE_HEAP_SIZE, false);
+        if(!m_value_heap->ok()) [[unlikely]] {
+                throw std::runtime_error(m_value_heap->get_error());
+        }
+        m_log_cmd_queue->map_buffer(Utils::get_logger_command_queue_buf_name(), false);
+        if(!m_log_cmd_queue->ok()) [[unlikely]] {
+                throw std::runtime_error(m_log_cmd_queue->get_error());
+        }
         rocksdb::Options options{};
         options.create_if_missing = true;
         rocksdb::Status status{rocksdb::DB::Open(options, m_db_path, &m_db)};
@@ -22,7 +31,7 @@ auto ContainerManager::init() -> void {
         }
 }
 
-auto ContainerManager::process_job(const JobData& job, const ContainerType& obj, Status& stat) -> void {
+auto ContainerManager::process_job(const DatabaseJobData& job, const ContainerType& obj, Status& stat) -> void {
         stat.m_ok = false;
         switch (job.type) {
                 case JobType::GET: process_get_job(job, stat); break;
@@ -30,33 +39,34 @@ auto ContainerManager::process_job(const JobData& job, const ContainerType& obj,
                 case JobType::UPDATE: process_update_job(job, obj, stat); break;
                 case JobType::DELETE: process_delete_job(job, stat); break;
                 default:
-                        m_logger.log(std::format("[{}] Container Manager Error: Unknown job type found.",
+                        log_event(std::format("[{}] Container Manager Error: Unknown job type found.",
                                         chrono::high_resolution_clock::now()));
                         stat.m_error = "Container Manager Error: Unknown job type found.";
         }
 }
 
 auto ContainerManager::extract_container(const std::string& raw_data, Status& stat) -> ContainerType {
+        stat.m_ok = false;
         ContainerType obj{};
         flatbuffers::Verifier verifier{reinterpret_cast<const uint8_t*>(raw_data.data()), raw_data.size()};
 
         if (verifier.VerifyBuffer<Types::Container>(nullptr)) {
-                m_logger.log(std::format("[{}] Container Manager Error: Data is corrupted or invalid flatbuffer data.",
-                                        chrono::high_resolution_clock::now()));
-                stat.m_ok = false;
+                log_event(std::format("[{}] Container Manager Error: Data is corrupted or invalid flatbuffer data.",
+                                chrono::high_resolution_clock::now()));
                 stat.m_error = "Container Manager Error: Data is corrupted or invalid flatbuffer data.";
                 return obj;
         }
 
         const auto* fb_root{flatbuffers::GetRoot<Types::Container>(raw_data.data())};
         obj = Serialization::deserialize(fb_root);
+        stat.m_ok = true;
         return obj;
 }
 
-auto ContainerManager::process_get_job(const JobData& job, Status& stat) -> void {
+auto ContainerManager::process_get_job(const DatabaseJobData& job, Status& stat) -> void {
         if (m_db == nullptr) [[unlikely]] {
-                m_logger.log(std::format("[{}] Container Manager Error: Manager not initialized.",
-                                        chrono::high_resolution_clock::now()));
+                log_event(std::format("[{}] Container Manager Error: Manager not initialized.",
+                                chrono::high_resolution_clock::now()));
                 stat.m_error = "Container Manager Error: Manager not initialized.";
                 return;
         }
@@ -65,25 +75,25 @@ auto ContainerManager::process_get_job(const JobData& job, Status& stat) -> void
         rocksdb::Status status{m_db->Get(rocksdb::ReadOptions(), db_key, &fetched_raw_bytes)};
 
         if (status.IsNotFound()) [[unlikely]] {
-                m_logger.log(std::format("[{}] Container Manager Error: Key [{}] not found in database.",
-                                        chrono::high_resolution_clock::now(), job.key));
+                log_event(std::format("[{}] Container Manager Error: Key [{}] not found in database.",
+                                chrono::high_resolution_clock::now(), job.key));
                 stat.m_error = std::format("Container Manager Error: Key [{}] not found in database.", job.key);
         }
         else if (!status.ok()) [[unlikely]] {
-                m_logger.log(std::format("[{}] Container Manager Error: Read error -> {}.",
-                                        chrono::high_resolution_clock::now(), status.ToString()));
+                log_event(std::format("[{}] Container Manager Error: Read error -> {}.",
+                                chrono::high_resolution_clock::now(), status.ToString()));
                 stat.m_error = std::format("Container Manager Error: Read error -> {}.", status.ToString());
         }
         else {
-                m_logger.log(std::format("[{}] Container Manager: Get job success.", chrono::high_resolution_clock::now()));
+                log_event(std::format("[{}] Container Manager: Get job success.", chrono::high_resolution_clock::now()));
                 stat.m_ok = true;
                 stat.m_result = std::move(fetched_raw_bytes);
         }
 }
 
-auto ContainerManager::process_put_job(const JobData& job, const ContainerType& obj, Status& stat) -> void {
+auto ContainerManager::process_put_job(const DatabaseJobData& job, const ContainerType& obj, Status& stat) -> void {
         if (m_db == nullptr) [[unlikely]] {
-                m_logger.log(std::format("[{}] Container Manager Error: Manager not initialized.",
+                log_event(std::format("[{}] Container Manager Error: Manager not initialized.",
                                         chrono::high_resolution_clock::now()));
                 stat.m_error = "Container Manager Error: Manager not initialized.";
                 return;
@@ -97,25 +107,25 @@ auto ContainerManager::process_put_job(const JobData& job, const ContainerType& 
         rocksdb::Status status{m_db->Put(rocksdb::WriteOptions(), db_key, serialized_value)};
 
         if (!status.ok()) [[unlikely]] {
-                m_logger.log(std::format("[{}] Container Manager Error: Write error -> {}.",
+                log_event(std::format("[{}] Container Manager Error: Write error -> {}.",
                                         chrono::high_resolution_clock::now(), status.ToString()));
                 stat.m_error = std::format("Container Manager Error: Write error -> {}.", status.ToString());
         }
         else {
-                m_logger.log(std::format("[{}] Container Manager: Put or Update job success.",
+                log_event(std::format("[{}] Container Manager: Put or Update job success.",
                                         chrono::high_resolution_clock::now()));
                 stat.m_ok = true;
                 stat.m_result = "Container Manager: Put or Update job success.";
         }
 }
 
-auto ContainerManager::process_update_job(const JobData& job, const ContainerType& obj, Status& stat) -> void {
+auto ContainerManager::process_update_job(const DatabaseJobData& job, const ContainerType& obj, Status& stat) -> void {
         process_put_job(job, obj, stat);
 }
 
-auto ContainerManager::process_delete_job(const JobData& job, Status& stat) -> void {
+auto ContainerManager::process_delete_job(const DatabaseJobData& job, Status& stat) -> void {
         if (m_db == nullptr) [[unlikely]] {
-                m_logger.log(std::format("[{}] Container Manager Error: Manager not initialized.",
+                log_event(std::format("[{}] Container Manager Error: Manager not initialized.",
                                         chrono::high_resolution_clock::now()));
                 stat.m_error = "Container Manager Error: Manager not initialized.";
                 return;
@@ -125,17 +135,27 @@ auto ContainerManager::process_delete_job(const JobData& job, Status& stat) -> v
         rocksdb::Status status{m_db->Delete(rocksdb::WriteOptions(), db_key)};
 
         if (!status.ok()) [[unlikely]] {
-                m_logger.log(std::format("[{}] Container Manager Error: Delete error -> {}.",
+                log_event(std::format("[{}] Container Manager Error: Delete error -> {}.",
                                         chrono::high_resolution_clock::now(), status.ToString()));
+                while(!m_log_cmd_queue->atomic_push(m_log_job_data)){}
                 stat.m_error = std::format("[{}] Container Manager Error: Delete error -> {}.",
                                 chrono::high_resolution_clock::now(), status.ToString());
         }
         else {
-                m_logger.log(std::format("[{}] Container Manager: Delete job success.",
+                log_event(std::format("[{}] Container Manager: Delete job success.",
                                         chrono::high_resolution_clock::now()));
                 stat.m_ok = true;
                 stat.m_result = "Container Manager: Delete job success.";
         }
+}
+
+auto ContainerManager::log_event(const std::string& log_data) -> void {
+                std::size_t offset{};
+                while(!m_value_heap->write_job_data(log_data, offset)){};
+                m_log_job_data.target_log = TargetLog::DBLOG;
+                m_log_job_data.value_offset = offset;
+                m_log_job_data.value_length = log_data.size();
+                while(!m_log_cmd_queue->atomic_push(m_log_job_data)){}
 }
 
 ContainerManager::~ContainerManager() {

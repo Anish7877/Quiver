@@ -85,11 +85,6 @@ auto Utils::get_image_path(const std::string& image_name) -> fs::path {
         return path;
 }
 
-auto Utils::get_logs_path(pid_t pid) -> fs::path {
-        std::string path{get_base_dir().string() + "/logs/" + std::to_string(static_cast<long long>(pid))};
-        return path;
-}
-
 auto Utils::get_container_db_path() -> fs::path {
         std::string path{get_base_dir().string() + "/db/container_db"};
         return path;
@@ -115,29 +110,16 @@ auto Utils::get_image_db_path() -> fs::path {
         return path;
 }
 
-auto Utils::get_container_db_log_path() -> fs::path {
-        std::string path{get_base_dir().string() + "/db_logs/container_db.log"};
-        return path;
+auto Utils::get_logger_command_queue_buf_name() -> std::string {
+        return "log_command_queue";
 }
 
-auto Utils::get_volume_db_log_path() -> fs::path {
-        std::string path{get_base_dir().string() + "/db_logs/volume_db.log"};
-        return path;
+auto Utils::get_database_command_queue_buf_name() -> std::string {
+        return "db_command_queue";
 }
 
-auto Utils::get_device_db_log_path() -> fs::path {
-        std::string path{get_base_dir().string() + "/db_logs/device_db.log"};
-        return path;
-}
-
-auto Utils::get_network_db_log_path() -> fs::path {
-        std::string path{get_base_dir().string() + "/db_logs/network_db.log"};
-        return path;
-}
-
-auto Utils::get_image_db_log_path() -> fs::path {
-        std::string path{get_base_dir().string() + "/db_logs/image_db.log"};
-        return path;
+auto Utils::get_value_heap_buf_name() -> std::string {
+        return "value_heap";
 }
 
 auto Utils::generate_container_id() -> std::string {
@@ -171,13 +153,13 @@ auto Utils::remove_directory_recursively(const fs::path& path) -> bool {
 auto Utils::extract_tarball(const std::string& tarball_path, const std::string& destination_path) -> void {
         pid_t pid{fork()};
 
-        if (pid == CERR) [[unlikely]] {
+        if (pid == -1) [[unlikely]] {
                 throw std::runtime_error("Tar Error: fork failed");
         }
         else if (pid == 0) {
                 execlp("tar", "tar", "-xzf", tarball_path.c_str(), "-C", destination_path.c_str(), NULL);
                 throw std::runtime_error("Tar Error: execlp failed");
-                exit(CERR);
+                exit(-1);
         }
         else {
                 int status{};

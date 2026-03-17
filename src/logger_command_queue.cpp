@@ -1,4 +1,4 @@
-#include "database_command_queue.hpp"
+#include "logger_command_queue.hpp"
 #include "types.hpp"
 #include <atomic>
 #include <cstring>
@@ -8,40 +8,40 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-auto DatabaseCommandQueue::map_buffer(const std::string& buf_name, bool is_consumer) -> void {
+auto LoggerCommandQueue::map_buffer(const std::string& buf_name, bool is_consumer) -> void {
         int fd{-1};
         m_is_consumer = is_consumer;
-        m_buf_name = buf_name;
+        m_bufname = buf_name;
 
         long page_size{sysconf(_SC_PAGESIZE)};
         if (page_size == -1) [[unlikely]] {
                 m_ok = false;
-                m_error = "Database Command Queue Error: Failed to get system page size.";
-                return;
+		m_error = "Logger Command Queue Error: Failed to get system page size.";
+		return;
         }
         std::size_t total_file_size{m_buf_size + page_size};
 
         if (m_is_consumer) {
-                shm_unlink(m_buf_name.c_str());
-                fd = shm_open(m_buf_name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0660);
+                shm_unlink(m_bufname.c_str());
+                fd = shm_open(m_bufname.c_str(), O_CREAT | O_EXCL | O_RDWR, 0660);
                 if (fd == -1) [[unlikely]] {
                         m_ok = false;
-                        m_error = "Database Command Queue Error: failed to create shared memory.";
+                        m_error = "Logger Command Queue Error: failed to create shared memory.";
                         return;
                 }
 
                 if (ftruncate(fd, total_file_size) == -1) [[unlikely]] {
                         close(fd);
                         m_ok = false;
-                        m_error = "Database Command Queue Error: failed to set shared memory size.";
+                        m_error = "Logger Command Queue Error: failed to set shared memory size.";
                         return;
                 }
         }
         else {
-                fd = shm_open(m_buf_name.c_str(), O_RDWR, 0660);
+                fd = shm_open(m_bufname.c_str(), O_RDWR, 0660);
                 if (fd == -1) [[unlikely]] {
                         m_ok = false;
-                        m_error = "Database Command Queue Error: Worker failed to connect.";
+                        m_error = "Logger Command Queue Error: Worker failed to connect.";
                         return;
                 }
         }
@@ -50,7 +50,7 @@ auto DatabaseCommandQueue::map_buffer(const std::string& buf_name, bool is_consu
         if (header_addr == MAP_FAILED) [[unlikely]] {
                 close(fd);
                 m_ok = false;
-                m_error = "Database Command Queue Error: failed to map header memory.";
+                m_error = "Logger Command Queue Error: failed to map header memory.";
                 return;
         }
 
@@ -58,14 +58,14 @@ auto DatabaseCommandQueue::map_buffer(const std::string& buf_name, bool is_consu
         if (virtual_addr == MAP_FAILED) [[unlikely]] {
                 close(fd);
                 m_ok = false;
-                m_error = "Database Command Queue Error: failed to reserve virtual memory.";
+                m_error = "Logger Command Queue Error: failed to reserve virtual memory.";
                 return;
         }
         close(fd);
 
         if (m_is_consumer) {
                 m_header = new (header_addr) CommandQueueHeader{};
-                m_mapped_address = static_cast<JobSlot*>(virtual_addr);
+                m_mapped_address = static_cast<LogSlot*>(virtual_addr);
                 m_header->head.store(0, std::memory_order_relaxed);
                 m_header->tail.store(0, std::memory_order_relaxed);
                 m_header->connections.store(0, std::memory_order_relaxed);
@@ -76,12 +76,12 @@ auto DatabaseCommandQueue::map_buffer(const std::string& buf_name, bool is_consu
         }
         else {
                 m_header = reinterpret_cast<CommandQueueHeader*>(header_addr);
-                m_mapped_address = static_cast<JobSlot*>(virtual_addr);
+                m_mapped_address = static_cast<LogSlot*>(virtual_addr);
                 m_header->connections.fetch_add(1, std::memory_order_relaxed);
         }
 }
 
-auto DatabaseCommandQueue::atomic_push(const DatabaseJobData& data) -> bool {
+auto LoggerCommandQueue::atomic_push(const LogJobData& data) -> bool {
         std::size_t current_tail{m_header->tail.load(std::memory_order_relaxed)};
 
         while (true) {
@@ -95,10 +95,9 @@ auto DatabaseCommandQueue::atomic_push(const DatabaseJobData& data) -> bool {
         }
 
         std::size_t index{current_tail % QUEUE_SIZE};
-        JobSlot& slot{m_mapped_address[index]};
+        LogSlot& slot{m_mapped_address[index]};
 
-        slot.type = data.type;
-        std::memcpy(slot.key, data.key, 32);
+        slot.target_log = data.target_log;
         slot.value_offset = data.value_offset;
         slot.value_length = data.value_length;
         slot.state.store(SlotState::READY, std::memory_order_release);
@@ -106,7 +105,7 @@ auto DatabaseCommandQueue::atomic_push(const DatabaseJobData& data) -> bool {
         return true;
 }
 
-auto DatabaseCommandQueue::atomic_pop() -> std::optional<DatabaseJobData> {
+auto LoggerCommandQueue::atomic_pop() -> std::optional<LogJobData> {
         std::size_t current_head{m_header->head.load(std::memory_order_relaxed)};
         std::size_t current_tail{m_header->tail.load(std::memory_order_acquire)};
 
@@ -115,15 +114,14 @@ auto DatabaseCommandQueue::atomic_pop() -> std::optional<DatabaseJobData> {
         }
 
         std::size_t index{current_head % QUEUE_SIZE};
-        JobSlot& acquired_slot{m_mapped_address[index]};
+        LogSlot& acquired_slot{m_mapped_address[index]};
 
         if (acquired_slot.state.load(std::memory_order_acquire) != SlotState::READY) {
                 return std::nullopt;
         }
 
-        DatabaseJobData local_copy{};
-        local_copy.type = acquired_slot.type;
-        std::memcpy(local_copy.key, acquired_slot.key, 32);
+        LogJobData local_copy{};
+        local_copy.target_log = acquired_slot.target_log;
         local_copy.value_offset = acquired_slot.value_offset;
         local_copy.value_length = acquired_slot.value_length;
 
@@ -134,18 +132,18 @@ auto DatabaseCommandQueue::atomic_pop() -> std::optional<DatabaseJobData> {
         return local_copy;
 }
 
-auto DatabaseCommandQueue::get_active_connections() const -> std::size_t {
+auto LoggerCommandQueue::get_active_connections() const -> std::size_t {
         if (!m_header) return 0;
         return m_header->connections.load(std::memory_order_acquire);
 }
 
-auto DatabaseCommandQueue::is_empty() const -> bool {
+auto LoggerCommandQueue::is_empty() const -> bool {
         std::uint64_t current_head{m_header->head.load(std::memory_order_acquire)};
         std::uint64_t current_tail{m_header->tail.load(std::memory_order_acquire)};
         return current_head == current_tail;
 }
 
-DatabaseCommandQueue::~DatabaseCommandQueue() {
+LoggerCommandQueue::~LoggerCommandQueue() {
         if(!m_is_consumer && m_header != nullptr) {
                 m_header->connections.fetch_sub(1, std::memory_order_release);
         }
@@ -153,21 +151,21 @@ DatabaseCommandQueue::~DatabaseCommandQueue() {
         if (m_header != nullptr) {
                 long page_size{sysconf(_SC_PAGESIZE)};
                 if (munmap(m_header, page_size) == -1) {
-                        std::cerr << "Database Command Queue Error: failed to unmap header.\n";
+                        std::cerr << "Logger Command Queue Error: failed to unmap header.\n";
                 }
                 m_header = nullptr;
         }
 
         if(m_mapped_address != nullptr) {
                 if(munmap(m_mapped_address, m_buf_size) == -1) {
-                        std::cerr << "Database Command Queue Error : munmap failed to unmap the mapped addresses.\n";
+                        std::cerr << "Logger Command Queue Error : munmap failed to unmap the mapped addresses.\n";
                 }
                 m_mapped_address = nullptr;
         }
 
-        if(m_is_consumer && !m_buf_name.empty()) {
-                if(shm_unlink(m_buf_name.c_str()) == -1) {
-                        std::cerr << "Database Command Queue Error : shared memory unlink failed.\n";
+        if(m_is_consumer && !m_bufname.empty()) {
+                if(shm_unlink(m_bufname.c_str()) == -1) {
+                        std::cerr << "Logger Command Queue Error : shared memory unlink failed.\n";
                 }
         }
 }
