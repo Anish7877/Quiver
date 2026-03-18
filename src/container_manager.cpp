@@ -15,11 +15,11 @@ auto ContainerManager::init() -> void {
         m_value_heap = &ValueHeap::get_instance();
         m_log_cmd_queue = &LoggerCommandQueue::get_instance();
         m_value_heap->map_buffer(Utils::get_value_heap_buf_name(), ValueHeap::VALUE_HEAP_SIZE, false);
-        if(!m_value_heap->ok()) [[unlikely]] {
+        if (!m_value_heap->ok()) [[unlikely]] {
                 throw std::runtime_error(m_value_heap->get_error());
         }
         m_log_cmd_queue->map_buffer(Utils::get_logger_command_queue_buf_name(), false);
-        if(!m_log_cmd_queue->ok()) [[unlikely]] {
+        if (!m_log_cmd_queue->ok()) [[unlikely]] {
                 throw std::runtime_error(m_log_cmd_queue->get_error());
         }
         rocksdb::Options options{};

@@ -29,7 +29,8 @@ enum class TargetDB : std::uint8_t {
 
 enum class TargetLog : std::uint8_t {
         DBLOG = 0,
-        CONTAINERLOG = 1
+        CONTAINERLOG = 1,
+        CONTAINERMON = 2
 };
 
 struct alignas(std::hardware_destructive_interference_size) JobSlot {

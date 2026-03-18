@@ -3,7 +3,7 @@
 
 class ContainerRuntime {
         public:
-                explicit ContainerRuntime();
+                ContainerRuntime() = default;
                 ~ContainerRuntime() = default;
                 ContainerRuntime(const ContainerRuntime&) = delete;
                 ContainerRuntime(ContainerRuntime&&) = delete;
