@@ -353,7 +353,7 @@ void Container::run_container(const ContainerArgs& args) {
         std::cerr << "ERROR: pivot_root failed, errno=" << errno
                   << " (" << strerror(errno) << ")" << '\n';
         Utils::handle_error("Unable to pivot root");
-    }
+   }
 
     std::cerr << "DEBUG: pivot_root successful!" << '\n';
     if (chdir("/") == ERR)

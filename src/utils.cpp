@@ -1,8 +1,15 @@
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <fstream>
 #include <format>
 #include <random>
+#include <blake3.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <system_error>
+#include <unistd.h>
+#include <archive.h>
 #include "utils.hpp"
 
 auto Utils::dir_exists(const fs::path& path) -> bool {
@@ -13,36 +20,41 @@ auto Utils::file_exists(const fs::path& path) -> bool {
         return fs::is_regular_file(path);
 }
 
-auto Utils::ensure_dir(const fs::path& path, mode_t mode) -> void {
-        if(!dir_exists(path)) {
+auto Utils::ensure_dir(const fs::path& path, mode_t mode) -> bool {
+        if (!dir_exists(path)) {
                 std::error_code error_code{};
                 fs::create_directories(path, error_code);
 
                 if (error_code) [[unlikely]] {
-                        throw std::runtime_error(std::format("Directory Error: couldn't create '{}' - {}", path.string(), error_code.message()));
+                        std::cerr << std::format("Directory Error: couldn't create '{}' - {}\n", path.string(), error_code.message());
+                        return false;
                 }
 
                 fs::permissions(path, static_cast<fs::perms>(mode), fs::perm_options::replace, error_code);
                 if (error_code) [[unlikely]] {
-                        throw std::runtime_error(std::format("Permissions Error: couldn't set permissions for '{}' - {}", path.string(), error_code.message()));
+                        std::cerr << std::format("Permissions Error: couldn't set permissions for '{}' - {}\n", path.string(), error_code.message());
+                        return false;
                 }
         }
+        return true;
 }
 
-auto Utils::ensure_file(const fs::path& path) -> void {
-        if(!file_exists(path)) {
+auto Utils::ensure_file(const fs::path& path) -> bool {
+        if (!file_exists(path)) {
                 fs::path parent_path{path.parent_path()};
                 if(!parent_path.empty() && !dir_exists(parent_path)) ensure_dir(parent_path);
                 std::ofstream file{path};
                 if(!file) [[unlikely]] {
-                        throw std::runtime_error(std::format("File Error: failed to create '{}'", path.string()));
+                        std::cerr << std::format("File Error: failed to create '{}'\n", path.string());
+                        return false;
                 }
         }
+        return true;
 }
 
-auto Utils::write_file(const fs::path& path, std::string_view buffer, bool append_mode) -> void {
+auto Utils::write_file(const fs::path& path, std::string_view buffer, bool append_mode) -> bool {
         fs::path parent_path{path.parent_path()};
-        if(!parent_path.empty() && !dir_exists(parent_path)) ensure_dir(parent_path);
+        if (!parent_path.empty() && !dir_exists(parent_path)) ensure_dir(parent_path);
 
         std::ios_base::openmode mode{std::ios::out};
         if (append_mode) {
@@ -51,12 +63,36 @@ auto Utils::write_file(const fs::path& path, std::string_view buffer, bool appen
         std::ofstream file{path, mode};
 
         if (!file.is_open()) [[unlikely]] {
-                throw std::runtime_error(std::format("File Error: couldn't open '{}'", path.string()));
+                std::cerr << std::format("File Error: couldn't open '{}'\n", path.string());
+                return false;
         }
         file << buffer;
         if (!file) [[unlikely]] {
-                throw std::runtime_error(std::format("File Error: failed to write data to '{}'", path.string()));
+                std::cerr << std::format("File Error: failed to write data to '{}'\n", path.string());
+                return false;
         }
+        return true;
+}
+
+auto Utils::copy_directory(const fs::path& source, const fs::path& destination) -> bool {
+        std::error_code error_code{};
+        fs::copy(source, destination, error_code);
+        if (error_code) [[unlikely]] {
+                std::cerr << std::format("Directory Error: couldn't copy '{}' -> '{}' with error - {}\n",
+                                source.string(), destination.string(), error_code.message());
+                return false;
+        }
+        return true;
+}
+
+auto Utils::remove_directory(const fs::path& path) -> bool {
+        std::error_code error_code{};
+        fs::remove_all(path, error_code);
+        if (error_code) [[unlikely]] {
+                std::cerr << std::format("Directory Error: couldn't remove '{}' - {}\n", path.string(), error_code.message());
+                return false;
+        }
+        return true;
 }
 
 auto Utils::get_base_dir() -> fs::path {
@@ -122,33 +158,35 @@ auto Utils::get_value_heap_buf_name() -> std::string {
         return "value_heap";
 }
 
+auto Utils::get_device_gid(const std::string& device) -> gid_t {
+        struct stat file_info{};
+
+        if(stat(device.c_str(), &file_info) == -1) [[unlikely]] {
+                std::cerr << "Device Error: could not read device file.\n";
+                return -1;
+        }
+        return file_info.st_gid;
+}
+
 auto Utils::generate_container_id() -> std::string {
         auto now{std::chrono::high_resolution_clock::now().time_since_epoch().count()};
         std::random_device rd{};
         std::string input{std::to_string(now) + ":" + std::to_string(rd())};
 
-        unsigned char hash[SHA256_DIGEST_LENGTH]{};
-        SHA256(reinterpret_cast<const unsigned char*>(input.c_str()), input.size(), hash);
+        blake3_hasher hasher{};
+        blake3_hasher_init(&hasher);
+        blake3_hasher_update(&hasher, input.c_str(), input.length());
 
-        std::string hexString{};
-        hexString.reserve(SHA256_DIGEST_LENGTH * 2);
-        static const char hexDigits[]{"0123456789abcdef"};
-
-        for (int i{0}; i < SHA256_DIGEST_LENGTH; i++) {
-                hexString += hexDigits[(hash[i] >> 4) & 0xF];
-                hexString += hexDigits[hash[i] & 0xF];
+        uint8_t output[BLAKE3_OUT_LEN];
+        blake3_hasher_finalize(&hasher, output, BLAKE3_OUT_LEN);
+        std::stringstream hex_stream{};
+        hex_stream << std::hex << std::setfill('0');
+        for (std::size_t i{0}; i < BLAKE3_OUT_LEN; ++i) {
+                hex_stream << std::setw(2) << static_cast<int>(output[i]);
         }
-        return hexString;
+        return hex_stream.str();
 }
 
-auto Utils::remove_directory_recursively(const fs::path& path) -> bool {
-        std::error_code error_code{};
-        fs::remove_all(path, error_code);
-        if(error_code) [[unlikely]] {
-                throw std::runtime_error(std::format("Directory Error: couldn't remove '{}' - {}", path.string(), error_code.message()));
-        }
-        return true;
-}
 
 auto Utils::extract_tarball(const std::string& tarball_path, const std::string& destination_path) -> void {
         pid_t pid{fork()};
@@ -158,16 +196,17 @@ auto Utils::extract_tarball(const std::string& tarball_path, const std::string& 
         }
         else if (pid == 0) {
                 execlp("tar", "tar", "-xzf", tarball_path.c_str(), "-C", destination_path.c_str(), NULL);
-                throw std::runtime_error("Tar Error: execlp failed");
-                exit(-1);
+                std::cerr << "Tar Error: execlp failed\n";
+                _exit(EXIT_FAILURE);
         }
         else {
                 int status{};
                 waitpid(pid, &status, 0);
                 if (WIFEXITED(status)) {
                         int exit_code{WEXITSTATUS(status)};
-                        if (exit_code != 0) [[unlikely]] {
-                                throw std::runtime_error(std::format("Tar Error: exited with error code: {}", exit_code));
+                        if (exit_code > 0) [[unlikely]] {
+                                std::cerr << std::format("Tar Error: exited with error code: {}\n", exit_code);\
+                                _exit(EXIT_FAILURE);
                         }
                 }
         }

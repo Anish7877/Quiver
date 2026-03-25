@@ -3,7 +3,7 @@ MIN_CXX_VER = 15
 STD = -std=c++20
 OPTFLAGS = -O3
 CXXFLAGS = -Wall -Wextra -Wpedantic -march=native
-LDFLAGS = -lcpr -lcurl -lssl -lcrypto -pthread -lsqlite3 -lutil -lrocksdb
+LDFLAGS = -lcpr -lcurl -lz -pthread -lutil -lrocksdb -lblake3
 DEBUG_FLAGS = -g
 DEPFLAGS = -MMD -MP
 

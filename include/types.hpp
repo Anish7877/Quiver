@@ -5,6 +5,8 @@
 #include <new>
 #include <utility>
 #include <vector>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 enum class JobType : std::uint8_t {
         GET = 0,
@@ -97,6 +99,14 @@ struct Status {
 };
 
 struct ContainerConfig {
+        fs::path new_fs{};
+        std::string id{};
+        std::string new_hostname{};
+        std::string overlay_opts{};
+        std::vector<std::pair<fs::path, fs::path>> volumes{};
+        std::vector<std::pair<fs::path, fs::path>> devices{};
+        bool tty{};
+        bool vfs{};
         //TODO: parsed manifest information
 };
 

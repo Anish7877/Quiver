@@ -1,58 +1,74 @@
-#include "../include/mount.hpp"
-#include "../include/utils.hpp"
+#include "mount.hpp"
+#include <sys/mount.h>
 
-void Mount::proc(const std::string& proc_path, const int& flags, const std::string& options){
-    if(mount(PROC, proc_path.c_str(), PROC, flags, options.empty() ? nullptr : options.c_str()) == ERR)
-        Utils::handle_error("Unable to mount " + std::string(PROC));
-}
-
-void Mount::dev(const std::string& dev_path, const int& flags, const std::string& options){
-    if(mount(DEV, dev_path.c_str(), DEV, flags, options.empty() ? nullptr : options.c_str()) == ERR)
-        Utils::handle_error("Unable to mount " + std::string(DEV));
-}
-
-void Mount::sys(const std::string& sys_path, const int& flags, const std::string& options){
-    if(mount(SYS, sys_path.c_str(), SYS, flags, options.empty() ? nullptr : options.c_str()) == ERR)
-        Utils::handle_error("Unable to mount " + std::string(SYS));
-}
-
-void Mount::tmpfs(const std::string& tmpfs_path, const int& flags, const std::string& options){
-    if(mount(TMPFS, tmpfs_path.c_str(), TMPFS, flags, options.empty() ? nullptr : options.c_str()) == ERR)
-        Utils::handle_error("Unable to mount " + std::string(PROC));
-}
-
-void Mount::dev_pts(const std::string& dev_pts_path, const int& flags, const std::string& options){
-    if(mount(DEVPTS, dev_pts_path.c_str(), DEVPTS, flags, options.empty() ? nullptr : options.c_str()) == ERR)
-        Utils::handle_error("Unable to mount " + std::string(DEVPTS));
-}
-
-void Mount::bind_mount(const std::string& src, const std::string& dst, const std::string& options){
-    if(mount(src.c_str(), dst.c_str(), nullptr, MS_BIND, options.empty() ? nullptr : options.c_str()) == ERR)
-        Utils::handle_error("Unable to bind mount " + src + " to " + dst);
-}
-
-void Mount::bind_rec_mount(const std::string &src, const std::string &dst, const std::string& options){
-    if(mount(src.c_str(), dst.c_str(), nullptr, MS_BIND | MS_REC, options.empty() ? nullptr : options.c_str()) == ERR)
-        Utils::handle_error("Unable to bind and rec mount " + src + " to " + dst);
-}
-
-void Mount::volumes(const std::string& rootfs, const std::vector<VolumeObject> volumes, const std::string& options){
-    size_t no_volumes{ volumes.size() };
-    if(no_volumes > 0){
-        std::vector<std::string> paths{};
-        std::vector<std::string> dirs{};
-        for(size_t i{0};i<no_volumes;++i){
-            paths.emplace_back(volumes[i].host_path);
-            dirs.emplace_back(volumes[i].container_path);
+auto Mount::_overlay_fs(const fs::path& fs, const std::string& overlay_opts) -> bool {
+        if (mount("overlay", fs.c_str(), "overlay", MS_NODEV, overlay_opts.c_str()) == -1) [[unlikely]] {
+                return false;
         }
-        for(size_t i{0};i<dirs.size();++i){
-            dirs[i] = rootfs + dirs[i];
-            Utils::ensure_dirs(dirs[i]);
+        return true;
+}
+
+auto Mount::_new_filesystem(const fs::path& fs) -> bool {
+        if (mount(fs.c_str(), fs.c_str(), NULL, MS_BIND | MS_REC, NULL) == -1) [[unlikely]] {
+                return false;
         }
-        for(size_t i{0};i<paths.size();++i){
-            if(mount(paths[i].c_str(), dirs[i].c_str(), nullptr, MS_BIND|MS_REC, options.empty() ? nullptr : options.c_str()) == -1){
-                Utils::handle_error("Unable to mount " + paths[i] + " to " + dirs[i]);
-            }
+        if (mount("none", fs.c_str(), NULL, MS_PRIVATE | MS_REC, NULL) == -1) [[unlikely]] {
+                return false;
         }
-    }
+        return true;
+}
+
+auto Mount::_private(const fs::path& fs) -> bool {
+        if (mount("none", fs.c_str(), NULL, MS_PRIVATE | MS_REC, NULL) == -1) [[unlikely]] {
+                return false;
+        }
+        return true;
+}
+
+auto Mount::_proc() -> bool {
+        if (mount("proc","/proc", "proc", MS_NOEXEC | MS_NODEV | MS_NOSUID, NULL) == -1) [[unlikely]] {
+                return false;
+        }
+        return true;
+}
+
+auto Mount::_sys() -> bool {
+        if (mount("sysfs","/sys", "sysfs", MS_RDONLY | MS_NOEXEC | MS_NODEV | MS_NOSUID, NULL) == -1) [[unlikely]] {
+                return false;
+        }
+        return true;
+}
+
+auto Mount::_tmpfs(const fs::path& fs, const std::string& opts) -> bool {
+        if (mount("tmpfs", fs.c_str(), "tmpfs", MS_NODEV | MS_NOSUID, opts.c_str()) == -1) [[unlikely]] {
+                return false;
+        }
+        return true;
+}
+
+auto Mount::_unmount_filesystem(const fs::path& fs) -> bool {
+        if (umount2(fs.c_str(), MNT_DETACH) == -1) [[unlikely]] {
+                return false;
+        }
+        return true;
+}
+
+auto Mount::_volumes(const std::vector<std::pair<fs::path, fs::path>>& paths) -> bool {
+        for (const auto& path : paths) {
+                int flags{MS_BIND | MS_REC | MS_NODEV | MS_NOSUID};
+                if (mount(path.first.c_str(), path.second.c_str(), NULL, flags, NULL) == -1) [[unlikely]] {
+                        return false;
+                }
+        }
+        return true;
+}
+
+auto Mount::_devices(const std::vector<std::pair<fs::path, fs::path>>& paths) -> bool {
+        for (const auto& path : paths) {
+                int flags{MS_BIND | MS_REC | MS_NOSUID | MS_NOEXEC};
+                if (mount(path.first.c_str(), path.second.c_str(), NULL, flags, NULL) == -1) [[unlikely]] {
+                        return false;
+                }
+        }
+        return true;
 }

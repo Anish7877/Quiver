@@ -9,7 +9,7 @@
 #include <cstring>
 #include <format>
 #include <cstdlib>
-#include <rocksdb/comparator.h>
+#include <sys/wait.h>
 #include <stdexcept>
 #include <unistd.h>
 #include <poll.h>
@@ -17,6 +17,8 @@ namespace chrono = std::chrono;
 
 auto ContainerMonitor::init(const ContainerConfig& config) -> void {
         m_container_config = config;
+        m_value_heap = &ValueHeap::get_instance();
+        m_log_cmd_queue = &LoggerCommandQueue::get_instance();
         m_value_heap->map_buffer(Utils::get_value_heap_buf_name(), ValueHeap::VALUE_HEAP_SIZE, false);
         if (!m_value_heap->ok()) [[unlikely]] {
                 throw std::runtime_error(m_value_heap->get_error());
@@ -28,6 +30,7 @@ auto ContainerMonitor::init(const ContainerConfig& config) -> void {
 }
 
 auto ContainerMonitor::setup_usernamespace() -> void {
+        setup_set_groups();
         setup_uid_map();
         setup_gid_map();
 }
@@ -38,9 +41,9 @@ auto ContainerMonitor::start_logging() -> bool {
         m_log_worker = std::thread([this]() {
                                 pollfd fds[2];
                                 fds[0].fd = m_std_out_fd[0];
-                                fds[0].events = POLL_IN;
+                                fds[0].events = POLLIN;
                                 fds[1].fd = m_std_err_fd[0];
-                                fds[1].events = POLL_IN;
+                                fds[1].events = POLLIN;
 
                                 int open_pipes{2};
                                 while(m_logging_active.load(std::memory_order_acquire) && open_pipes > 0) {
@@ -53,7 +56,7 @@ auto ContainerMonitor::start_logging() -> bool {
                                         if (ret == 0) {
                                                 continue;
                                         }
-                                        if (fds[0].fd != -1) {
+                                        if (fds[0].fd != -1 && (fds[0].revents & POLLIN)) {
                                                 char buffer[4096];
                                                 ssize_t bytes_read{read(fds[0].fd, buffer, sizeof(buffer))};
                                                 if (bytes_read > 0) {
@@ -63,12 +66,12 @@ auto ContainerMonitor::start_logging() -> bool {
                                                                         std::string(buffer, bytes_read))};
                                                         this->log_event(log_data, TargetLog::CONTAINERLOG);
                                                 }
-                                                if (fds[0].revents & POLL_HUP) {
-                                                        fds[0].fd = -1;
-                                                        --open_pipes;
-                                                }
                                         }
-                                        if (fds[1].fd != -1) {
+                                        if (fds[0].fd != -1 && (fds[0].revents & POLLHUP)) {
+                                                fds[0].fd = -1;
+                                                --open_pipes;
+                                        }
+                                        if (fds[1].fd != -1 && (fds[0].revents & POLLIN)) {
                                                 char buffer[4096];
                                                 ssize_t bytes_read{read(fds[1].fd, buffer, sizeof(buffer))};
                                                 if (bytes_read > 1) {
@@ -78,10 +81,10 @@ auto ContainerMonitor::start_logging() -> bool {
                                                                         std::string(buffer, bytes_read))};
                                                         this->log_event(log_data, TargetLog::CONTAINERLOG);
                                                 }
-                                                if (fds[1].revents & POLL_HUP) {
-                                                        fds[1].fd = -1;
-                                                        --open_pipes;
-                                                }
+                                        }
+                                        if (fds[1].fd != -1 && (fds[1].revents & POLLHUP)) {
+                                                fds[1].fd = -1;
+                                                --open_pipes;
                                         }
                                 }
                         });
@@ -131,6 +134,14 @@ auto ContainerMonitor::invoke_container() -> void {
                 start_logging();
                 close(m_std_out_fd[1]);
                 close(m_std_err_fd[1]);
+        }
+}
+
+auto ContainerMonitor::setup_set_groups() -> void {
+        fs::path set_groups_path{std::format("/proc/{}/setgroups", m_container_pid)};
+        std::string buf{"deny"};
+        if (!Utils::write_file(set_groups_path, buf)) {
+                _exit(EXIT_FAILURE);
         }
 }
 
@@ -193,12 +204,12 @@ auto ContainerMonitor::stop_logging() -> void {
 }
 
 auto ContainerMonitor::log_event(const std::string& log_data, TargetLog target_log) -> void {
-                std::size_t offset{};
-                while(!m_value_heap->write_job_data(log_data, offset)){}
-                m_log_job_data.target_log = target_log;
-                m_log_job_data.value_offset = offset;
-                m_log_job_data.value_length = log_data.size();
-                while(!m_log_cmd_queue->atomic_push(m_log_job_data)){}
+        std::size_t offset{};
+        while(!m_value_heap->write_job_data(log_data, offset)){}
+        m_log_job_data.target_log = target_log;
+        m_log_job_data.value_offset = offset;
+        m_log_job_data.value_length = log_data.size();
+        while(!m_log_cmd_queue->atomic_push(m_log_job_data)){}
 }
 
 ContainerMonitor::~ContainerMonitor() {

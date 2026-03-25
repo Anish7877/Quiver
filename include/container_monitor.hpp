@@ -22,6 +22,7 @@ class ContainerMonitor : public Singleton<ContainerMonitor> {
                 auto start_logging() -> bool;
                 auto invoke_container() -> void;
         private:
+                auto setup_set_groups() -> void;
                 auto setup_uid_map() -> void;
                 auto setup_gid_map() -> void;
                 auto exec_mapping_tool(const char*, const char*) -> void;
