@@ -12,6 +12,9 @@
 #include <QWidget>
 #include <QAbstractItemView>
 #include <QSizePolicy>
+#include <QButtonGroup>
+#include <QToolButton>
+#include<QLayout>
 
 namespace Quiver {
 namespace {
@@ -19,7 +22,7 @@ namespace {
 auto make_item(const QString& text, bool bright = false) -> QTableWidgetItem* {
     auto* item { new QTableWidgetItem(text) };
     item->setFlags(item->flags() & ~Qt::ItemIsEditable);
-    item->setForeground(bright ? QColor{"#e2e8f0"} : QColor{"#94a3b8"});
+
     return item;
 }
 
@@ -126,7 +129,15 @@ TablePage::TablePage(const QString& title,
 
     pimpl_->table_->setColumnWidth(action_col, 130);
 
-    layout->addWidget(pimpl_->table_, 1);
+    
+
+    
+    pimpl_->table_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
+    
+    pimpl_->table_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+
+    layout->addWidget(pimpl_->table_); 
+    layout->addStretch(1);             
 
 
     auto* fab_row { new QHBoxLayout };
@@ -180,10 +191,13 @@ auto TablePage::add_row(const QStringList& row_data,
             auto* w { pimpl_->table_->cellWidget(r, cols - 1) };
             if (w && w->findChild<QPushButton*>() == btn) {
                 pimpl_->table_->removeRow(r);
+                pimpl_->table_->updateGeometry(); 
                 break;
             }
         }
     });
+
+    pimpl_->table_->updateGeometry(); 
 }
 
 auto TablePage::table() -> QTableWidget* { return pimpl_->table_; }
@@ -199,39 +213,14 @@ static auto make_stat_row(
     row->setSpacing(20);
     row->setContentsMargins(0, 0, 0, 24);
 
-    auto make_card = [](const QString& title, const QString& value,
-                        const QString& val_color) -> QFrame*
-    {
-        auto* card { new QFrame };
-        card->setObjectName("StatPanel");
-        card->setFixedHeight(90);
-        card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    
+    
+    row->addWidget(new Quiver::StatCard(t1, v1, "#F97316"));
+    row->addWidget(new Quiver::StatCard(t2, v2, c2));
+    row->addWidget(new Quiver::StatCard(t3, v3, c3));
 
-        auto* l { new QVBoxLayout(card) };
-        l->setAlignment(Qt::AlignCenter);
-        l->setSpacing(6);
-
-        auto* t { new QLabel(title) };
-        t->setObjectName("StatLabelTitle");
-        t->setAlignment(Qt::AlignCenter);
-
-        auto* v { new QLabel(value) };
-        v->setObjectName("StatLabelValue");
-        v->setAlignment(Qt::AlignCenter);
-        if (val_color != "#ffffff")
-            v->setStyleSheet(QString("color: %1;").arg(val_color));
-
-        l->addWidget(t);
-        l->addWidget(v);
-        return card;
-    };
-
-    row->addWidget(make_card(t1, v1, "#ffffff"));
-    row->addWidget(make_card(t2, v2, c2));
-    row->addWidget(make_card(t3, v3, c3));
     root->addLayout(row);
 }
-
 
 struct ImagesPage::Impl { TablePage* page_ {}; };
 
@@ -496,9 +485,134 @@ SettingsPage::SettingsPage(QWidget* parent)
     auto* layout { new QVBoxLayout(this) };
     layout->setContentsMargins(40, 32, 40, 32);
     layout->setSpacing(24);
+    
     auto* title { new QLabel("Settings") };
     title->setObjectName("PageTitle");
     layout->addWidget(title);
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+
+
+    auto* app_frame { new QFrame };
+    app_frame->setObjectName("SettingsGroup");
+    auto* app_fl { new QVBoxLayout(app_frame) };
+    app_fl->setContentsMargins(24, 20, 24, 20);
+    app_fl->setSpacing(16);
+    
+    auto* app_gt { new QLabel("APPEARANCE") }; 
+    app_gt->setObjectName("SettingsGroupTitle"); 
+    app_fl->addWidget(app_gt);
+    
+    auto* app_div { new QFrame }; 
+    app_div->setObjectName("Divider"); 
+    app_div->setFixedHeight(1); 
+    app_fl->addWidget(app_div);
+
+    
+    auto* theme_row { new QHBoxLayout };
+    theme_row->setAlignment(Qt::AlignLeft | Qt::AlignVCenter); 
+
+    auto* theme_lbl { new QWidget }; 
+    
+    
+    theme_lbl->setFixedWidth(120); 
+
+    
+    auto* btn_light { new QToolButton };
+    btn_light->setObjectName("ThemeLightCard");
+    btn_light->setText("Light Mode");
+    btn_light->setIcon(QIcon(":/assets/icons/light_mode_svg.svg")); 
+    btn_light->setIconSize(QSize(390, 290)); 
+    btn_light->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    btn_light->setCheckable(true);
+    btn_light->setAutoExclusive(true);
+    btn_light->setCursor(Qt::PointingHandCursor);
+    btn_light->setFixedSize(410, 260); 
+
+    
+    auto* btn_dark { new QToolButton };
+    btn_dark->setObjectName("ThemeDarkCard");
+    btn_dark->setText("Dark Mode");
+    btn_dark->setIcon(QIcon(":/assets/icons/dark_mode_svg.svg")); 
+    btn_dark->setIconSize(QSize(390, 290)); 
+    btn_dark->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    btn_dark->setCheckable(true);
+    btn_light->setAutoExclusive(true);
+    btn_dark->setChecked(true); 
+    btn_dark->setCursor(Qt::PointingHandCursor);
+    btn_dark->setFixedSize(410, 260); 
+
+
+   auto* right_spacer { new QWidget };
+    right_spacer->setFixedWidth(120); 
+    theme_row->addWidget(theme_lbl);     
+    theme_row->addStretch(1);            
+    theme_row->addWidget(btn_light);     
+    theme_row->addSpacing(60);           
+    theme_row->addWidget(btn_dark);      
+    theme_row->addStretch(1);            
+    theme_row->addWidget(right_spacer);  
+
+    app_fl->addLayout(theme_row);
+    layout->addWidget(app_frame);
 
     auto make_group = [&](const QString& group_title,
                           std::initializer_list<QPair<QString,QString>> items) {

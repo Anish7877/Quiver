@@ -12,5 +12,14 @@
         <file>assets/icons/devices.svg</file>
         <file>assets/icons/moon.svg</file>
         <file>assets/icons/sun.svg</file>
+        <file>assets/icons/docs.svg</file>
+        <file>assets/icons/profile.svg</file>
+        <file>assets/icons/settings.svg</file>
+        <file>assets/icons/help.svg</file>
+        <file>assets/icons/logout.svg</file>
+        <file>assets/icons/Quiver.svg</file>
+        <file>assets/icons/gemini-svg.svg</file>
+        <file>assets/icons/dark_mode_svg.svg</file>
+        <file>assets/icons/light_mode_svg.svg</file>
     </qresource>
 </RCC>

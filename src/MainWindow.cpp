@@ -21,6 +21,7 @@
 #include <QStackedWidget>
 #include <QPropertyAnimation>
 #include <QList>
+#include "include/DashboardPage.h"
 
 namespace Quiver {
 
@@ -42,6 +43,9 @@ struct MainWindow::Impl {
 
     QPushButton*    create_btn_      {};
     QPushButton*    theme_btn_       {};
+    QButtonGroup* nav_group_        {};
+    QPushButton* settings_btn_    {}; 
+    SettingsPage* settings_page_   {}; 
 
     bool is_sidebar_expanded_ { true  };
     bool is_dark_mode_        { true  };
@@ -54,7 +58,7 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent), pimpl_{std::make_unique<Impl>()}
 {
     resize(1280, 850);
-    setWindowTitle("Quiver Platform - C++ Edition");
+    setWindowTitle("Quiver");
 
     QFile file(":/assets/style.qss");
     if (file.open(QFile::ReadOnly)) {
@@ -76,53 +80,41 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 MainWindow::~MainWindow() = default;
-
 auto MainWindow::setup_sidebar() -> void {
     pimpl_->sidebar_ = new QFrame;
     pimpl_->sidebar_->setObjectName("Sidebar");
     pimpl_->sidebar_->setFixedWidth(240);
 
     pimpl_->sidebar_layout_ = new QVBoxLayout(pimpl_->sidebar_);
-    pimpl_->sidebar_layout_->setContentsMargins(10, 20, 10, 20);
+    pimpl_->sidebar_layout_->setContentsMargins(10, 20, 10, 15);
     pimpl_->sidebar_layout_->setSpacing(5);
 
-
+    
     auto* logo_btn { new QPushButton };
     logo_btn->setObjectName("ToggleBtn");
-    logo_btn->setProperty("iconPath", ":/assets/icons/logo.svg");
+    logo_btn->setProperty("iconPath", ":/assets/icons/Quiver.svg");
     logo_btn->setProperty("navText", "  QUIVER");
     logo_btn->setProperty("expanded", true);
     logo_btn->setCursor(Qt::PointingHandCursor);
-    logo_btn->setFixedHeight(44);
+    logo_btn->setFixedHeight(50);
 
-
-    QPixmap logo_px(":/assets/icons/logo.png");
-    if (logo_px.isNull()) {
-        logo_px = QPixmap(":/assets/icons/logo.svg");
-    }
+    QPixmap logo_px(":/assets/icons/Quiver");
+    if (logo_px.isNull()) logo_px = QPixmap(":/assets/icons/Quiver.svg");
     if (!logo_px.isNull()) {
         logo_px = logo_px.scaled(28, 28, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         logo_btn->setIcon(QIcon(logo_px));
         logo_btn->setIconSize(QSize(28, 28));
     }
-    logo_btn->setText("  QUIVER");
-    logo_btn->setStyleSheet(
-        "QPushButton { color: white; font-weight: 900; font-size: 16px; "
-        "text-align: left; padding-left: 12px; border: none; background: transparent; "
-        "border-radius: 6px; padding-top: 8px; padding-bottom: 8px; letter-spacing: 1px; }"
-        "QPushButton:hover { background-color: #1e293b; color: #60A5FA; }");
+    logo_btn->setText(" QUIVER");
     connect(logo_btn, &QPushButton::clicked, this, &MainWindow::toggle_sidebar);
+
     pimpl_->sidebar_layout_->addWidget(logo_btn);
-    pimpl_->sidebar_layout_->addSpacing(30);
-    pimpl_->logo_label_ = nullptr;
+    pimpl_->sidebar_layout_->addSpacing(25);
 
+    pimpl_->nav_group_ = new QButtonGroup(this);
+    pimpl_->nav_group_->setExclusive(true);
 
-    auto* nav_group { new QButtonGroup(this) };
-    nav_group->setExclusive(true);
-
-    auto add_nav = [&](const QString& icon_path, const QString& text,
-                       int index, bool active)
-    {
+    auto add_nav = [&](const QString& icon_path, const QString& text, int index, bool active) {
         auto* btn { new QPushButton("  " + text) };
         btn->setObjectName("NavButton");
         btn->setProperty("iconPath", icon_path);
@@ -131,8 +123,13 @@ auto MainWindow::setup_sidebar() -> void {
         btn->setCursor(Qt::PointingHandCursor);
         btn->setCheckable(true);
         if (active) btn->setChecked(true);
-        connect(btn, &QPushButton::clicked, this, [this, index](){ switch_tab(index); });
-        nav_group->addButton(btn);
+        
+        connect(btn, &QPushButton::clicked, this, [this, index](){ 
+            if (pimpl_->settings_btn_) pimpl_->settings_btn_->setChecked(false); 
+            switch_tab(index); 
+        });
+        
+        pimpl_->nav_group_->addButton(btn);
         pimpl_->sidebar_layout_->addWidget(btn);
     };
 
@@ -142,43 +139,105 @@ auto MainWindow::setup_sidebar() -> void {
     add_nav(":/assets/icons/volumes.svg",    "Volumes",    3, false);
     add_nav(":/assets/icons/ports.svg",      "Ports",      4, false);
     add_nav(":/assets/icons/devices.svg",    "Devices",    5, false);
-    pimpl_->sidebar_layout_->addStretch();
 
+    pimpl_->sidebar_layout_->addStretch(); 
 
-    pimpl_->theme_btn_ = new QPushButton;
-    pimpl_->theme_btn_->setObjectName("ThemeBtn");
-    pimpl_->theme_btn_->setProperty("iconPath",
-        pimpl_->is_dark_mode_ ? ":/assets/icons/moon.svg" : ":/assets/icons/sun.svg");
-    pimpl_->theme_btn_->setProperty("navText",
-        pimpl_->is_dark_mode_ ? "  Dark Mode" : "  Light Mode");
-    pimpl_->theme_btn_->setText(
-        pimpl_->is_sidebar_expanded_
-            ? pimpl_->theme_btn_->property("navText").toString()
-            : "");
-    pimpl_->theme_btn_->setProperty("expanded", true);
-    pimpl_->theme_btn_->setCursor(Qt::PointingHandCursor);
-    connect(pimpl_->theme_btn_, &QPushButton::clicked, this, &MainWindow::toggle_theme);
-    pimpl_->sidebar_layout_->addWidget(pimpl_->theme_btn_);
+   
+    add_nav(":/assets/icons/help.svg", "Help", 6, false);
+    add_nav(":/assets/icons/docs.svg", "Documentation", 7, false);
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    auto* divider { new QFrame };
+    divider->setFrameShape(QFrame::HLine);
+    divider->setStyleSheet("background-color: #27272A; max-height: 1px; margin: 10px 0px;");
+    pimpl_->sidebar_layout_->addWidget(divider);
+
+    
+    auto* profile_btn { new QPushButton("  Bhavish Pushkarna") };
+    profile_btn->setObjectName("ProfileBtn");
+    profile_btn->setProperty("iconPath", ":/assets/icons/profile.svg");
+    profile_btn->setProperty("navText", "  Bhavish Pushkarna");
+    profile_btn->setProperty("expanded", true);
+    profile_btn->setCursor(Qt::PointingHandCursor);
+    pimpl_->sidebar_layout_->addWidget(profile_btn);
+
+    auto* auth_btn { new QPushButton("  Logout") };
+    auth_btn->setObjectName("AuthBtn");
+    auth_btn->setProperty("iconPath", ":/assets/icons/logout.svg");
+    auth_btn->setProperty("navText", "  Logout");
+    auth_btn->setProperty("expanded", true);
+    auth_btn->setCursor(Qt::PointingHandCursor);
+    pimpl_->sidebar_layout_->addWidget(auth_btn);
 
     update_sidebar_icons();
 }
 
 auto MainWindow::setup_content() -> void {
+
+
     pimpl_->central_widget_ = new QWidget;
-    auto* layout { new QVBoxLayout(pimpl_->central_widget_) };
-    layout->setContentsMargins(40, 40, 40, 0);
+    pimpl_->central_widget_->setObjectName("CentralWidget");
+    auto* main_v_layout { new QVBoxLayout(pimpl_->central_widget_) };
+    main_v_layout->setContentsMargins(0, 0, 0, 0);
+    main_v_layout->setSpacing(0);
+
+
+    auto* top_bar { new QFrame };
+    top_bar->setObjectName("TopNavBar");
+    top_bar->setFixedHeight(65);
+    auto* top_layout { new QHBoxLayout(top_bar) };
+    top_layout->setContentsMargins(40, 0, 40, 0);
+    top_layout->setAlignment(Qt::AlignVCenter);
+
+    top_layout->addStretch(); 
+
+    auto* search_input { new QLineEdit };
+    search_input->setPlaceholderText("Search containers, images, volumes...");
+    search_input->setFixedWidth(350);
+    search_input->setFixedHeight(36);
+    search_input->setObjectName("SearchBox");
+    search_input->addAction(QIcon(":/assets/icons/gemini-svg.svg"), QLineEdit::LeadingPosition); 
+
+    pimpl_->settings_btn_ = new QPushButton("Settings");
+    pimpl_->settings_btn_->setObjectName("SettingsBtn");
+    pimpl_->settings_btn_->setCursor(Qt::PointingHandCursor);
+    pimpl_->settings_btn_->setFixedHeight(36);
+    pimpl_->settings_btn_->setCheckable(true); 
+
+    top_layout->addWidget(search_input);
+    top_layout->addStretch(); 
+    top_layout->addWidget(pimpl_->settings_btn_);
+
+    main_v_layout->addWidget(top_bar);
+
+    
+    auto* content_wrapper { new QWidget };
+    auto* layout { new QVBoxLayout(content_wrapper) };
+    layout->setContentsMargins(40, 20, 40, 0);
 
     pimpl_->main_stack_ = new QStackedWidget;
     layout->addWidget(pimpl_->main_stack_);
+    main_v_layout->addWidget(content_wrapper);
 
 
-    pimpl_->dashboard_page_ = new QWidget;
-    auto* d_layout { new QVBoxLayout(pimpl_->dashboard_page_) };
-    d_layout->setAlignment(Qt::AlignCenter);
-    auto* d_label { new QLabel("Dashboard View (Coming Soon)") };
-    d_label->setStyleSheet("font-size: 24px; color: #64748B; font-weight: bold;");
-    d_layout->addWidget(d_label);
-    pimpl_->main_stack_->addWidget(pimpl_->dashboard_page_);
+    
+    
+    
+    
+    
+    
+    
+    pimpl_->dashboard_page_ = new DashboardPage;
+pimpl_->main_stack_->addWidget(pimpl_->dashboard_page_);
 
 
     pimpl_->containers_page_ = new QWidget;
@@ -250,8 +309,40 @@ auto MainWindow::setup_content() -> void {
     pimpl_->devices_page_ = new DevicesPage;
     pimpl_->main_stack_->addWidget(pimpl_->devices_page_);
 
-    pimpl_->main_stack_->setCurrentIndex(1);
+    pimpl_->settings_page_ = new SettingsPage;
+    pimpl_->main_stack_->addWidget(pimpl_->settings_page_);
+    int settings_idx = pimpl_->main_stack_->count() - 1;
+
+    
+    connect(pimpl_->settings_btn_, &QPushButton::clicked, this, [this, settings_idx](){
+        if (pimpl_->nav_group_) {
+            pimpl_->nav_group_->setExclusive(false);
+            for(auto* b : pimpl_->nav_group_->buttons()) b->setChecked(false);
+            pimpl_->nav_group_->setExclusive(true);
+        }
+        switch_tab(settings_idx);
+    });
+
+    
+   
+    auto* light_card = pimpl_->settings_page_->findChild<QAbstractButton*>("ThemeLightCard");
+    auto* dark_card  = pimpl_->settings_page_->findChild<QAbstractButton*>("ThemeDarkCard");
+    
+    if (light_card && dark_card) {
+        connect(light_card, &QAbstractButton::clicked, this, [this]() {
+            if (pimpl_->is_dark_mode_) toggle_theme();
+        });
+        connect(dark_card, &QAbstractButton::clicked, this, [this]() {
+            if (!pimpl_->is_dark_mode_) toggle_theme();
+        });
+    }
+
+    pimpl_->main_stack_->setCurrentIndex(1); 
 }
+
+
+
+
 
 auto MainWindow::toggle_sidebar() -> void {
     bool will_expand { !pimpl_->is_sidebar_expanded_ };
@@ -303,17 +394,6 @@ auto MainWindow::toggle_theme() -> void {
         file.close();
     }
 
-    if (pimpl_->is_dark_mode_) {
-        pimpl_->theme_btn_->setProperty("iconPath", ":/assets/icons/moon.svg");
-        pimpl_->theme_btn_->setProperty("navText",  "  Dark Mode");
-    } else {
-        pimpl_->theme_btn_->setProperty("iconPath", ":/assets/icons/sun.svg");
-        pimpl_->theme_btn_->setProperty("navText",  "  Light Mode");
-    }
-    pimpl_->theme_btn_->setText(
-        pimpl_->is_sidebar_expanded_
-            ? pimpl_->theme_btn_->property("navText").toString()
-            : "");
 
     update_sidebar_icons();
 
@@ -335,12 +415,15 @@ auto MainWindow::switch_tab(int index) -> void {
 }
 
 auto MainWindow::update_sidebar_icons() -> void {
-    QColor normal_color { pimpl_->is_dark_mode_ ? QColor{"#94A3B8"} : QColor{"#64748B"} };
-    QColor active_color { pimpl_->is_dark_mode_ ? QColor{"#3B82F6"} : QColor{"#2563EB"} };
+    QColor normal_color { pimpl_->is_dark_mode_ ? QColor{"#A1A1AA"} : QColor{"#71717A"} };
+
+    QColor active_color { QColor{"#F97316"} };
 
     QList<QPushButton*> btns { pimpl_->sidebar_->findChildren<QPushButton*>() };
     for (auto* btn : btns) {
+        if (btn->objectName() == "ToggleBtn") continue;
         QString path { btn->property("iconPath").toString() };
+        
         if (!path.isEmpty()) {
             QColor target_color { normal_color };
             if (btn->isCheckable() && btn->isChecked()) {

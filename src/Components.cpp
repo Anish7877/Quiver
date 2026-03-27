@@ -31,7 +31,7 @@ auto ToggleSwitch::paintEvent(QPaintEvent*) -> void {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     bool on { isChecked() };
-    QColor bg { on ? QColor{"#8b5cf6"} : QColor{"#52525b"} };
+    QColor bg { on ? QColor{"#F97316"} : QColor{"#3F3F46"} };
     p.setPen(Qt::NoPen);
     p.setBrush(bg);
     p.drawRoundedRect(0, 0, width(), height(), 13, 13);
@@ -164,27 +164,40 @@ auto ContainerCard::on_delete() -> void {
     }
 }
 
-
 struct StatCard::Impl {};
+
 StatCard::StatCard(const QString& title, const QString& value,
                    const QString& color, QWidget* parent)
     : QFrame(parent), pimpl_{std::make_unique<Impl>()}
 {
     setObjectName("StatPanel");
-    setMinimumHeight(80);
-    setMinimumWidth(140);
+    setFixedHeight(75);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
+    
+    QString theme = "orange"; 
+    if (color == "#4ade80" || color.contains("4ade80", Qt::CaseInsensitive)) theme = "green";
+    else if (color == "#fb7185" || color.contains("fb7185", Qt::CaseInsensitive)) theme = "red";
+    else if (color == "#ffffff" || color == "white") theme = "white"; 
+
+    setProperty("statTheme", theme); 
+
     auto* layout { new QVBoxLayout(this) };
-    layout->setAlignment(Qt::AlignCenter);
+    layout->setContentsMargins(15, 12, 15, 12);
+    layout->setSpacing(2);
+
     auto* t { new QLabel(title) };
-    t->setObjectName("StatLabelTitle");
+    t->setObjectName("StatTitle"); 
+
     auto* v { new QLabel(value) };
-    v->setObjectName("StatLabelValue");
-    if (color != "#ffffff") v->setStyleSheet(QString("color: %1;").arg(color));
+    v->setObjectName("StatValue");
+    v->setProperty("statTheme", theme); 
+
     layout->addWidget(t);
     layout->addWidget(v);
-    layout->setAlignment(t, Qt::AlignCenter);
-    layout->setAlignment(v, Qt::AlignCenter);
+    layout->addStretch();
 }
+
 StatCard::~StatCard() = default;
 
 
@@ -197,23 +210,22 @@ ResourceTable::ResourceTable(const QStringList& headers, QWidget* parent)
     setColumnCount(static_cast<int>(headers.size()));
     setHorizontalHeaderLabels(headers);
 
-
     setShowGrid(false);
-    setAlternatingRowColors(true);
+
     setSelectionBehavior(QAbstractItemView::SelectRows);
     setSelectionMode(QAbstractItemView::SingleSelection);
     setEditTriggers(QAbstractItemView::NoEditTriggers);
     setFocusPolicy(Qt::NoFocus);
-    verticalHeader()->setVisible(false);
 
+    verticalHeader()->setVisible(false);
+    verticalHeader()->setDefaultSectionSize(56); 
 
     horizontalHeader()->setHighlightSections(false);
-    horizontalHeader()->setStretchLastSection(false);
+    horizontalHeader()->setStretchLastSection(true);
     horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-
-
-    verticalHeader()->setDefaultSectionSize(44);
+    horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 }
+
 ResourceTable::~ResourceTable() = default;
 
 auto ResourceTable::add_status_badge(int row, int col, const QString& status) -> void {
@@ -448,26 +460,36 @@ CreateDialog::CreateDialog(QWidget* parent)
     auto create_list_box = [&](const QString& title_text, QListWidget*& out_list, auto slot_fn) {
         auto* box { new QFrame };
         box->setObjectName("InnerBox");
-        box->setFixedHeight(130);
+        box->setFixedHeight(140);
         auto* bl { new QVBoxLayout(box) };
-        bl->setContentsMargins(15, 15, 15, 15);
+        bl->setContentsMargins(15, 12, 15, 12);
+
+        
+        auto* top_row { new QHBoxLayout };
         auto* b_title { new QLabel(title_text) };
         b_title->setObjectName("BoxTitle");
-        bl->addWidget(b_title);
+        top_row->addWidget(b_title);
+        top_row->addStretch();
+
+        auto* plus { new QPushButton("+") };
+        plus->setObjectName("SmallPlusBtn");
+        plus->setFixedSize(22, 22);
+        plus->setCursor(Qt::PointingHandCursor);
+        connect(plus, &QPushButton::clicked, this, slot_fn);
+        top_row->addWidget(plus);
+        bl->addLayout(top_row);
+
+        
         out_list = new QListWidget;
         out_list->setStyleSheet(
             "QListWidget { background: transparent; border: none; outline: none; }"
-            "QListWidget::item { font-family: monospace; font-size: 12px; padding: 2px 0; }"
-            "QListWidget::item:selected { color: white; background: transparent; }");
+            "QListWidget::item { font-family: monospace; font-size: 11px; padding: 4px 0; border-bottom: 1px solid rgba(161, 161, 170, 0.2); }"
+            "QListWidget::item:selected { color: #F97316; background: transparent; }"
+            );
         out_list->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         out_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         bl->addWidget(out_list);
-        auto* plus { new QPushButton("+") };
-        plus->setObjectName("PlusBtn");
-        plus->setFixedSize(28, 28);
-        plus->setCursor(Qt::PointingHandCursor);
-        connect(plus, &QPushButton::clicked, this, slot_fn);
-        bl->addWidget(plus, 0, Qt::AlignRight);
+
         boxes->addWidget(box);
     };
 
@@ -476,9 +498,6 @@ CreateDialog::CreateDialog(QWidget* parent)
     create_list_box("PORTS",   pimpl_->port_list_,   &CreateDialog::on_add_port);
     v_layout->addLayout(boxes);
 
-    auto* res_lbl { new QLabel("RESOURCE LIMITS") };
-    res_lbl->setObjectName("SectionTitle");
-    v_layout->addWidget(res_lbl);
 
     auto add_slider = [&](const QString& label_text, int min, int max, int val, QLabel*& lbl) {
         auto* r { new QHBoxLayout };
@@ -517,6 +536,7 @@ CreateDialog::CreateDialog(QWidget* parent)
     auto* imp_btn { new QPushButton("Import JSON File") };
     imp_btn->setObjectName("SecondaryBtn");
     imp_btn->setCursor(Qt::PointingHandCursor);
+    imp_btn->setFixedSize(160, 36);
     connect(imp_btn, &QPushButton::clicked, this, &CreateDialog::on_import_json);
     j_head->addWidget(f_name);
     j_head->addStretch();
@@ -594,7 +614,8 @@ auto CreateDialog::on_add_port() -> void {
     auto* base_l { new QVBoxLayout(&d) };
     base_l->setContentsMargins(10, 10, 10, 10);
     auto* bg_frame { new QFrame(&d) };
-    bg_frame->setObjectName("CreateDialog");
+    
+    bg_frame->setObjectName("PopupFrame");
     base_l->addWidget(bg_frame);
     auto* l { new QVBoxLayout(bg_frame) };
     l->setContentsMargins(20, 20, 20, 20);

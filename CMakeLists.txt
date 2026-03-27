@@ -13,11 +13,13 @@ set(CMAKE_AUTOUIC ON)
 add_executable(QuiverCpp
     main.cpp
     src/MainWindow.cpp
+    src/DashboardPage.cpp
     src/Components.cpp
     src/Backend.cpp
     src/TablePages.cpp
     src/TopNavBar.cpp
     include/MainWindow.h
+    include/DashboardPage.h
     include/Components.h
     include/Backend.h
     include/FlowLayout.h
@@ -30,6 +32,8 @@ add_executable(QuiverCpp
     assets/light_style.qss
     assets/icons
 )
-
+if(WIN32)
+    target_sources(QuiverCpp PRIVATE quiver.rc)
+endif()
 target_link_libraries(QuiverCpp PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core)
 target_include_directories(QuiverCpp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
