@@ -105,6 +105,7 @@ struct ContainerConfig {
         std::string overlay_opts{};
         std::vector<std::pair<fs::path, fs::path>> volumes{};
         std::vector<std::pair<fs::path, fs::path>> devices{};
+        int flags{};
         bool tty{};
         bool vfs{};
         //TODO: parsed manifest information

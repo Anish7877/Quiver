@@ -3,10 +3,9 @@
 
 class LoggerCommandQueue;
 class ValueHeap;
-class PtySessionManager;
 class ContainerRuntime {
         public:
-                explicit ContainerRuntime(const ContainerConfig&, int, int);
+                explicit ContainerRuntime(const ContainerConfig&);
                 ~ContainerRuntime() = default;
                 ContainerRuntime(const ContainerRuntime&) = delete;
                 ContainerRuntime(ContainerRuntime&&) = delete;
@@ -23,13 +22,11 @@ class ContainerRuntime {
                 auto setup_root_filesystem() -> void;
                 auto jail_process() -> void;
                 auto mount_necessary_dirs() -> void;
+                auto setup_standard_symlinks() -> void;
                 auto supervise_container(pid_t) -> void;
                 auto log_event(const std::string&) -> void;
                 ContainerConfig m_container_config{};
                 LogJobData m_log_job_data{};
                 LoggerCommandQueue* m_log_cmd_queue{};
                 ValueHeap* m_value_heap{};
-                PtySessionManager* m_pty_session_manager{};
-                int m_container_to_monitor_fd{};
-                int m_monitor_to_container_fd{};
 };

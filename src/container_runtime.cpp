@@ -20,10 +20,8 @@
 namespace chrono = std::chrono;
 
 
-ContainerRuntime::ContainerRuntime(const ContainerConfig& config, int container_to_monitor_fd, int monitor_to_container_fd) {
+ContainerRuntime::ContainerRuntime(const ContainerConfig& config) {
         m_container_config = config;
-        m_container_to_monitor_fd = container_to_monitor_fd;
-        m_monitor_to_container_fd = monitor_to_container_fd;
         m_value_heap = &ValueHeap::get_instance();
         m_log_cmd_queue = &LoggerCommandQueue::get_instance();
         m_value_heap->map_buffer(Utils::get_value_heap_buf_name(), ValueHeap::VALUE_HEAP_SIZE, false);
@@ -55,24 +53,9 @@ auto ContainerRuntime::restart_container() -> void {
 }
 
 auto ContainerRuntime::run_container() -> void {
-        // TODO: Get flags from container config from parsed manifest
-        int flags{};
+        int flags{m_container_config.flags};
         if (unshare(flags) == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: unshare failed.",
-                                        chrono::high_resolution_clock::now(), m_container_config.id));
-                _exit(EXIT_FAILURE);
-        }
-
-        char ready{'1'};
-        if (write(m_container_to_monitor_fd, &ready, 1) == -1) {
-                log_event(std::format("[{}] [{}] Container Runtime Error: write to container_to_monitor_fd failed.",
-                                        chrono::high_resolution_clock::now(), m_container_config.id));
-                _exit(EXIT_FAILURE);
-        }
-
-        char go{};
-        if (read(m_monitor_to_container_fd, &go, 1) != 1) {
-                log_event(std::format("[{}] [{}] Container Runtime Error: read failed from monitor_to_container_fd.",
                                         chrono::high_resolution_clock::now(), m_container_config.id));
                 _exit(EXIT_FAILURE);
         }
@@ -104,9 +87,6 @@ auto ContainerRuntime::run_container() -> void {
 }
 
 auto ContainerRuntime::execute_container_init() -> void {
-        close(m_container_to_monitor_fd);
-        close(m_monitor_to_container_fd);
-
         if (setsid() == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: setsid failed for container init.",
                                         chrono::high_resolution_clock::now(), m_container_config.id));
@@ -122,6 +102,11 @@ auto ContainerRuntime::execute_container_init() -> void {
         setup_root_filesystem();
         jail_process();
         mount_necessary_dirs();
+        setup_standard_symlinks();
+        execl("/bin/bash", "/bin/bash", (char*)NULL);
+        log_event(std::format("[{}] [{}] Container Runtime Error: execl failed for container init.",
+                                chrono::high_resolution_clock::now(), m_container_config.id));
+        _exit(EXIT_FAILURE);
 }
 
 auto ContainerRuntime::setup_root_filesystem() -> void {
@@ -166,9 +151,7 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
 }
 
 auto ContainerRuntime::jail_process() -> void {
-        if (!Utils::ensure_dir("oldroot")) [[unlikely]] {
-                _exit(EXIT_FAILURE);
-        }
+        Utils::ensure_dir("oldroot");
 
         if (syscall(SYS_pivot_root, ".", "oldroot") == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: pivot root failed for container init with error {}.",
@@ -196,21 +179,12 @@ auto ContainerRuntime::jail_process() -> void {
 }
 
 auto ContainerRuntime::mount_necessary_dirs() -> void {
-        if(!Utils::ensure_dir("/proc")) [[unlikely]] {
-                _exit(EXIT_FAILURE);
-        }
-        if(!Utils::ensure_dir("/sys")) [[unlikely]] {
-                _exit(EXIT_FAILURE);
-        }
-        if (!Utils::ensure_dir("/dev/shm")) [[unlikely]] {
-                _exit(EXIT_FAILURE);
-        }
-        if (!Utils::ensure_dir("/tmp")) [[unlikely]] {
-                _exit(EXIT_FAILURE);
-        }
-        if (!Utils::ensure_dir("/run")) [[unlikely]] {
-                _exit(EXIT_FAILURE);
-        }
+        Utils::ensure_dir("/proc");
+        Utils::ensure_dir("/sys");
+        Utils::ensure_dir("/dev");
+        Utils::ensure_dir("/tmp");
+        Utils::ensure_dir("/run");
+
         if (!Mount::_proc()) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: proc mount failed for container init.",
                                         chrono::high_resolution_clock::now(), m_container_config.id));
@@ -221,11 +195,15 @@ auto ContainerRuntime::mount_necessary_dirs() -> void {
                                         chrono::high_resolution_clock::now(), m_container_config.id));
                 _exit(EXIT_FAILURE);
         }
-        if (!Mount::_tmpfs("/dev/shm", "mode=1777,size=65536k")) [[unlikely]] {
-                log_event(std::format("[{}] [{}] Container Runtime Error: shm mount failed for container init.",
+        if (!Mount::_dev()) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: dev mount failed for container init.",
                                         chrono::high_resolution_clock::now(), m_container_config.id));
                 _exit(EXIT_FAILURE);
         }
+
+        Utils::ensure_dir("/dev/shm");
+        Utils::ensure_dir("/dev/pts");
+
         if (!Mount::_tmpfs("/tmp", "mode=1777")) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: tmp mount failed for container init.",
                                         chrono::high_resolution_clock::now(), m_container_config.id));
@@ -236,11 +214,39 @@ auto ContainerRuntime::mount_necessary_dirs() -> void {
                                         chrono::high_resolution_clock::now(), m_container_config.id));
                 _exit(EXIT_FAILURE);
         }
+        if (!Mount::_tmpfs("/dev/shm", "mode=1777,size=65536k")) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: shm mount failed for container init.",
+                                        chrono::high_resolution_clock::now(), m_container_config.id));
+                _exit(EXIT_FAILURE);
+        }
+        if (!Mount::_devpts("/dev/pts", "newinstance,ptmxmode=0666,mode=0620,gid=5")) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: devpts mount failed for container init.",
+                                        chrono::high_resolution_clock::now(), m_container_config.id));
+                _exit(EXIT_FAILURE);
+        }
+}
+
+auto ContainerRuntime::setup_standard_symlinks() -> void {
+        std::vector<std::pair<std::string, std::string>> links{
+                {"/proc/self/fd",   "/dev/fd"},
+                {"/proc/self/fd/0", "/dev/stdin"},
+                {"/proc/self/fd/1", "/dev/stdout"},
+                {"/proc/self/fd/2", "/dev/stderr"},
+                {"pts/ptmx",        "/dev/ptmx"}
+        };
+
+        for (const auto& link : links) {
+                unlink(link.second.c_str());
+
+                if (symlink(link.first.c_str(), link.second.c_str()) == -1) [[unlikely]] {
+                        log_event(std::format("[{}] [{}] Container Runtime Error: Failed to symlink {} to {} -> {}.",
+                                                chrono::high_resolution_clock::now(), m_container_config.id,
+                                                link.first, link.second, std::strerror(errno)));
+                }
+        }
 }
 
 auto ContainerRuntime::supervise_container(pid_t pid) -> void {
-        close(m_container_to_monitor_fd);
-        close(m_monitor_to_container_fd);
         int status{};
         while (waitpid(pid, &status, 0) == -1) {
                 if (errno == EINTR) continue;

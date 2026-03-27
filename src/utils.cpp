@@ -20,39 +20,34 @@ auto Utils::file_exists(const fs::path& path) -> bool {
         return fs::is_regular_file(path);
 }
 
-auto Utils::ensure_dir(const fs::path& path, mode_t mode) -> bool {
+auto Utils::ensure_dir(const fs::path& path, mode_t mode) -> void {
         if (!dir_exists(path)) {
                 std::error_code error_code{};
                 fs::create_directories(path, error_code);
 
                 if (error_code) [[unlikely]] {
-                        std::cerr << std::format("Directory Error: couldn't create '{}' - {}\n", path.string(), error_code.message());
-                        return false;
+                        throw std::runtime_error(std::format("Directory Error: couldn't create '{}' - {}\n", path.string(), error_code.message()));
                 }
 
                 fs::permissions(path, static_cast<fs::perms>(mode), fs::perm_options::replace, error_code);
                 if (error_code) [[unlikely]] {
-                        std::cerr << std::format("Permissions Error: couldn't set permissions for '{}' - {}\n", path.string(), error_code.message());
-                        return false;
+                        throw std::runtime_error(std::format("Permissions Error: couldn't set permissions for '{}' - {}\n", path.string(), error_code.message()));
                 }
         }
-        return true;
 }
 
-auto Utils::ensure_file(const fs::path& path) -> bool {
+auto Utils::ensure_file(const fs::path& path) -> void {
         if (!file_exists(path)) {
                 fs::path parent_path{path.parent_path()};
                 if(!parent_path.empty() && !dir_exists(parent_path)) ensure_dir(parent_path);
                 std::ofstream file{path};
                 if(!file) [[unlikely]] {
-                        std::cerr << std::format("File Error: failed to create '{}'\n", path.string());
-                        return false;
+                        throw std::runtime_error(std::format("File Error: failed to create '{}'\n", path.string()));
                 }
         }
-        return true;
 }
 
-auto Utils::write_file(const fs::path& path, std::string_view buffer, bool append_mode) -> bool {
+auto Utils::write_file(const fs::path& path, std::string_view buffer, bool append_mode) -> void {
         fs::path parent_path{path.parent_path()};
         if (!parent_path.empty() && !dir_exists(parent_path)) ensure_dir(parent_path);
 
@@ -63,36 +58,29 @@ auto Utils::write_file(const fs::path& path, std::string_view buffer, bool appen
         std::ofstream file{path, mode};
 
         if (!file.is_open()) [[unlikely]] {
-                std::cerr << std::format("File Error: couldn't open '{}'\n", path.string());
-                return false;
+                throw std::runtime_error(std::format("File Error: couldn't open '{}'\n", path.string()));
         }
         file << buffer;
         if (!file) [[unlikely]] {
-                std::cerr << std::format("File Error: failed to write data to '{}'\n", path.string());
-                return false;
+                throw std::runtime_error(std::format("File Error: failed to write data to '{}'\n", path.string()));
         }
-        return true;
 }
 
-auto Utils::copy_directory(const fs::path& source, const fs::path& destination) -> bool {
+auto Utils::copy_directory(const fs::path& source, const fs::path& destination) -> void {
         std::error_code error_code{};
         fs::copy(source, destination, error_code);
         if (error_code) [[unlikely]] {
-                std::cerr << std::format("Directory Error: couldn't copy '{}' -> '{}' with error - {}\n",
-                                source.string(), destination.string(), error_code.message());
-                return false;
+                throw std::runtime_error(std::format("Directory Error: couldn't copy '{}' -> '{}' with error - {}\n",
+                                source.string(), destination.string(), error_code.message()));
         }
-        return true;
 }
 
-auto Utils::remove_directory(const fs::path& path) -> bool {
+auto Utils::remove_directory(const fs::path& path) -> void {
         std::error_code error_code{};
         fs::remove_all(path, error_code);
         if (error_code) [[unlikely]] {
-                std::cerr << std::format("Directory Error: couldn't remove '{}' - {}\n", path.string(), error_code.message());
-                return false;
+                throw std::runtime_error(std::format("Directory Error: couldn't remove '{}' - {}\n", path.string(), error_code.message()));
         }
-        return true;
 }
 
 auto Utils::get_base_dir() -> fs::path {
@@ -101,48 +89,48 @@ auto Utils::get_base_dir() -> fs::path {
         return base + "/.quiver";
 }
 
-auto Utils::get_sock_path(pid_t pid) -> fs::path {
-        std::string path{get_base_dir().string() + "/containers/" + std::to_string(static_cast<long long>(pid))};
+auto Utils::get_sock_path(const std::string& container_id) -> fs::path {
+        std::string path{std::format("/tmp/quiver_{}.sock", container_id)};
         return path;
 }
 
-auto Utils::get_filesystem_path(pid_t pid) -> fs::path {
-        std::string path{get_base_dir().string() + "/filesystems/" + std::to_string(static_cast<long long>(pid))};
+auto Utils::get_filesystem_path(const std::string& container_id) -> fs::path {
+        std::string path{std::format("{}/filesystems/{}",get_base_dir().string(), container_id)};
         return path;
 }
 
-auto Utils::get_vfs_path(pid_t pid) -> fs::path {
-        std::string path{get_base_dir().string() + "/vfs/" + std::to_string(static_cast<long long>(pid))};
+auto Utils::get_vfs_path(const std::string& container_id) -> fs::path {
+        std::string path{std::format("{}/vfs/{}",get_base_dir().string(), container_id)};
         return path;
 }
 
 auto Utils::get_image_path(const std::string& image_name) -> fs::path {
-        std::string path{get_base_dir().string() + "/images/" + image_name};
+        std::string path{std::format("{}/images/{}", get_base_dir().string(), image_name)};
         return path;
 }
 
 auto Utils::get_container_db_path() -> fs::path {
-        std::string path{get_base_dir().string() + "/db/container_db"};
+        std::string path{std::format("{}/db/container_db", get_base_dir().string())};
         return path;
 }
 
 auto Utils::get_volume_db_path() -> fs::path {
-        std::string path{get_base_dir().string() + "/db/volume_db"};
+        std::string path{std::format("{}/db/volume_db", get_base_dir().string())};
         return path;
 }
 
 auto Utils::get_device_db_path() -> fs::path {
-        std::string path{get_base_dir().string() + "/db/device_db"};
+        std::string path{std::format("{}/db/device_db", get_base_dir().string())};
         return path;
 }
 
 auto Utils::get_network_db_path() -> fs::path {
-        std::string path{get_base_dir().string() + "/db/network_db"};
+        std::string path{std::format("{}/db/network_db", get_base_dir().string())};
         return path;
 }
 
 auto Utils::get_image_db_path() -> fs::path {
-        std::string path{get_base_dir().string() + "/db/image_db"};
+        std::string path{std::format("{}/db/image_db", get_base_dir().string())};
         return path;
 }
 

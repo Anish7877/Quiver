@@ -39,8 +39,22 @@ auto Mount::_sys() -> bool {
         return true;
 }
 
+auto Mount::_dev() -> bool {
+        if (mount("tmpfs","/dev", "tmpfs", MS_NOSUID | MS_STRICTATIME, "mode=755,size=65536K") == -1) [[unlikely]] {
+                return false;
+        }
+        return true;
+}
+
 auto Mount::_tmpfs(const fs::path& fs, const std::string& opts) -> bool {
         if (mount("tmpfs", fs.c_str(), "tmpfs", MS_NODEV | MS_NOSUID, opts.c_str()) == -1) [[unlikely]] {
+                return false;
+        }
+        return true;
+}
+
+auto Mount::_devpts(const fs::path& fs, const std::string& opts) -> bool {
+        if (mount("devpts", fs.c_str(), "devpts", MS_NOEXEC | MS_NOSUID, opts.c_str()) == -1) [[unlikely]] {
                 return false;
         }
         return true;

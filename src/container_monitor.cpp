@@ -1,4 +1,6 @@
 #include "container_monitor.hpp"
+#include "container_runtime.hpp"
+#include "pty_session_manager.hpp"
 #include "types.hpp"
 #include "value_heap.hpp"
 #include "logger_command_queue.hpp"
@@ -9,7 +11,12 @@
 #include <cstring>
 #include <format>
 #include <cstdlib>
+#include <memory>
+#include <sched.h>
+#include <sys/poll.h>
+#include <sys/un.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
 #include <stdexcept>
 #include <unistd.h>
 #include <poll.h>
@@ -19,6 +26,7 @@ auto ContainerMonitor::init(const ContainerConfig& config) -> void {
         m_container_config = config;
         m_value_heap = &ValueHeap::get_instance();
         m_log_cmd_queue = &LoggerCommandQueue::get_instance();
+        m_pty_session_manager = &PtySessionManager::get_instance();
         m_value_heap->map_buffer(Utils::get_value_heap_buf_name(), ValueHeap::VALUE_HEAP_SIZE, false);
         if (!m_value_heap->ok()) [[unlikely]] {
                 throw std::runtime_error(m_value_heap->get_error());
@@ -35,56 +43,91 @@ auto ContainerMonitor::setup_usernamespace() -> void {
         setup_gid_map();
 }
 
-auto ContainerMonitor::start_logging() -> bool {
-        if (!attach_to_stdio()) return false;
+auto ContainerMonitor::start_logging(int master_fd) -> bool {
         m_logging_active.store(true, std::memory_order_release);
-        m_log_worker = std::thread([this]() {
-                                pollfd fds[2];
-                                fds[0].fd = m_std_out_fd[0];
-                                fds[0].events = POLLIN;
-                                fds[1].fd = m_std_err_fd[0];
-                                fds[1].events = POLLIN;
+        m_log_worker = std::thread([&]() {
+                                if(m_container_config.tty) {
+                                        pollfd fds[1];
+                                        fds[0].fd = master_fd;
+                                        fds[0].events = POLLIN;
 
-                                int open_pipes{2};
-                                while(m_logging_active.load(std::memory_order_acquire) && open_pipes > 0) {
-                                        int ret{poll(fds, 2, 100)};
+                                        while(m_logging_active.load(std::memory_order_acquire) && fds[0].fd != -1) {
+                                                int ret{poll(fds, 1, 100)};
 
-                                        if (ret == -1) [[unlikely]] {
-                                                if(errno == EINTR) continue;
-                                                break;
-                                        }
-                                        if (ret == 0) {
-                                                continue;
-                                        }
-                                        if (fds[0].fd != -1 && (fds[0].revents & POLLIN)) {
-                                                char buffer[4096];
-                                                ssize_t bytes_read{read(fds[0].fd, buffer, sizeof(buffer))};
-                                                if (bytes_read > 0) {
-                                                        std::string log_data{std::format("[{}] [{}] [STDOUT] {}.",
-                                                                        chrono::high_resolution_clock::now(),
-                                                                        m_container_id,
-                                                                        std::string(buffer, bytes_read))};
-                                                        this->log_event(log_data, TargetLog::CONTAINERLOG);
+                                                if (ret < 0) {
+                                                        if(errno == EINTR) continue;
+                                                        break;
+                                                }
+                                                if (ret == 0) continue;
+
+                                                if (fds[0].fd != -1 && (fds[0].revents & POLLIN)) {
+                                                        char buffer[4096];
+                                                        ssize_t bytes_read{read(fds[0].fd, buffer, sizeof(buffer))};
+
+                                                        if (bytes_read > 0) {
+                                                                std::string log_data{std::format("[{}] [{}] [PTY] {}.",
+                                                                                chrono::high_resolution_clock::now(),
+                                                                                m_container_id,
+                                                                                std::string(buffer, bytes_read))};
+
+                                                                log_event(log_data, TargetLog::CONTAINERLOG);
+
+                                                        }
+                                                }
+
+                                                if (fds[0].fd != -1 && (fds[0].revents & POLLHUP)) {
+                                                        fds[0].fd = -1;
                                                 }
                                         }
-                                        if (fds[0].fd != -1 && (fds[0].revents & POLLHUP)) {
-                                                fds[0].fd = -1;
-                                                --open_pipes;
-                                        }
-                                        if (fds[1].fd != -1 && (fds[0].revents & POLLIN)) {
-                                                char buffer[4096];
-                                                ssize_t bytes_read{read(fds[1].fd, buffer, sizeof(buffer))};
-                                                if (bytes_read > 1) {
-                                                        std::string log_data{std::format("[{}] [{}] [STDERR] {}.",
-                                                                        chrono::high_resolution_clock::now(),
-                                                                        m_container_id,
-                                                                        std::string(buffer, bytes_read))};
-                                                        this->log_event(log_data, TargetLog::CONTAINERLOG);
+                                }
+                                else {
+                                        pollfd fds[2];
+                                        fds[0].fd = m_std_out_fd[0];
+                                        fds[0].events = POLLIN;
+                                        fds[1].fd = m_std_err_fd[0];
+                                        fds[1].events = POLLIN;
+
+                                        int open_pipes{2};
+                                        while(m_logging_active.load(std::memory_order_acquire) && open_pipes > 0) {
+                                                int ret{poll(fds, 2, 100)};
+
+                                                if (ret == -1) [[unlikely]] {
+                                                        if(errno == EINTR) continue;
+                                                        break;
                                                 }
-                                        }
-                                        if (fds[1].fd != -1 && (fds[1].revents & POLLHUP)) {
-                                                fds[1].fd = -1;
-                                                --open_pipes;
+                                                if (ret == 0) {
+                                                        continue;
+                                                }
+                                                if (fds[0].fd != -1 && (fds[0].revents & POLLIN)) {
+                                                        char buffer[4096];
+                                                        ssize_t bytes_read{read(fds[0].fd, buffer, sizeof(buffer))};
+                                                        if (bytes_read > 0) {
+                                                                std::string log_data{std::format("[{}] [{}] [STDOUT] {}.",
+                                                                                chrono::high_resolution_clock::now(),
+                                                                                m_container_id,
+                                                                                std::string(buffer, bytes_read))};
+                                                                this->log_event(log_data, TargetLog::CONTAINERLOG);
+                                                        }
+                                                }
+                                                if (fds[0].fd != -1 && (fds[0].revents & POLLHUP)) {
+                                                        fds[0].fd = -1;
+                                                        --open_pipes;
+                                                }
+                                                if (fds[1].fd != -1 && (fds[1].revents & POLLIN)) {
+                                                        char buffer[4096];
+                                                        ssize_t bytes_read{read(fds[1].fd, buffer, sizeof(buffer))};
+                                                        if (bytes_read > 1) {
+                                                                std::string log_data{std::format("[{}] [{}] [STDERR] {}.",
+                                                                                chrono::high_resolution_clock::now(),
+                                                                                m_container_id,
+                                                                                std::string(buffer, bytes_read))};
+                                                                this->log_event(log_data, TargetLog::CONTAINERLOG);
+                                                        }
+                                                }
+                                                if (fds[1].fd != -1 && (fds[1].revents & POLLHUP)) {
+                                                        fds[1].fd = -1;
+                                                        --open_pipes;
+                                                }
                                         }
                                 }
                         });
@@ -100,49 +143,138 @@ auto ContainerMonitor::invoke_container() -> void {
         }
         if(m_monitor_pid > 0) return;
         if (setsid() == -1) [[unlikely]] {
-                std::string err{std::format("[{}] Container Monitor Fatal: setsid failed -> {}.", m_container_id, std::strerror(errno))};
-                this->log_event(err, TargetLog::CONTAINERMON);
-                _exit(EXIT_FAILURE);
+                std::string err{std::format("[{}] Container Monitor Fatal: setsid failed -> {}.",
+                                m_container_id, std::strerror(errno))};
+                log_event(err, TargetLog::CONTAINERMON);
+                return;
+        }
+        if (!attach_to_stdio()) [[unlikely]] {
+                log_event("Container Monitor Fatal: Failed to attach stdio.", TargetLog::CONTAINERMON);
+                return;
         }
         if (pipe(m_container_to_monitor_fd) == -1 || pipe(m_monitor_to_container_fd) == -1) [[unlikely]] {
                 std::string err{"Container Monitor Fatal: pipe creation failed."};
-                this->log_event(err, TargetLog::CONTAINERMON);
-                _exit(EXIT_FAILURE);
+                log_event(err, TargetLog::CONTAINERMON);
+                return;
         }
         m_container_pid = fork();
         if (m_container_pid == -1) [[unlikely]] {
                 std::string err{std::format("Container Monitor Error: fork failed -> {}.", std::strerror(errno))};
-                this->log_event(err, TargetLog::CONTAINERMON);
-                _exit(EXIT_FAILURE);
+                log_event(err, TargetLog::CONTAINERMON);
+                return;
         }
         if (m_container_pid == 0) {
                 close(m_container_to_monitor_fd[0]);
                 close(m_monitor_to_container_fd[1]);
 
-                close(m_std_out_fd[0]);
-                close(m_std_err_fd[0]);
+                if (unshare(CLONE_NEWUSER) == -1) [[unlikely]] {
+                        log_event(std::format("[{}] [{}] Container Runtime Error: unshare(CLONE_NEWUSER) failed.",
+                                                chrono::high_resolution_clock::now(), m_container_config.id), TargetLog::CONTAINERLOG);
+                        _exit(EXIT_FAILURE);
+                }
+                char ready{'1'};
+                if (write(m_container_to_monitor_fd[1], &ready, 1) == -1) [[unlikely]] {
+                        log_event(std::format("[{}] [{}] Container Runtime Error: write to container_to_monitor_fd failed.",
+                                                chrono::high_resolution_clock::now(), m_container_config.id), TargetLog::CONTAINERLOG);
+                        close(m_container_to_monitor_fd[1]);
+                        _exit(EXIT_FAILURE);
+                }
+                close(m_container_to_monitor_fd[1]);
 
-                dup2(m_std_out_fd[1], STDOUT_FILENO);
-                dup2(m_std_err_fd[1], STDERR_FILENO);
+                char go{};
+                if (read(m_monitor_to_container_fd[0], &go, 1) != 1) [[unlikely]] {
+                        log_event(std::format("[{}] [{}] Container Runtime Error: read failed from monitor_to_container_fd.",
+                                                chrono::high_resolution_clock::now(), m_container_config.id), TargetLog::CONTAINERLOG);
+                        close(m_monitor_to_container_fd[0]);
+                        _exit(EXIT_FAILURE);
+                }
+                close(m_monitor_to_container_fd[0]);
+                if (m_container_config.tty) {
+                        close(m_control_sock[0]);
 
-                close(m_std_out_fd[1]);
-                close(m_std_err_fd[1]);
+                        m_pty_session_manager->setup_pty();
+                        if (!m_pty_session_manager->ok()) [[unlikely]] {
+                                log_event(m_pty_session_manager->get_error(), TargetLog::CONTAINERMON);
+                                _exit(EXIT_FAILURE);
+                        }
+
+                        m_pty_session_manager->send_master_fd(m_control_sock[1], m_pty_session_manager->get_master_fd());
+                        if (!m_pty_session_manager->ok()) {
+                                log_event(m_pty_session_manager->get_error(), TargetLog::CONTAINERMON);
+                                _exit(EXIT_FAILURE);
+                        }
+                        setup_socket_connection();
+
+                        close(m_control_sock[1]);
+                        close(m_pty_session_manager->get_master_fd());
+                }
+                else {
+                        close(m_std_out_fd[0]);
+                        close(m_std_err_fd[0]);
+
+                        dup2(m_std_out_fd[1], STDOUT_FILENO);
+                        dup2(m_std_err_fd[1], STDERR_FILENO);
+
+                        close(m_std_out_fd[1]);
+                        close(m_std_err_fd[1]);
+                }
+                m_runtime = std::make_unique<ContainerRuntime>(m_container_config);
+                m_runtime->run_container();
+                _exit(EXIT_FAILURE);
         }
         else {
                 close(m_monitor_to_container_fd[0]);
                 close(m_container_to_monitor_fd[1]);
-                start_logging();
-                close(m_std_out_fd[1]);
-                close(m_std_err_fd[1]);
+
+                char buf{};
+                if (read(m_container_to_monitor_fd[0], &buf, 1) != 1) [[unlikely]] {
+                        log_event(std::format("[{}] Container Monitor Error: read from container_to_monitor_fd failed.",
+                                                m_container_config.id), TargetLog::CONTAINERLOG);
+                        close(m_container_to_monitor_fd[0]);
+                        return;
+                }
+                close(m_container_to_monitor_fd[0]);
+
+                setup_usernamespace();
+
+                char go_sig{'1'};
+                if (write(m_monitor_to_container_fd[1], &go_sig, 1) != -1) [[unlikely]] {
+                        log_event(std::format("[{}] Container Monitor Error: write to monitor_to_container_fd failed.",
+                                                m_container_config.id), TargetLog::CONTAINERLOG);
+                        close(m_monitor_to_container_fd[1]);
+                        return;
+                }
+                close(m_monitor_to_container_fd[1]);
+
+                int master_fd{-1};
+                if (m_container_config.tty) {
+                        close(m_control_sock[1]);
+
+                        master_fd = m_pty_session_manager->recv_master_fd(m_control_sock[0]);
+                        if (!m_pty_session_manager->ok()) [[unlikely]] {
+                                log_event(m_pty_session_manager->get_error(), TargetLog::CONTAINERMON);
+                                return;
+                        }
+                        close(m_control_sock[0]);
+                }
+                else {
+                        close(m_std_out_fd[1]);
+                        close(m_std_err_fd[1]);
+                }
+                start_logging(master_fd);
+                int status{};
+                if (waitpid(m_container_pid, &status, 0) == -1) [[unlikely]] {
+                        log_event(std::format("Container Monitor Error: waitpid failed - '{}'.", std::strerror(errno)),
+                                        TargetLog::CONTAINERMON);
+                        return;
+                }
         }
 }
 
 auto ContainerMonitor::setup_set_groups() -> void {
         fs::path set_groups_path{std::format("/proc/{}/setgroups", m_container_pid)};
         std::string buf{"deny"};
-        if (!Utils::write_file(set_groups_path, buf)) {
-                _exit(EXIT_FAILURE);
-        }
+        Utils::write_file(set_groups_path, buf);
 }
 
 auto ContainerMonitor::setup_uid_map() -> void {
@@ -155,6 +287,129 @@ auto ContainerMonitor::setup_gid_map() -> void {
         const char* newgidmap_path{"/usr/bin/newgidmap"};
         const char* newgidmap{"newgidmap"};
         exec_mapping_tool(newgidmap_path, newgidmap);
+}
+
+auto ContainerMonitor::setup_socket_connection() -> void {
+        m_sock_path = Utils::get_sock_path(m_container_config.id);
+        unlink(m_sock_path.c_str());
+
+        m_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (m_socket_fd == -1) [[unlikely]] {
+                log_event(std::format("[{}] Container Runtime Error: socket failed.", m_container_config.id), TargetLog::CONTAINERLOG);
+                _exit(EXIT_FAILURE);
+        }
+
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, m_sock_path.c_str(), sizeof(addr.sun_path)-1);
+
+        if (bind(m_socket_fd, (sockaddr*)&addr, sizeof(addr)) == -1) [[unlikely]] {
+                log_event(std::format("[{}] Container Runtime Error: bind failed.", m_container_config.id), TargetLog::CONTAINERLOG);
+                _exit(EXIT_FAILURE);
+        }
+
+        if (listen(m_socket_fd, 1) == -1) [[unlikely]] {
+                log_event(std::format("[{}] Container Runtime Error: listen failed.", m_container_config.id), TargetLog::CONTAINERLOG);
+                _exit(EXIT_FAILURE);
+        }
+}
+
+auto ContainerMonitor::attach_to_container(const std::string& container_id) -> void {
+        m_sock_path = Utils::get_sock_path(container_id);
+
+        m_connection_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, m_sock_path.c_str(), sizeof(addr.sun_path)-1);
+
+        if (connect(m_connection_fd, (sockaddr*)&addr, sizeof(addr)) == -1) [[unlikely]] {
+                log_event(std::format("[{}] Container Runtime Error: Connection to socket failed.", m_container_config.id), TargetLog::CONTAINERLOG);
+                std::cerr << std::format("[{}] Container Runtime Error: Connection to socket failed.\n", m_container_config.id);
+                _exit(EXIT_FAILURE);
+        }
+
+        m_pty_session_manager->enable_raw_mode();
+
+        pollfd fds[2];
+        fds[0].fd = STDIN_FILENO;
+        fds[0].events = POLLIN;
+        fds[1].fd = m_connection_fd;
+        fds[1].events = POLLIN;
+
+        bool saw_ctrlp { false };
+        bool should_run { true };
+        bool user_detached { false };
+
+        while (should_run) {
+                int ret{poll(fds, 2, -1)};
+
+                if (ret < 0) {
+                        if (errno == EINTR) continue;
+                        break;
+                }
+
+                if ((fds[0].revents | fds[1].revents) & (POLLERR | POLLHUP | POLLNVAL)) {
+                        break;
+                }
+
+                if (fds[0].revents & POLLIN) {
+                        char buf[4096];
+                        ssize_t n{read(fds[0].fd, buf, sizeof(buf))};
+                        if (n <= 0) {
+                                should_run = false;
+                                break;
+                        }
+
+                        for (ssize_t i = 0; i < n; ++i) {
+                                unsigned char c{static_cast<unsigned char>(buf[i])};
+
+                                if (saw_ctrlp) {
+                                        if (c == 0x11) {
+                                                should_run = false;
+                                                user_detached = true;
+                                                break;
+                                        }
+                                        unsigned char seq[2] { 0x10, c };
+                                        if (write(m_connection_fd, seq, 2) <= 0) {
+                                                should_run = false;
+                                                break;
+                                        }
+                                        saw_ctrlp = false;
+                                } else if (c == 0x10) {
+                                        saw_ctrlp = true;
+                                } else {
+                                        if (write(m_connection_fd, &c, 1) <= 0) {
+                                                should_run = false;
+                                                break;
+                                        }
+                                }
+                        }
+                }
+
+                if (!should_run) break;
+
+                if (fds[1].revents & POLLIN) {
+                        char buf[4096];
+                        ssize_t n {read(fds[1].fd, buf, sizeof(buf))};
+                        if (n <= 0) {
+                                should_run = false;
+                                break;
+                        }
+                        if (write(STDOUT_FILENO, buf, n) <= 0) {
+                                should_run = false;
+                                break;
+                        }
+                }
+        }
+        m_pty_session_manager->disable_raw_mode();
+        if (user_detached) {
+                fprintf(stderr, "[Detached]\n");
+        }
+        else {
+                fprintf(stderr, "[Session Terminated]\n");
+        }
+
+        close (m_connection_fd);
 }
 
 auto ContainerMonitor::exec_mapping_tool(const char* binary_path, const char* binary_name) -> void {
@@ -190,7 +445,12 @@ auto ContainerMonitor::exec_mapping_tool(const char* binary_path, const char* bi
 }
 
 auto ContainerMonitor::attach_to_stdio() -> bool {
-        if (pipe(m_std_out_fd) == -1 || pipe(m_std_err_fd) == -1) return false;
+        if (m_container_config.tty) {
+                if (socketpair(AF_UNIX, SOCK_STREAM, 0, m_control_sock) == -1) [[unlikely]] return false;
+        }
+        else {
+                if (pipe(m_std_out_fd) == -1 || pipe(m_std_err_fd) == -1) [[unlikely]]  return false;
+        }
         return true;
 }
 
@@ -214,4 +474,14 @@ auto ContainerMonitor::log_event(const std::string& log_data, TargetLog target_l
 
 ContainerMonitor::~ContainerMonitor() {
         stop_logging();
+
+        if (m_connection_fd != -1) {
+                close(m_connection_fd);
+        }
+        if (m_socket_fd != -1) {
+                close(m_connection_fd);
+        }
+        if (!m_sock_path.empty()) {
+                unlink(m_sock_path.c_str());
+        }
 }
