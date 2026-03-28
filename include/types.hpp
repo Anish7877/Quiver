@@ -105,6 +105,8 @@ struct ContainerConfig {
         std::string overlay_opts{};
         std::vector<std::pair<fs::path, fs::path>> volumes{};
         std::vector<std::pair<fs::path, fs::path>> devices{};
+        uid_t uid{};
+        gid_t gid{};
         int flags{};
         bool tty{};
         bool vfs{};

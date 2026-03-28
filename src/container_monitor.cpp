@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <memory>
 #include <sched.h>
+#include <sstream>
 #include <sys/poll.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -279,14 +280,15 @@ auto ContainerMonitor::setup_set_groups() -> void {
 
 auto ContainerMonitor::setup_uid_map() -> void {
         const char* newuidmap_path{"/usr/bin/newuidmap"};
-        const char* newuidmap{"newuidmap"};
-        exec_mapping_tool(newuidmap_path, newuidmap);
+        std::string payload{std::format("0 {} 1\n", m_container_config.uid)};
+        exec_mapping_tool(newuidmap_path, payload);
 }
 
 auto ContainerMonitor::setup_gid_map() -> void {
         const char* newgidmap_path{"/usr/bin/newgidmap"};
-        const char* newgidmap{"newgidmap"};
-        exec_mapping_tool(newgidmap_path, newgidmap);
+        std::string payload{std::format("0 {} 1\n", m_container_config.uid)};
+        payload += Utils::get_gid_map_payload(m_container_config.devices);
+        exec_mapping_tool(newgidmap_path, payload);
 }
 
 auto ContainerMonitor::setup_socket_connection() -> void {
@@ -412,34 +414,49 @@ auto ContainerMonitor::attach_to_container(const std::string& container_id) -> v
         close (m_connection_fd);
 }
 
-auto ContainerMonitor::exec_mapping_tool(const char* binary_path, const char* binary_name) -> void {
+auto ContainerMonitor::exec_mapping_tool(const char* binary_path, const std::string& payload) -> void {
         pid_t pid{fork()};
 
         if (pid == -1) [[unlikely]] {
                 throw std::runtime_error(std::format("Container Monitor Error: fork failed for {} -> {}.",
-                                                     binary_name, std::strerror(errno)));
+                                                     binary_path, std::strerror(errno)));
         }
         else if (pid == 0) {
-                execl(binary_path, binary_name, static_cast<char*>(NULL));
-                std::cerr << std::format("Container Monitor Fatal: execl failed for {} -> {}.\n", binary_name, std::strerror(errno));
+                std::vector<std::string> args{};
+                args.emplace_back(binary_path);
+                args.emplace_back(std::to_string(m_container_pid));
+                std::stringstream ss{payload};
+                std::string token{};
+                while (ss >> token) {
+                        args.emplace_back(token);
+                }
+                std::vector<char*> c_args{};
+                for(auto& arg : args) {
+                        c_args.emplace_back(arg.data());
+                }
+                c_args.emplace_back(nullptr);
+
+                execv(binary_path, c_args.data());
+
+                std::cerr << std::format("Container Monitor Fatal: execl failed for {} -> {}.\n", binary_path, std::strerror(errno));
                 _exit(EXIT_FAILURE);
         }
         else {
                 int status{};
                 if (waitpid(pid, &status, 0) == -1) [[unlikely]] {
                         throw std::runtime_error(std::format("Container Monitor Error: waitpid failed for {} -> {}",
-                                                             binary_name, std::strerror(errno)));
+                                                             binary_path, std::strerror(errno)));
                 }
                 if (WIFEXITED(status)) {
                         int exit_code{WEXITSTATUS(status)};
                         if (exit_code > 0) [[unlikely]] {
                                 throw std::runtime_error(std::format("Container Monitor Error: {} failed with user exit code {}.",
-                                                                     binary_name, exit_code));
+                                                                     binary_path, exit_code));
                         }
                 }
                 else if (WIFSIGNALED(status)) {
                         throw std::runtime_error(std::format("Container Monitor Error: {} was terminated by signal {}.",
-                                                             binary_name, WTERMSIG(status)));
+                                                             binary_path, WTERMSIG(status)));
                 }
         }
 }

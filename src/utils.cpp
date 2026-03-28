@@ -10,6 +10,7 @@
 #include <system_error>
 #include <unistd.h>
 #include <archive.h>
+#include <set>
 #include "utils.hpp"
 
 auto Utils::dir_exists(const fs::path& path) -> bool {
@@ -146,7 +147,7 @@ auto Utils::get_value_heap_buf_name() -> std::string {
         return "value_heap";
 }
 
-auto Utils::get_device_gid(const std::string& device) -> gid_t {
+auto Utils::get_device_gid(const fs::path& device) -> gid_t {
         struct stat file_info{};
 
         if(stat(device.c_str(), &file_info) == -1) [[unlikely]] {
@@ -154,6 +155,20 @@ auto Utils::get_device_gid(const std::string& device) -> gid_t {
                 return -1;
         }
         return file_info.st_gid;
+}
+
+auto Utils::get_gid_map_payload(const std::vector<std::pair<fs::path, fs::path>>& devices) -> std::string {
+        std::string payload{};
+        std::set<gid_t> unique_gids{};
+
+        for (const auto& dev : devices) {
+                gid_t gid{get_device_gid(dev.first)};
+
+                if (unique_gids.insert(gid).second) {
+                        payload += std::format("{} {} 1\n", gid, gid);
+                }
+        }
+        return payload;
 }
 
 auto Utils::generate_container_id() -> std::string {

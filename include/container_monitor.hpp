@@ -30,7 +30,7 @@ class ContainerMonitor : public Singleton<ContainerMonitor> {
                 auto setup_gid_map() -> void;
                 auto setup_socket_connection() -> void;
                 auto attach_to_container(const std::string&) -> void;
-                auto exec_mapping_tool(const char*, const char*) -> void;
+                auto exec_mapping_tool(const char*, const std::string&) -> void;
                 auto attach_to_stdio() -> bool;
                 auto stop_logging() -> void;
                 auto log_event(const std::string&, TargetLog) -> void;

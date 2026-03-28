@@ -1,6 +1,7 @@
 #pragma once
 #include <filesystem>
 #include <string>
+#include <vector>
 namespace fs = std::filesystem;
 
 class LoggerCommandQueue;
@@ -26,7 +27,8 @@ namespace Utils {
     auto get_logger_command_queue_buf_name() -> std::string;
     auto get_database_command_queue_buf_name() -> std::string;
     auto get_value_heap_buf_name() -> std::string;
-    auto get_device_gid(const std::string&) -> gid_t;
+    auto get_device_gid(const fs::path&) -> gid_t;
+    auto get_gid_map_payload(const std::vector<std::pair<fs::path, fs::path>>&) -> std::string;
     auto generate_container_id() -> std::string;
     auto extract_tarball(const std::string&, const std::string&) -> void;
     auto print_usage() -> void;

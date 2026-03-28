@@ -103,7 +103,7 @@ auto ContainerRuntime::execute_container_init() -> void {
         jail_process();
         mount_necessary_dirs();
         setup_standard_symlinks();
-        execl("/bin/bash", "/bin/bash", (char*)NULL);
+        execl("/bin/bash", "/bin/bash", static_cast<char*>(NULL));
         log_event(std::format("[{}] [{}] Container Runtime Error: execl failed for container init.",
                                 chrono::high_resolution_clock::now(), m_container_config.id));
         _exit(EXIT_FAILURE);
