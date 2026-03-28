@@ -489,68 +489,6 @@ SettingsPage::SettingsPage(QWidget* parent)
     auto* title { new QLabel("Settings") };
     title->setObjectName("PageTitle");
     layout->addWidget(title);
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    
-    
-    
-    
-
-    
-    
-    
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    
-    
-    
-    
-    
-
-    
-    
-    
-    
-    
-
-
     auto* app_frame { new QFrame };
     app_frame->setObjectName("SettingsGroup");
     auto* app_fl { new QVBoxLayout(app_frame) };
@@ -579,26 +517,26 @@ SettingsPage::SettingsPage(QWidget* parent)
     auto* btn_light { new QToolButton };
     btn_light->setObjectName("ThemeLightCard");
     btn_light->setText("Light Mode");
-    btn_light->setIcon(QIcon(":/assets/icons/light_mode_svg.svg")); 
-    btn_light->setIconSize(QSize(390, 290)); 
+    btn_light->setIcon(QIcon(":/assets/icons/light_mode.png")); 
+    btn_light->setIconSize(QSize(440, 240)); 
     btn_light->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     btn_light->setCheckable(true);
     btn_light->setAutoExclusive(true);
     btn_light->setCursor(Qt::PointingHandCursor);
-    btn_light->setFixedSize(410, 260); 
+    btn_light->setFixedSize(450, 300); 
 
     
     auto* btn_dark { new QToolButton };
     btn_dark->setObjectName("ThemeDarkCard");
     btn_dark->setText("Dark Mode");
-    btn_dark->setIcon(QIcon(":/assets/icons/dark_mode_svg.svg")); 
-    btn_dark->setIconSize(QSize(390, 290)); 
+    btn_dark->setIcon(QIcon(":/assets/icons/dark_mode.png")); 
+    btn_dark->setIconSize(QSize(440, 240)); 
     btn_dark->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     btn_dark->setCheckable(true);
     btn_light->setAutoExclusive(true);
     btn_dark->setChecked(true); 
     btn_dark->setCursor(Qt::PointingHandCursor);
-    btn_dark->setFixedSize(410, 260); 
+    btn_dark->setFixedSize(450, 300); 
 
 
    auto* right_spacer { new QWidget };

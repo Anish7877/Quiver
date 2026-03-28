@@ -19,7 +19,7 @@
         <file>assets/icons/logout.svg</file>
         <file>assets/icons/Quiver.svg</file>
         <file>assets/icons/gemini-svg.svg</file>
-        <file>assets/icons/dark_mode_svg.svg</file>
-        <file>assets/icons/light_mode_svg.svg</file>
+        <file>assets/icons/dark_mode.png</file>
+        <file>assets/icons/light_mode.png</file>
     </qresource>
 </RCC>

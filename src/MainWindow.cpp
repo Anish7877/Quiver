@@ -80,6 +80,7 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 MainWindow::~MainWindow() = default;
+
 auto MainWindow::setup_sidebar() -> void {
     pimpl_->sidebar_ = new QFrame;
     pimpl_->sidebar_->setObjectName("Sidebar");
@@ -145,17 +146,6 @@ auto MainWindow::setup_sidebar() -> void {
    
     add_nav(":/assets/icons/help.svg", "Help", 6, false);
     add_nav(":/assets/icons/docs.svg", "Documentation", 7, false);
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
     auto* divider { new QFrame };
     divider->setFrameShape(QFrame::HLine);
     divider->setStyleSheet("background-color: #27272A; max-height: 1px; margin: 10px 0px;");
@@ -227,13 +217,6 @@ auto MainWindow::setup_content() -> void {
     pimpl_->main_stack_ = new QStackedWidget;
     layout->addWidget(pimpl_->main_stack_);
     main_v_layout->addWidget(content_wrapper);
-
-
-    
-    
-    
-    
-    
     
     
     pimpl_->dashboard_page_ = new DashboardPage;

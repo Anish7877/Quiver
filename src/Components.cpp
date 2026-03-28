@@ -481,11 +481,7 @@ CreateDialog::CreateDialog(QWidget* parent)
 
         
         out_list = new QListWidget;
-        out_list->setStyleSheet(
-            "QListWidget { background: transparent; border: none; outline: none; }"
-            "QListWidget::item { font-family: monospace; font-size: 11px; padding: 4px 0; border-bottom: 1px solid rgba(161, 161, 170, 0.2); }"
-            "QListWidget::item:selected { color: #F97316; background: transparent; }"
-            );
+        out_list->setObjectName("CreateList"); 
         out_list->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         out_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         bl->addWidget(out_list);
