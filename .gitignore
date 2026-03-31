@@ -1,0 +1,46 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build artifacts
+bin/
+main
+quiver-backend
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+coverage.txt
+profile.out
+
+# Dependency directories (if you are not committing them)
+vendor/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Editor and IDE directories
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Build and testing directories
+build/
+dist/
+coverage/
+
+# Postman/API test collections (optional, uncomment if you don't want to track them)
+# *.postman_collection.json
+# *.postman_environment.json
