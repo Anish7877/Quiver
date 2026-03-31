@@ -15,6 +15,7 @@
 #include <QStyle>
 #include <QRandomGenerator>
 #include <QPainter>
+#include <QPainterPath>
 #include <QIcon>
 #include <QFrame>
 #include <QPushButton>
@@ -22,6 +23,8 @@
 #include <QPropertyAnimation>
 #include <QList>
 #include "include/DashboardPage.h"
+#include "include/AuthManager.h"
+#include <QProcess> 
 
 namespace Quiver {
 
@@ -152,13 +155,66 @@ auto MainWindow::setup_sidebar() -> void {
     pimpl_->sidebar_layout_->addWidget(divider);
 
     
-    auto* profile_btn { new QPushButton("  Bhavish Pushkarna") };
+
+
+    auto get_circular_icon = [](const QString& path, int size) -> QIcon {
+        QPixmap src(path);
+        if (src.isNull()) src.load(":/assets/icons/profile.svg");
+        
+        int hr_size = size * 2;
+        QPixmap scaled = src.scaled(hr_size, hr_size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        QPixmap cropped = scaled.copy((scaled.width() - hr_size) / 2, (scaled.height() - hr_size) / 2, hr_size, hr_size);
+        
+        QPixmap out(hr_size, hr_size);
+        out.fill(Qt::transparent);
+        
+        QPainter p(&out);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setRenderHint(QPainter::SmoothPixmapTransform);
+        QPainterPath path_clip;
+        path_clip.addEllipse(1, 1, hr_size - 2, hr_size - 2);
+        p.setClipPath(path_clip);
+        p.drawPixmap(0, 0, cropped);
+        p.end();
+        
+        QPixmap final_pix = out.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        return QIcon(final_pix);
+    };
+
+ 
+    QString display_name = AuthManager::get_instance().get_full_name();
+    QString current_avatar = AuthManager::get_instance().get_cached_avatar_path();
+
+    auto* profile_btn { new QPushButton("  " + display_name) };
     profile_btn->setObjectName("ProfileBtn");
-    profile_btn->setProperty("iconPath", ":/assets/icons/profile.svg");
-    profile_btn->setProperty("navText", "  Bhavish Pushkarna");
+    profile_btn->setProperty("navText", "  " + display_name);
     profile_btn->setProperty("expanded", true);
     profile_btn->setCursor(Qt::PointingHandCursor);
+    
+
+    
+    profile_btn->setIcon(get_circular_icon(current_avatar, 64));
+    profile_btn->setIconSize(QSize(26, 26)); 
     pimpl_->sidebar_layout_->addWidget(profile_btn);
+
+
+    connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this, [profile_btn, get_circular_icon]() {
+        QString new_name = AuthManager::get_instance().get_username();
+        profile_btn->setProperty("navText", "  " + new_name);
+        
+        QString avatar_path = AuthManager::get_instance().get_cached_avatar_path();
+        
+
+        profile_btn->setIcon(get_circular_icon(avatar_path, 64));
+        
+        profile_btn->style()->unpolish(profile_btn);
+        profile_btn->style()->polish(profile_btn);
+        
+        if (profile_btn->property("expanded").toBool()) {
+            profile_btn->setText("  " + new_name);
+        }
+    });
+
 
     auto* auth_btn { new QPushButton("  Logout") };
     auth_btn->setObjectName("AuthBtn");
@@ -166,9 +222,19 @@ auto MainWindow::setup_sidebar() -> void {
     auth_btn->setProperty("navText", "  Logout");
     auth_btn->setProperty("expanded", true);
     auth_btn->setCursor(Qt::PointingHandCursor);
+    auth_btn->setIcon(QIcon(":/assets/icons/logout.svg")); 
+    auth_btn->setIconSize(QSize(24, 24));
     pimpl_->sidebar_layout_->addWidget(auth_btn);
 
+
+    connect(auth_btn, &QPushButton::clicked, this, [this]() {
+        AuthManager::get_instance().logout();
+        qApp->quit();
+        QProcess::startDetached(qApp->arguments()[0], qApp->arguments());
+    });
+
     update_sidebar_icons();
+
 }
 
 auto MainWindow::setup_content() -> void {

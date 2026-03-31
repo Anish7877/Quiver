@@ -190,40 +190,6 @@ QLabel#StatLabelTitle { font-size: 11px; font-weight: bold; color: #A1A1AA; lett
 QLabel#StatLabelValue { font-size: 28px; font-weight: 900; color: #FAFAFA; }
 
 
-/* =======================================================
-   FLOATING ACTION BUTTON (FAB)
-======================================================== */
-QPushButton#FabButton {
-    background-color: #F97316;
-    color: #FFFFFF;
-
-    /* Lock the QSS dimensions to exactly match the C++ 52x52 */
-    min-width: 52px;
-    max-width: 52px;
-    min-height: 52px;
-    max-height: 52px;
-
-    /* 52 divided by 2 = 26px for a perfect circle */
-    border-radius: 26px;
-
-    font-size: 28px;
-    font-weight: 500;
-
-    /* Use a transparent border instead of 'none' to force smooth anti-aliased clipping in Qt */
-    border: 1px solid transparent;
-
-    /* CRITICAL: No margins allowed here! */
-    margin: 0px;
-    padding-bottom: 4px; /* visually centers the '+' text */
-}
-
-QPushButton#FabButton:hover {
-    background-color: #EA580C;
-}
-
-QPushButton#FabButton:pressed {
-    background-color: #C2410C;
-}
 
 /* Sidebar Bottom Buttons */
 QPushButton#ProfileBtn {
@@ -312,44 +278,6 @@ QTextEdit#JsonEditor {
     padding: 15px;
 }
 
-
-/* =======================================================
-   STAT CARDS (DARK MODE)
-======================================================== */
-QFrame#StatPanel { 
-    border: 1px solid #27272A; 
-    border-radius: 12px; 
-    background-color: #18181B; 
-}
-
-/* Dynamic Gradients matching your screenshot */
-QFrame#StatPanel[statTheme="orange"] { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(249, 115, 22, 0.15), stop:1 #18181B); }
-QFrame#StatPanel[statTheme="green"]  { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(74, 222, 128, 0.15), stop:1 #18181B); }
-QFrame#StatPanel[statTheme="red"]    { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(251, 113, 133, 0.15), stop:1 #18181B); }
-QFrame#StatPanel[statTheme="white"]  { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(255, 255, 255, 0.05), stop:1 #18181B); }
-
-QFrame#StatPanel[statTheme="orange"]:hover { border: 1px solid #F97316; }
-QFrame#StatPanel[statTheme="green"]:hover  { border: 1px solid #4ade80; }
-QFrame#StatPanel[statTheme="red"]:hover    { border: 1px solid #fb7185; }
-QFrame#StatPanel[statTheme="white"]:hover  { border: 1px solid #A1A1AA; }
-
-/* Stat Card Typography */
-QLabel#StatTitle { 
-    color: #A1A1AA; 
-    font-weight: bold; 
-    font-size: 11px; 
-    background: transparent; 
-    letter-spacing: 1.2px; 
-}
-QLabel#StatValue { 
-    font-weight: 900; 
-    font-size: 34px; 
-    background: transparent; 
-}
-QLabel#StatValue[statTheme="orange"] { color: #F97316; }
-QLabel#StatValue[statTheme="green"]  { color: #4ade80; }
-QLabel#StatValue[statTheme="red"]    { color: #fb7185; }
-QLabel#StatValue[statTheme="white"]  { color: #FFFFFF; }
 
 
 /* =======================================================
@@ -631,4 +559,66 @@ QComboBox QAbstractItemView {
     selection-background-color: rgba(249, 115, 22, 0.15); /* Orange highlight */
     selection-color: #F97316;
     outline: none; /* Removes the dotted focus rectangle */
+}
+
+/* Settings Page Profile Section */
+QLabel#AvatarDisplay {
+    background-color: #09090B;
+    border: 2px solid #27272A;
+    border-radius: 45px; /* Makes it a perfect circle! */
+}
+QFrame#SettingsGroup QLineEdit {
+    background: #09090B; 
+    border: 1px solid #27272A; 
+    border-radius: 6px; 
+    color: #FAFAFA; 
+    padding: 0 10px; 
+    font-size: 13px;
+}
+QFrame#SettingsGroup QLineEdit:focus { border: 1px solid #F97316; }
+
+/* =======================================================
+   STAT CARDS (MINIMALIST EDGE - DARK)
+======================================================== */
+QFrame#StatPanel {
+    background-color: #18181B; /* Solid Matte Dark */
+    border: 1px solid #27272A; /* Faint outer border */
+    border-radius: 6px;
+    border-left: 4px solid #3F3F46; /* Default inactive edge */
+}
+
+/* Dynamic Left Borders */
+QFrame#StatPanel[statTheme="green"]  { border-left-color: #4ade80; }
+QFrame#StatPanel[statTheme="red"]    { border-left-color: #fb7185; }
+QFrame#StatPanel[statTheme="orange"] { border-left-color: #F97316; }
+QFrame#StatPanel[statTheme="white"]  { border-left-color: #FAFAFA; }
+
+QLabel#StatTitle { 
+    color: #A1A1AA; 
+    font-size: 11px; 
+    font-weight: bold; 
+    text-transform: uppercase; 
+}
+QLabel#StatValue { 
+    color: #FAFAFA; 
+    font-size: 24px; 
+    font-weight: bold; 
+}
+
+/* =======================================================
+   FLOATING ACTION BUTTON (PURE SVG, ENLARGE ON HOVER)
+======================================================== */
+QPushButton#FabButton {
+    background: transparent; 
+    border: none;
+    qproperty-iconSize: 70px 70px; 
+    qproperty-icon: url(":/assets/icons/plus1.png");
+}
+
+QPushButton#FabButton:hover {
+    qproperty-iconSize: 90px 90px; 
+}
+
+QPushButton#FabButton:pressed {
+    qproperty-iconSize: 80px 80px; 
 }

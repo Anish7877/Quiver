@@ -2,7 +2,6 @@
     <qresource prefix="/">
         <file>assets/style.qss</file>
         <file>assets/light_style.qss</file>
-        <file>assets/icons/logo.svg</file>
         <file>assets/icons/menu.svg</file>
         <file>assets/icons/home.svg</file>
         <file>assets/icons/containers.svg</file>
@@ -21,5 +20,7 @@
         <file>assets/icons/gemini-svg.svg</file>
         <file>assets/icons/dark_mode.png</file>
         <file>assets/icons/light_mode.png</file>
+        <file>assets/icons/plus.png</file>
+        <file>assets/icons/plus1.png</file>
     </qresource>
 </RCC>

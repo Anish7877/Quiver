@@ -15,6 +15,13 @@
 #include <QButtonGroup>
 #include <QToolButton>
 #include<QLayout>
+#include<QFileDialog>
+#include <QTimer>
+#include "include/AuthManager.h"
+#include <QScrollArea>
+#include <QPainter>
+#include <QPainterPath>
+#include<QSettings>
 
 namespace Quiver {
 namespace {
@@ -120,18 +127,12 @@ TablePage::TablePage(const QString& title,
     pimpl_->table_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     pimpl_->table_->horizontalHeader()->setHighlightSections(false);
     pimpl_->table_->horizontalHeader()->setMinimumSectionSize(80);
-
-
     pimpl_->table_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     int action_col { static_cast<int>(all_cols.size()) - 1 };
     pimpl_->table_->horizontalHeader()->setSectionResizeMode(
         action_col, QHeaderView::Fixed);
 
     pimpl_->table_->setColumnWidth(action_col, 130);
-
-    
-
-    
     pimpl_->table_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
     
     pimpl_->table_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
@@ -142,10 +143,13 @@ TablePage::TablePage(const QString& title,
 
     auto* fab_row { new QHBoxLayout };
     fab_row->setContentsMargins(0, 16, 0, 0);
-    pimpl_->add_btn_ = new QPushButton("+");
+    pimpl_->add_btn_ = new QPushButton(); 
     pimpl_->add_btn_->setObjectName("FabButton");
+    
+    
     pimpl_->add_btn_->setCursor(Qt::PointingHandCursor);
-    pimpl_->add_btn_->setFixedSize(52, 52);
+    pimpl_->add_btn_->setFixedSize(100, 100); 
+
     connect(pimpl_->add_btn_, &QPushButton::clicked,
             this, &TablePage::add_clicked);
     fab_row->addStretch();
@@ -482,19 +486,161 @@ struct SettingsPage::Impl {};
 SettingsPage::SettingsPage(QWidget* parent)
     : QWidget(parent), pimpl_{ std::make_unique<Impl>() }
 {
-    auto* layout { new QVBoxLayout(this) };
-    layout->setContentsMargins(40, 32, 40, 32);
-    layout->setSpacing(24);
+
     
+  
+    auto* main_layout = new QVBoxLayout(this);
+    main_layout->setContentsMargins(0, 0, 0, 0);
+
+
+    auto* scroll_area = new QScrollArea(this);
+    scroll_area->setWidgetResizable(true);
+    scroll_area->setStyleSheet("QScrollArea { background: transparent; border: none; }");
+    scroll_area->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll_area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+ 
+    auto* scroll_content = new QWidget;
+    scroll_content->setStyleSheet("QWidget { background: transparent; }"); 
+ 
+    auto* layout = new QVBoxLayout(scroll_content);
+    layout->setContentsMargins(0, 0, 20, 0); 
+    layout->setSpacing(24);
+
     auto* title { new QLabel("Settings") };
     title->setObjectName("PageTitle");
     layout->addWidget(title);
-    auto* app_frame { new QFrame };
+
+   
+    auto* acc_frame { new QFrame };
+    acc_frame->setObjectName("SettingsGroup");
+    auto* acc_fl { new QVBoxLayout(acc_frame) };
+    acc_fl->setContentsMargins(24, 20, 24, 20);
+    acc_fl->setSpacing(16);
+    
+    auto* acc_gt { new QLabel("ACCOUNT PROFILE") }; 
+    acc_gt->setObjectName("SettingsGroupTitle"); 
+    acc_fl->addWidget(acc_gt);
+    
+    auto* acc_div { new QFrame }; 
+    acc_div->setObjectName("Divider"); 
+    acc_div->setFixedHeight(1); 
+    acc_fl->addWidget(acc_div);
+
+    auto* profile_row { new QHBoxLayout };
+    profile_row->setSpacing(30);
+
+ 
+    auto* avatar_box { new QVBoxLayout };
+    auto* avatar_display { new QLabel };
+    avatar_display->setFixedSize(90, 90);
+    avatar_display->setObjectName("AvatarDisplay");
+    avatar_display->setAlignment(Qt::AlignCenter);
+    
+    auto get_circular_pixmap = [](const QString& path, int size) -> QPixmap {
+        QPixmap src(path);
+        if (src.isNull()) src.load(":/assets/icons/profile.svg"); 
+        
+       
+        QPixmap scaled = src.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        
+     
+        QPixmap cropped = scaled.copy((scaled.width() - size) / 2, (scaled.height() - size) / 2, size, size);
+
+        QPixmap out(size, size);
+        out.fill(Qt::transparent);
+        QPainter p(&out);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setRenderHint(QPainter::SmoothPixmapTransform);
+        QPainterPath path_clip;
+        path_clip.addEllipse(0, 0, size, size);
+        p.setClipPath(path_clip);
+        p.drawPixmap(0, 0, cropped);
+        return out;
+    };
+
+    avatar_display->setPixmap(get_circular_pixmap(AuthManager::get_instance().get_cached_avatar_path(), 86)); /
+    
+    auto* upload_btn { new QPushButton("Upload Image") };
+    upload_btn->setObjectName("SecondaryBtn");
+    upload_btn->setCursor(Qt::PointingHandCursor);
+    upload_btn->setFixedWidth(100);
+    
+    avatar_box->addWidget(avatar_display, 0, Qt::AlignHCenter);
+    avatar_box->addWidget(upload_btn, 0, Qt::AlignHCenter);
+
+    profile_row->addLayout(avatar_box);
+
+  
+    auto* form_box { new QVBoxLayout };
+    form_box->setSpacing(10);
+    
+    auto* name_lbl { new QLabel("Full Name") }; name_lbl->setObjectName("SettingsLabel");
+    auto* name_input { new QLineEdit };
+    name_input->setText(AuthManager::get_instance().get_full_name());
+    name_input->setFixedHeight(36);
+    
+    auto* user_lbl { new QLabel("Username") }; user_lbl->setObjectName("SettingsLabel");
+    auto* user_input { new QLineEdit };
+    user_input->setText(AuthManager::get_instance().get_username());
+    user_input->setFixedHeight(36);
+    
+    auto* save_btn { new QPushButton("Save Changes") };
+    save_btn->setObjectName("PrimaryButton");
+    save_btn->setCursor(Qt::PointingHandCursor);
+    save_btn->setFixedWidth(140);
+    
+    form_box->addWidget(name_lbl);
+    form_box->addWidget(name_input);
+    form_box->addWidget(user_lbl);
+    form_box->addWidget(user_input);
+    form_box->addWidget(save_btn, 0, Qt::AlignRight);
+    
+    profile_row->addLayout(form_box);
+    acc_fl->addLayout(profile_row);
+    layout->addWidget(acc_frame);
+
+
+
+    layout->addStretch(); 
+    scroll_area->setWidget(scroll_content);
+    main_layout->addWidget(scroll_area);
+
+    connect(upload_btn, &QPushButton::clicked, this, [avatar_display, get_circular_pixmap, this]() {
+    QString file_name = QFileDialog::getOpenFileName(
+        this, "Select Profile Picture", "", "Images (*.png *.jpg *.jpeg *.webp)");
+    if (file_name.isEmpty()) return;
+
+    avatar_display->setPixmap(get_circular_pixmap(file_name, 86));
+
+
+    AuthManager::get_instance().upload_avatar(file_name);
+});
+connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this,
+    [avatar_display, get_circular_pixmap]() {
+        QSettings settings("QuiverApp", "Quiver");
+        QString url = settings.value("avatar_url").toString();
+        if (!url.isEmpty() && !url.startsWith(":/")) {
+           
+        }
+    });
+
+connect(save_btn, &QPushButton::clicked, this, [name_input, user_input, save_btn]() {
+    save_btn->setText("Saving...");
+    save_btn->setEnabled(false);
+    AuthManager::get_instance().update_profile(name_input->text(), user_input->text());
+});
+connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this, [save_btn]() {
+    save_btn->setText("Saved!");
+    save_btn->setEnabled(true);
+    QTimer::singleShot(2000, save_btn, [save_btn]() { save_btn->setText("Save Changes"); });
+});
+    
+      auto* app_frame { new QFrame };
     app_frame->setObjectName("SettingsGroup");
     auto* app_fl { new QVBoxLayout(app_frame) };
     app_fl->setContentsMargins(24, 20, 24, 20);
     app_fl->setSpacing(16);
-    
+
     auto* app_gt { new QLabel("APPEARANCE") }; 
     app_gt->setObjectName("SettingsGroupTitle"); 
     app_fl->addWidget(app_gt);

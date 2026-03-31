@@ -1,6 +1,8 @@
 #pragma once
 #include "common_header.hpp"
 #include <QString>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 
 namespace Quiver {
 

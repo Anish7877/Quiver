@@ -140,31 +140,7 @@ QLabel#StatLabelTitle { font-size: 11px; font-weight: bold; color: #A1A1AA; lett
 QLabel#StatLabelValue { font-size: 28px; font-weight: 900; color: #09090B; }
 
 
-/* =======================================================
-   FLOATING ACTION BUTTON (FAB)
-======================================================== */
-QPushButton#FabButton {
-    background-color: #F97316;
-    color: #FFFFFF;
-    
-    /* Lock the QSS dimensions to exactly match the C++ 52x52 */
-    min-width: 52px;
-    max-width: 52px;
-    min-height: 52px;
-    max-height: 52px;
-    
-    /* 52 divided by 2 = 26px for a perfect circle */
-    border-radius: 26px; 
-    
-    font-size: 28px;
-    font-weight: 500;
-    
-    border: 1px solid transparent; 
-    margin: 0px; /* CRITICAL: No margins allowed, or it squishes into an oval! */
-    padding-bottom: 4px; 
-}
-QPushButton#FabButton:hover { background-color: #EA580C; }
-QPushButton#FabButton:pressed { background-color: #C2410C; }
+
 
 /* =======================================================
    CONTAINER CARD MENU (3-DOTS)
@@ -251,19 +227,23 @@ QFrame#Sidebar {
     margin: 0px; padding: 0px; 
 }
 
-QPushButton#NavButton {
+QFrame#Sidebar QWidget, QFrame#Sidebar QLabel {
+    background-color: transparent;
+    color: #71717A;
+}
+QPushButton#NavButton, QPushButton#ThemeBtn, QPushButton#HelpBtn, QPushButton#DocsBtn {
     text-align: left;
     padding: 10px 15px; /* Identical to Dark Mode */
-    margin: 2px 10px;   /* Identical to Dark Mode */
+    margin: 2px 5px;   /* Identical to Dark Mode */
     border: none;
-    border-radius: 8px;
+    border-radius: 6px;
     color: #71717A;
     font-size: 13px;
     font-weight: bold;
     background-color: transparent;
     outline: none;
 }
-QPushButton#NavButton:hover {
+QPushButton#NavButton:hover  {
     background-color: #F4F4F5;
     color: #09090B;
 }
@@ -279,43 +259,7 @@ QPushButton#NavButton:checked:hover {
     background-color: rgba(249, 115, 22, 0.12); 
 }
 
-/* =======================================================
-   STAT CARDS (LIGHT MODE)
-======================================================== */
-QFrame#StatPanel { 
-    border: 1px solid #E4E4E7; 
-    border-radius: 12px; 
-    background-color: #FFFFFF; 
-}
 
-/* Bright, clean gradients matching the geometric structure of Dark Mode */
-QFrame#StatPanel[statTheme="orange"] { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(249, 115, 22, 0.08), stop:1 #FFFFFF); }
-QFrame#StatPanel[statTheme="green"]  { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(74, 222, 128, 0.10), stop:1 #FFFFFF); }
-QFrame#StatPanel[statTheme="red"]    { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(251, 113, 133, 0.10), stop:1 #FFFFFF); }
-QFrame#StatPanel[statTheme="white"]  { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(9, 9, 11, 0.04), stop:1 #FFFFFF); }
-
-QFrame#StatPanel[statTheme="orange"]:hover { border: 1px solid #EA580C; }
-QFrame#StatPanel[statTheme="green"]:hover  { border: 1px solid #16A34A; }
-QFrame#StatPanel[statTheme="red"]:hover    { border: 1px solid #DC2626; }
-QFrame#StatPanel[statTheme="white"]:hover  { border: 1px solid #71717A; }
-
-/* Stat Card Typography */
-QLabel#StatTitle { 
-    color: #71717A; 
-    font-weight: bold; 
-    font-size: 11px; 
-    background: transparent; 
-    letter-spacing: 1.2px; 
-}
-QLabel#StatValue { 
-    font-weight: 900; 
-    font-size: 34px; 
-    background: transparent; 
-}
-QLabel#StatValue[statTheme="orange"] { color: #EA580C; }
-QLabel#StatValue[statTheme="green"]  { color: #16A34A; }
-QLabel#StatValue[statTheme="red"]    { color: #DC2626; }
-QLabel#StatValue[statTheme="white"]  { color: #09090B; } /* Total becomes solid black in light mode! */
 
 
 /* =======================================================
@@ -540,7 +484,7 @@ QSlider::handle:horizontal {
     width: 14px;
     margin-top: -5px;
     margin-bottom: -5px;
-    border-radius: 8px; /* Makes it a perfect circle */
+    border-radius: 10px; /* Makes it a perfect circle */
 }
 QSlider::handle:horizontal:hover {
     background: #EA580C;
@@ -582,4 +526,75 @@ QComboBox QAbstractItemView {
     selection-background-color: rgba(249, 115, 22, 0.08); /* Orange highlight */
     selection-color: #EA580C;
     outline: none; /* Removes the dotted focus rectangle */
+}
+
+/* Settings Page Profile Section */
+QLabel#AvatarDisplay {
+    background-color: #FAFAFA;
+    border: 2px solid #E4E4E7;
+    border-radius: 45px; /* Makes it a perfect circle! */
+}
+QFrame#SettingsGroup QLineEdit {
+    background: #FAFAFA; 
+    border: 1px solid #E4E4E7; 
+    border-radius: 6px; 
+    color: #09090B; 
+    padding: 0 10px; 
+    font-size: 13px;
+}
+QFrame#SettingsGroup QLineEdit:focus { border: 1px solid #EA580C; }
+
+/* =======================================================
+   STAT CARDS (MINIMALIST EDGE - LIGHT)
+======================================================== */
+QFrame#StatPanel {
+    background-color: #FFFFFF; /* Pure White */
+    border: 1px solid #E4E4E7; /* Faint gray border */
+    border-radius: 6px;
+    border-left: 4px solid #D4D4D8; /* Default inactive edge */
+}
+
+/* Dynamic Left Borders (Slightly darker for Light Mode contrast) */
+QFrame#StatPanel[statTheme="green"]  { border-left-color: #22c55e; }
+QFrame#StatPanel[statTheme="red"]    { border-left-color: #ef4444; }
+QFrame#StatPanel[statTheme="orange"] { border-left-color: #ea580c; }
+QFrame#StatPanel[statTheme="white"]  { border-left-color: #09090B; }
+
+QLabel#StatTitle { 
+    color: #71717A; 
+    font-size: 11px; 
+    font-weight: bold; 
+    text-transform: uppercase; 
+}
+QLabel#StatValue { 
+    color: #09090B; /* Pure black text */
+    font-size: 24px; 
+    font-weight: bold; 
+}
+
+/* Make the new SVG plus button look clean */
+QPushButton#SmallPlusBtn {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+}
+QPushButton#SmallPlusBtn:hover {
+    background: #E4E4E7;
+}
+/* =======================================================
+   FLOATING ACTION BUTTON (PURE SVG, ENLARGE ON HOVER)
+======================================================== */
+QPushButton#FabButton {
+    background: transparent; /* Removes the ugly orange circle */
+    border: none;
+    qproperty-iconSize: 70px 70px; 
+    qproperty-icon: url(":/assets/icons/plus.png");
+   
+}
+QPushButton#FabButton:hover {
+    qproperty-iconSize: 90px 90px; /* SVG smoothly enlarges on hover! */
+}
+
+QPushButton#FabButton:pressed {
+    qproperty-iconSize: 80px 80px; /* Shrinks slightly when you click it for tactile feedback */
 }

@@ -15,6 +15,7 @@
 #include <QAbstractItemView>
 #include <QTableWidgetItem>
 #include <QRandomGenerator>
+#include <QGraphicsDropShadowEffect>
 
 namespace Quiver {
 
@@ -173,14 +174,21 @@ StatCard::StatCard(const QString& title, const QString& value,
     setObjectName("StatPanel");
     setFixedHeight(75);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    setAttribute(Qt::WA_StyledBackground, true); 
 
-    
+  
     QString theme = "orange"; 
     if (color == "#4ade80" || color.contains("4ade80", Qt::CaseInsensitive)) theme = "green";
     else if (color == "#fb7185" || color.contains("fb7185", Qt::CaseInsensitive)) theme = "red";
     else if (color == "#ffffff" || color == "white") theme = "white"; 
-
     setProperty("statTheme", theme); 
+
+   
+    auto* shadow = new QGraphicsDropShadowEffect(this);
+    shadow->setBlurRadius(15);
+    shadow->setOffset(0, 4);
+    shadow->setColor(QColor(0, 0, 0, 30)); 
+    setGraphicsEffect(shadow);
 
     auto* layout { new QVBoxLayout(this) };
     layout->setContentsMargins(15, 12, 15, 12);
@@ -191,7 +199,6 @@ StatCard::StatCard(const QString& title, const QString& value,
 
     auto* v { new QLabel(value) };
     v->setObjectName("StatValue");
-    v->setProperty("statTheme", theme); 
 
     layout->addWidget(t);
     layout->addWidget(v);

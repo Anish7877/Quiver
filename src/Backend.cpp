@@ -3,6 +3,7 @@
 namespace Quiver {
 
 struct Backend::BackendImpl {
+    QNetworkAccessManager network_; 
     std::vector<Container> containers_ {
         {"7f8a1b", "nginx-proxy",  "nginx:alpine",  "running"},
         {"3c4d5e", "redis-cache",  "redis:6.2",     "stopped"},
