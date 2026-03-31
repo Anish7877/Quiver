@@ -1,0 +1,209 @@
+{
+  "info": {
+    "name": "Quiver Backend API",
+    "description": "Complete API collection for Quiver Qt6 App Backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8080/api" },
+    { "key": "token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "url": "http://localhost:8080/health"
+      }
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "1. Sign Up",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('token', body.token);",
+                  "    console.log('Token saved:', body.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/signup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Bhavish\",\n  \"last_name\": \"Pushkarna\",\n  \"username\": \"bhavish123\",\n  \"email\": \"bhavish@quiver.dev\",\n  \"password\": \"SecurePass@123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "2. Sign In (with Email)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('token', body.token);",
+                  "    console.log('Token saved:', body.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/signin",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identity\": \"bhavish@quiver.dev\",\n  \"password\": \"SecurePass@123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "3. Sign In (with Username)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('token', body.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/signin",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identity\": \"bhavish123\",\n  \"password\": \"SecurePass@123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "4. Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{base_url}}/auth/logout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Profile",
+      "item": [
+        {
+          "name": "5. Get My Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{base_url}}/profile/me"
+          }
+        },
+        {
+          "name": "6. Update Profile (Name + Username)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{base_url}}/profile/update",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Bhavish\",\n  \"last_name\": \"Updated\",\n  \"username\": \"bhavish_new\"\n}"
+            }
+          }
+        },
+        {
+          "name": "7. Update Avatar (File Upload)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{base_url}}/profile/avatar",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "avatar",
+                  "type": "file",
+                  "src": "/path/to/your/image.jpg",
+                  "description": "Select an image file (JPEG/PNG/GIF/WebP, max 5MB)"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Error Cases",
+      "item": [
+        {
+          "name": "Signup - Missing Fields",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/signup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@test.com\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Signin - Wrong Password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/signin",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identity\": \"bhavish@quiver.dev\",\n  \"password\": \"wrongpassword\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Profile - No Auth Token",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/profile/me"
+          }
+        },
+        {
+          "name": "Profile - Invalid Token",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer this.is.invalid" }
+            ],
+            "url": "{{base_url}}/profile/me"
+          }
+        }
+      ]
+    }
+  ]
+}
