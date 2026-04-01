@@ -4,8 +4,6 @@
 #include <vector>
 namespace fs = std::filesystem;
 
-class LoggerCommandQueue;
-class ValueHeap;
 namespace Utils {
     auto dir_exists(const fs::path&) -> bool;
     auto file_exists(const fs::path&) -> bool;
@@ -19,11 +17,8 @@ namespace Utils {
     auto get_filesystem_path(const std::string&) -> fs::path;
     auto get_vfs_path(const std::string&) -> fs::path;
     auto get_image_path(const std::string&) -> fs::path;
-    auto get_container_db_path() -> fs::path;
-    auto get_volume_db_path() -> fs::path;
-    auto get_device_db_path() -> fs::path;
-    auto get_network_db_path() -> fs::path;
-    auto get_image_db_path() -> fs::path;
+    auto get_db_path(std::string_view) -> fs::path;
+    auto get_log_path(std::string_view) -> fs::path;
     auto get_logger_command_queue_buf_name() -> std::string;
     auto get_database_command_queue_buf_name() -> std::string;
     auto get_value_heap_buf_name() -> std::string;

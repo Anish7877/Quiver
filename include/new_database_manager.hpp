@@ -12,6 +12,7 @@ class DatabaseManager {
                 DatabaseManager(DatabaseManager&&) = delete;
                 auto operator=(const DatabaseManager&) = delete;
                 auto operator=(DatabaseManager&&) = delete;
+
                 virtual auto init() -> void = 0;
                 virtual auto process_job(const DatabaseJobData&, const T&, Status&) -> void = 0;
         private:

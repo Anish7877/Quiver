@@ -110,28 +110,13 @@ auto Utils::get_image_path(const std::string& image_name) -> fs::path {
         return path;
 }
 
-auto Utils::get_container_db_path() -> fs::path {
-        std::string path{std::format("{}/db/container_db", get_base_dir().string())};
+auto Utils::get_db_path(std::string_view name) -> fs::path {
+        std::string path{std::format("{}/db/{}", get_base_dir().string(), name)};
         return path;
 }
 
-auto Utils::get_volume_db_path() -> fs::path {
-        std::string path{std::format("{}/db/volume_db", get_base_dir().string())};
-        return path;
-}
-
-auto Utils::get_device_db_path() -> fs::path {
-        std::string path{std::format("{}/db/device_db", get_base_dir().string())};
-        return path;
-}
-
-auto Utils::get_network_db_path() -> fs::path {
-        std::string path{std::format("{}/db/network_db", get_base_dir().string())};
-        return path;
-}
-
-auto Utils::get_image_db_path() -> fs::path {
-        std::string path{std::format("{}/db/image_db", get_base_dir().string())};
+auto Utils::get_log_path(std::string_view name) -> fs::path {
+        std::string path{std::format("{}/logs/{}.log", get_base_dir().string(), name)};
         return path;
 }
 
@@ -172,7 +157,7 @@ auto Utils::get_gid_map_payload(const std::vector<std::pair<fs::path, fs::path>>
 }
 
 auto Utils::generate_container_id() -> std::string {
-        auto now{std::chrono::high_resolution_clock::now().time_since_epoch().count()};
+        auto now{std::chrono::system_clock::now().time_since_epoch().count()};
         std::random_device rd{};
         std::string input{std::to_string(now) + ":" + std::to_string(rd())};
 

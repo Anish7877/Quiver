@@ -9,6 +9,7 @@ class LoggerCommandQueue;
 class ValueHeap;
 class PtySessionManager;
 class ContainerRuntime;
+class CGroupsManager;
 class ContainerMonitor : public Singleton<ContainerMonitor> {
         friend class Singleton<ContainerMonitor>;
         private:
@@ -34,6 +35,7 @@ class ContainerMonitor : public Singleton<ContainerMonitor> {
                 auto attach_to_stdio() -> bool;
                 auto stop_logging() -> void;
                 auto log_event(const std::string&, TargetLog) -> void;
+
                 ContainerConfig m_container_config{};
                 std::atomic<bool> m_logging_active{false};
                 std::thread m_log_worker{};
@@ -41,6 +43,7 @@ class ContainerMonitor : public Singleton<ContainerMonitor> {
                 std::string m_container_id{};
                 std::string m_sock_path{};
                 std::unique_ptr<ContainerRuntime> m_runtime{nullptr};
+                std::unique_ptr<CGroupsManager> m_cgroups_manager{nullptr};
                 LoggerCommandQueue* m_log_cmd_queue{nullptr};
                 ValueHeap* m_value_heap{nullptr};
                 PtySessionManager* m_pty_session_manager{nullptr};

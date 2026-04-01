@@ -27,7 +27,7 @@ auto ContainerManager::init() -> void {
         rocksdb::Status status{rocksdb::DB::Open(options, m_db_path, &m_db)};
         if (!status.ok()) [[unlikely]] {
                 throw std::runtime_error(std::format("[{}] Containe Manager Error: could not open database.",
-                                        chrono::high_resolution_clock::now()));
+                                        chrono::system_clock::now()));
         }
 }
 
@@ -40,7 +40,7 @@ auto ContainerManager::process_job(const DatabaseJobData& job, const ContainerTy
                 case JobType::DELETE: process_delete_job(job, stat); break;
                 default:
                         log_event(std::format("[{}] Container Manager Error: Unknown job type found.",
-                                        chrono::high_resolution_clock::now()));
+                                        chrono::system_clock::now()));
                         stat.m_error = "Container Manager Error: Unknown job type found.";
         }
 }
@@ -52,7 +52,7 @@ auto ContainerManager::extract_container(const std::string& raw_data, Status& st
 
         if (verifier.VerifyBuffer<Types::Container>(nullptr)) {
                 log_event(std::format("[{}] Container Manager Error: Data is corrupted or invalid flatbuffer data.",
-                                chrono::high_resolution_clock::now()));
+                                chrono::system_clock::now()));
                 stat.m_error = "Container Manager Error: Data is corrupted or invalid flatbuffer data.";
                 return obj;
         }
@@ -66,7 +66,7 @@ auto ContainerManager::extract_container(const std::string& raw_data, Status& st
 auto ContainerManager::process_get_job(const DatabaseJobData& job, Status& stat) -> void {
         if (m_db == nullptr) [[unlikely]] {
                 log_event(std::format("[{}] Container Manager Error: Manager not initialized.",
-                                chrono::high_resolution_clock::now()));
+                                chrono::system_clock::now()));
                 stat.m_error = "Container Manager Error: Manager not initialized.";
                 return;
         }
@@ -76,16 +76,16 @@ auto ContainerManager::process_get_job(const DatabaseJobData& job, Status& stat)
 
         if (status.IsNotFound()) [[unlikely]] {
                 log_event(std::format("[{}] Container Manager Error: Key [{}] not found in database.",
-                                chrono::high_resolution_clock::now(), job.key));
+                                chrono::system_clock::now(), job.key));
                 stat.m_error = std::format("Container Manager Error: Key [{}] not found in database.", job.key);
         }
         else if (!status.ok()) [[unlikely]] {
                 log_event(std::format("[{}] Container Manager Error: Read error -> {}.",
-                                chrono::high_resolution_clock::now(), status.ToString()));
+                                chrono::system_clock::now(), status.ToString()));
                 stat.m_error = std::format("Container Manager Error: Read error -> {}.", status.ToString());
         }
         else {
-                log_event(std::format("[{}] Container Manager: Get job success.", chrono::high_resolution_clock::now()));
+                log_event(std::format("[{}] Container Manager: Get job success.", chrono::system_clock::now()));
                 stat.m_ok = true;
                 stat.m_result = std::move(fetched_raw_bytes);
         }
@@ -94,7 +94,7 @@ auto ContainerManager::process_get_job(const DatabaseJobData& job, Status& stat)
 auto ContainerManager::process_put_job(const DatabaseJobData& job, const ContainerType& obj, Status& stat) -> void {
         if (m_db == nullptr) [[unlikely]] {
                 log_event(std::format("[{}] Container Manager Error: Manager not initialized.",
-                                        chrono::high_resolution_clock::now()));
+                                        chrono::system_clock::now()));
                 stat.m_error = "Container Manager Error: Manager not initialized.";
                 return;
         }
@@ -108,12 +108,12 @@ auto ContainerManager::process_put_job(const DatabaseJobData& job, const Contain
 
         if (!status.ok()) [[unlikely]] {
                 log_event(std::format("[{}] Container Manager Error: Write error -> {}.",
-                                        chrono::high_resolution_clock::now(), status.ToString()));
+                                        chrono::system_clock::now(), status.ToString()));
                 stat.m_error = std::format("Container Manager Error: Write error -> {}.", status.ToString());
         }
         else {
                 log_event(std::format("[{}] Container Manager: Put or Update job success.",
-                                        chrono::high_resolution_clock::now()));
+                                        chrono::system_clock::now()));
                 stat.m_ok = true;
                 stat.m_result = "Container Manager: Put or Update job success.";
         }
@@ -126,7 +126,7 @@ auto ContainerManager::process_update_job(const DatabaseJobData& job, const Cont
 auto ContainerManager::process_delete_job(const DatabaseJobData& job, Status& stat) -> void {
         if (m_db == nullptr) [[unlikely]] {
                 log_event(std::format("[{}] Container Manager Error: Manager not initialized.",
-                                        chrono::high_resolution_clock::now()));
+                                        chrono::system_clock::now()));
                 stat.m_error = "Container Manager Error: Manager not initialized.";
                 return;
         }
@@ -136,14 +136,14 @@ auto ContainerManager::process_delete_job(const DatabaseJobData& job, Status& st
 
         if (!status.ok()) [[unlikely]] {
                 log_event(std::format("[{}] Container Manager Error: Delete error -> {}.",
-                                        chrono::high_resolution_clock::now(), status.ToString()));
+                                        chrono::system_clock::now(), status.ToString()));
                 while(!m_log_cmd_queue->atomic_push(m_log_job_data)){}
                 stat.m_error = std::format("[{}] Container Manager Error: Delete error -> {}.",
-                                chrono::high_resolution_clock::now(), status.ToString());
+                                chrono::system_clock::now(), status.ToString());
         }
         else {
                 log_event(std::format("[{}] Container Manager: Delete job success.",
-                                        chrono::high_resolution_clock::now()));
+                                        chrono::system_clock::now()));
                 stat.m_ok = true;
                 stat.m_result = "Container Manager: Delete job success.";
         }

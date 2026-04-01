@@ -5,6 +5,7 @@
 #include "value_heap.hpp"
 #include "logger_command_queue.hpp"
 #include "utils.hpp"
+#include "cgroups_manager.hpp"
 #include <chrono>
 #include <iostream>
 #include <cerrno>
@@ -67,7 +68,7 @@ auto ContainerMonitor::start_logging(int master_fd) -> bool {
 
                                                         if (bytes_read > 0) {
                                                                 std::string log_data{std::format("[{}] [{}] [PTY] {}.",
-                                                                                chrono::high_resolution_clock::now(),
+                                                                                chrono::system_clock::now(),
                                                                                 m_container_id,
                                                                                 std::string(buffer, bytes_read))};
 
@@ -104,7 +105,7 @@ auto ContainerMonitor::start_logging(int master_fd) -> bool {
                                                         ssize_t bytes_read{read(fds[0].fd, buffer, sizeof(buffer))};
                                                         if (bytes_read > 0) {
                                                                 std::string log_data{std::format("[{}] [{}] [STDOUT] {}.",
-                                                                                chrono::high_resolution_clock::now(),
+                                                                                chrono::system_clock::now(),
                                                                                 m_container_id,
                                                                                 std::string(buffer, bytes_read))};
                                                                 this->log_event(log_data, TargetLog::CONTAINERLOG);
@@ -119,7 +120,7 @@ auto ContainerMonitor::start_logging(int master_fd) -> bool {
                                                         ssize_t bytes_read{read(fds[1].fd, buffer, sizeof(buffer))};
                                                         if (bytes_read > 1) {
                                                                 std::string log_data{std::format("[{}] [{}] [STDERR] {}.",
-                                                                                chrono::high_resolution_clock::now(),
+                                                                                chrono::system_clock::now(),
                                                                                 m_container_id,
                                                                                 std::string(buffer, bytes_read))};
                                                                 this->log_event(log_data, TargetLog::CONTAINERLOG);
@@ -170,13 +171,13 @@ auto ContainerMonitor::invoke_container() -> void {
 
                 if (unshare(CLONE_NEWUSER) == -1) [[unlikely]] {
                         log_event(std::format("[{}] [{}] Container Runtime Error: unshare(CLONE_NEWUSER) failed.",
-                                                chrono::high_resolution_clock::now(), m_container_config.id), TargetLog::CONTAINERLOG);
+                                                chrono::system_clock::now(), m_container_config.id), TargetLog::CONTAINERLOG);
                         _exit(EXIT_FAILURE);
                 }
                 char ready{'1'};
                 if (write(m_container_to_monitor_fd[1], &ready, 1) == -1) [[unlikely]] {
                         log_event(std::format("[{}] [{}] Container Runtime Error: write to container_to_monitor_fd failed.",
-                                                chrono::high_resolution_clock::now(), m_container_config.id), TargetLog::CONTAINERLOG);
+                                                chrono::system_clock::now(), m_container_config.id), TargetLog::CONTAINERLOG);
                         close(m_container_to_monitor_fd[1]);
                         _exit(EXIT_FAILURE);
                 }
@@ -185,7 +186,7 @@ auto ContainerMonitor::invoke_container() -> void {
                 char go{};
                 if (read(m_monitor_to_container_fd[0], &go, 1) != 1) [[unlikely]] {
                         log_event(std::format("[{}] [{}] Container Runtime Error: read failed from monitor_to_container_fd.",
-                                                chrono::high_resolution_clock::now(), m_container_config.id), TargetLog::CONTAINERLOG);
+                                                chrono::system_clock::now(), m_container_config.id), TargetLog::CONTAINERLOG);
                         close(m_monitor_to_container_fd[0]);
                         _exit(EXIT_FAILURE);
                 }
@@ -227,6 +228,8 @@ auto ContainerMonitor::invoke_container() -> void {
                 close(m_monitor_to_container_fd[0]);
                 close(m_container_to_monitor_fd[1]);
 
+                m_cgroups_manager = std::make_unique<CGroupsManager>(m_container_config.id);
+                m_cgroups_manager->attach_process(m_container_pid);
                 char buf{};
                 if (read(m_container_to_monitor_fd[0], &buf, 1) != 1) [[unlikely]] {
                         log_event(std::format("[{}] Container Monitor Error: read from container_to_monitor_fd failed.",
@@ -269,6 +272,7 @@ auto ContainerMonitor::invoke_container() -> void {
                                         TargetLog::CONTAINERMON);
                         return;
                 }
+                m_cgroups_manager->destroy();
         }
 }
 
@@ -286,7 +290,7 @@ auto ContainerMonitor::setup_uid_map() -> void {
 
 auto ContainerMonitor::setup_gid_map() -> void {
         const char* newgidmap_path{"/usr/bin/newgidmap"};
-        std::string payload{std::format("0 {} 1\n", m_container_config.uid)};
+        std::string payload{std::format("0 {} 1\n", m_container_config.gid)};
         payload += Utils::get_gid_map_payload(m_container_config.devices);
         exec_mapping_tool(newgidmap_path, payload);
 }
