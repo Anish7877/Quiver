@@ -1,48 +1,83 @@
 #pragma once
-
-#include <string>
-#include <vector>
-#include <future>
-#include <mutex>
-#include <map>
+#include "types.hpp"
+#include "singleton.hpp"
 #include <nlohmann/json.hpp>
-#include <cpr/cpr.h>
-#include "database_manager.hpp"
+#include <filesystem>
+#include <future>
+#include <vector>
 
+namespace fs = std::filesystem;
 using json = nlohmann::json;
 
-class ImageManager {
-    public:
-    explicit ImageManager(DatabaseManager& db_manager);
+// Forward declarations — headers commented out until those subsystems are re-enabled
+class LoggerCommandQueue;
+class ValueHeap;
+
+class ImageManager : public Singleton<ImageManager> {
+    friend class Singleton<ImageManager>;
+
+private:
+    ImageManager() = default;
     ~ImageManager();
 
-    // Public API
-    bool pull(const std::string& imageName, std::string& outPath, std::string& error);
-    bool remove(const std::string& imageName, std::string& error);
+public:
+    ImageManager(const ImageManager&)                    = delete;
+    ImageManager(ImageManager&&)                         = delete;
+    auto operator=(const ImageManager&) -> ImageManager& = delete;
+    auto operator=(ImageManager&&)      -> ImageManager& = delete;
 
-    private:
-        DatabaseManager& db_manager;
-        std::string base_cache_path;
+    // Interface
+    auto init()  -> void;
+    auto pull(const std::string& image_name, std::string& out_path, std::string& error) -> json;
+    auto remove(const std::string& image_name, std::string& error) -> bool;
 
-        struct DownloadProgress {
-            long long total = 0;
-            long long downloaded = 0;
-        };
-        std::map<std::string, DownloadProgress> m_download_progress;
-        std::mutex m_progress_mutex;
+    // --- Commented out: DatabaseManager base and job queue dispatch ---
+    // auto process_job(const DatabaseJobData& job_data, const ImageType& obj, Status& stat) -> void override;
 
-        // Helper Functions
-        bool get_image(const std::string& imageName, std::string& outPath, std::string& error);
-        bool pull_image_from_registry(const std::string& imageName, const std::string& imagePath, std::string& error);
-        bool get_manifest(const std::string& imageName, const std::string& token, json& outManifest, std::string& error);
-        bool get_auth_token(const std::string& imageName, std::string& outToken, std::string& error);
-        bool download_and_extract_layers(const json& manifest, const std::string& repo, const std::string& token, const std::string& destinationPath, std::string& error);
-        bool extract_layer(const std::string& tarball_path, const std::string& destination_path, std::string& error);
+private:
+    // --- Commented out: RocksDB job handlers (re-enable with DB subsystem) ---
+    // auto process_get_job   (const DatabaseJobData& job_data, Status& stat)                        -> void;
+    // auto process_put_job   (const DatabaseJobData& job_data, const ImageType& obj, Status& stat)  -> void;
+    // auto process_update_job(const DatabaseJobData& job_data, const ImageType& obj, Status& stat)  -> void;
+    // auto process_delete_job(const DatabaseJobData& job_data, Status& stat)                        -> void;
 
-        std::future<std::string> download_layer_async(const std::string& url, const std::string& token, const std::string& destination_path, const std::string& digest);
-        void print_progress();
+    // Registry & Layer Management
+    auto get_auth_token  (const std::string& repo, std::string& out_token, std::string& error) -> bool;
+    
+    // Updated signature: returns media_type to handle multi-arch lists
+    auto fetch_manifest  (const std::string& repo, const std::string& tag,
+                          const std::string& token, json& out_manifest, 
+                          std::string& out_media_type, std::string& error) -> bool;
 
-        std::string get_image_path(const std::string& imageName) const;
-        bool path_exists(const std::string& path) const;
-        std::string parse_auth_header(const std::string& header, const std::string& key);
+    auto fetch_config_blob(const std::string& repo, const std::string& digest,
+                           const std::string& token, json& out_config,
+                           std::string& error) -> bool;
+
+    auto download_layer(const std::string& repo, const std::string& digest,
+                        const std::string& token, const fs::path& dest,
+                        std::size_t expected_size) -> std::string;
+
+    auto extract_layer(const fs::path& tarball_path, const fs::path& destination,
+                       std::string& error) -> bool;
+
+    // Utility
+    auto extract_image_meta(const std::string& image_name,
+                            std::string& repo, std::string& tag) -> void;
+
+    // --- Commented out: logger subsystem (re-enable with LoggerCommandQueue/ValueHeap) ---
+    // auto log_event(const std::string& log_data) -> void;
+
+    // --- Commented out: RocksDB handle (re-enable with DB subsystem) ---
+    // rocksdb::DB* m_db{nullptr};
+
+    fs::path m_db_path{};
+    fs::path m_images_root{};
+    std::string baseCachePath{};
+
+    // Retained as nullptr — safe to leave declared while subsystems are disabled
+    LoggerCommandQueue* m_log_cmd_queue{nullptr};
+    ValueHeap* m_value_heap{nullptr};
+
+    // --- Commented out: only needed by log_event ---
+    // LogJobData m_log_job_data{};
 };
