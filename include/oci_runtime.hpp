@@ -126,6 +126,8 @@ namespace OCIRuntime {
                 std::vector<gid_t> additional_gids{};
         };
 
+        struct
+
         struct Env {
                 std::vector<const char*> value{};
         };
