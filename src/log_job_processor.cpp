@@ -22,11 +22,11 @@ auto LogJobProcessor::init() -> void {
 
         m_value_heap = &ValueHeap::get_instance();
         m_value_heap->map_buffer(Utils::get_value_heap_buf_name(), ValueHeap::VALUE_HEAP_SIZE, true);
-        if (!m_value_heap->ok()) {
+        if (!m_value_heap->ok()) [[unlikely]] {
                 throw std::runtime_error(m_value_heap->get_error());
         }
         m_log_command_queue->map_buffer(Utils::get_logger_command_queue_buf_name(), true);
-        if (!m_log_command_queue->ok()) {
+        if (!m_log_command_queue->ok()) [[unlikely]] {
                 throw std::runtime_error(m_log_command_queue->get_error());
         }
 }
@@ -37,7 +37,7 @@ auto LogJobProcessor::process_job() -> void {
                                 while (this->m_running.load(std::memory_order_acquire)) {
                                         auto log_data{m_log_command_queue->atomic_pop()};
                                         if (log_data == std::nullopt) {
-                                                std::this_thread::sleep_for(chrono::milliseconds(1));
+                                                std::this_thread::yield();
                                                 continue;
                                         }
                                         this->route_job(log_data.value());

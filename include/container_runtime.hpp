@@ -1,8 +1,12 @@
 #pragma once
+#include "container_config.hpp"
 #include "types.hpp"
+#include <memory>
 
 class LoggerCommandQueue;
 class ValueHeap;
+class CapsManager;
+class SeccompProfileManager;
 class ContainerRuntime {
         public:
                 explicit ContainerRuntime(const ContainerConfig&);
@@ -23,10 +27,13 @@ class ContainerRuntime {
                 auto jail_process() -> void;
                 auto mount_necessary_dirs() -> void;
                 auto setup_standard_symlinks() -> void;
+                auto setup_environment_variables() -> void;
                 auto supervise_container(pid_t) -> void;
                 auto log_event(const std::string&) -> void;
                 ContainerConfig m_container_config{};
                 LogJobData m_log_job_data{};
+                std::unique_ptr<CapsManager> m_caps_manager{};
+                std::unique_ptr<SeccompProfileManager> m_seccomp_profile_manager{};
                 LoggerCommandQueue* m_log_cmd_queue{};
                 ValueHeap* m_value_heap{};
 };

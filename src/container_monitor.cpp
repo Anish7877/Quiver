@@ -20,6 +20,7 @@
 #include <sys/wait.h>
 #include <sys/socket.h>
 #include <stdexcept>
+#include <thread>
 #include <unistd.h>
 #include <poll.h>
 namespace chrono = std::chrono;
@@ -228,8 +229,13 @@ auto ContainerMonitor::invoke_container() -> void {
                 close(m_monitor_to_container_fd[0]);
                 close(m_container_to_monitor_fd[1]);
 
-                m_cgroups_manager = std::make_unique<CGroupsManager>(m_container_config.id);
-                m_cgroups_manager->attach_process(m_container_pid);
+                try {
+                        m_cgroups_manager = std::make_unique<CGroupsManager>(m_container_config.id);
+                        m_cgroups_manager->attach_process(m_container_pid);
+                }
+                catch (const std::exception& e) {
+                        log_event(std::format("[{}] {}", chrono::system_clock::now(), e.what()), TargetLog::CONTAINERMON);
+                }
                 char buf{};
                 if (read(m_container_to_monitor_fd[0], &buf, 1) != 1) [[unlikely]] {
                         log_event(std::format("[{}] Container Monitor Error: read from container_to_monitor_fd failed.",
@@ -486,11 +492,15 @@ auto ContainerMonitor::stop_logging() -> void {
 
 auto ContainerMonitor::log_event(const std::string& log_data, TargetLog target_log) -> void {
         std::size_t offset{};
-        while(!m_value_heap->write_job_data(log_data, offset)){}
+        while (!m_value_heap->write_job_data(log_data, offset)) {
+                std::this_thread::yield();
+        }
         m_log_job_data.target_log = target_log;
         m_log_job_data.value_offset = offset;
         m_log_job_data.value_length = log_data.size();
-        while(!m_log_cmd_queue->atomic_push(m_log_job_data)){}
+        while(!m_log_cmd_queue->atomic_push(m_log_job_data)) {
+                std::this_thread::yield();
+        }
 }
 
 ContainerMonitor::~ContainerMonitor() {

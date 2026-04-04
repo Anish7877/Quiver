@@ -1,19 +1,17 @@
 #pragma once
-#include <cstdint>
-#include <string>
+#include "oci_runtime.hpp"
 #include <seccomp.h>
+#include <string>
 
 class SeccompProfileManager {
         public:
-                explicit SeccompProfileManager(uint32_t);
+                explicit SeccompProfileManager(const OCIRuntime::Seccomp&);
                 ~SeccompProfileManager();
                 SeccompProfileManager(const SeccompProfileManager&) = delete;
-                SeccompProfileManager(SeccompProfileManager&&) = delete;
                 auto operator=(const SeccompProfileManager&) -> SeccompProfileManager& = delete;
-                auto operator=(SeccompProfileManager&&) -> SeccompProfileManager& = delete;
 
-                auto add_rule(uint32_t, const std::string&) -> void;
                 auto apply() -> void;
         private:
-                scmp_filter_ctx m_ctx{};
+                scmp_filter_ctx m_ctx{nullptr};
+                auto resolve_action(const std::string&, uint32_t) const -> uint32_t;
 };

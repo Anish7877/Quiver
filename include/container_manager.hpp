@@ -1,6 +1,7 @@
 #pragma once
 #include "types.hpp"
 #include "new_database_manager.hpp"
+#include "container_config.hpp"
 #include "singleton.hpp"
 #include <filesystem>
 #include <rocksdb/db.h>

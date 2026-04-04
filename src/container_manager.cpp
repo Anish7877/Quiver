@@ -9,6 +9,7 @@
 #include <flatbuffers/buffer.h>
 #include <flatbuffers/verifier.h>
 #include <format>
+#include <thread>
 namespace chrono = std::chrono;
 
 auto ContainerManager::init() -> void {
@@ -50,7 +51,7 @@ auto ContainerManager::extract_container(const std::string& raw_data, Status& st
         ContainerType obj{};
         flatbuffers::Verifier verifier{reinterpret_cast<const uint8_t*>(raw_data.data()), raw_data.size()};
 
-        if (verifier.VerifyBuffer<Types::Container>(nullptr)) {
+        if (!verifier.VerifyBuffer<Types::Container>(nullptr)) {
                 log_event(std::format("[{}] Container Manager Error: Data is corrupted or invalid flatbuffer data.",
                                 chrono::system_clock::now()));
                 stat.m_error = "Container Manager Error: Data is corrupted or invalid flatbuffer data.";
@@ -151,11 +152,15 @@ auto ContainerManager::process_delete_job(const DatabaseJobData& job, Status& st
 
 auto ContainerManager::log_event(const std::string& log_data) -> void {
                 std::size_t offset{};
-                while(!m_value_heap->write_job_data(log_data, offset)){};
+                while (!m_value_heap->write_job_data(log_data, offset)) {
+                        std::this_thread::yield();
+                };
                 m_log_job_data.target_log = TargetLog::DBLOG;
                 m_log_job_data.value_offset = offset;
                 m_log_job_data.value_length = log_data.size();
-                while(!m_log_cmd_queue->atomic_push(m_log_job_data)){}
+                while (!m_log_cmd_queue->atomic_push(m_log_job_data)) {
+                        std::this_thread::yield();
+                }
 }
 
 ContainerManager::~ContainerManager() {

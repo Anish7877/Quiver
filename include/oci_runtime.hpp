@@ -8,106 +8,161 @@
 #include <sys/resource.h>
 #include <linux/ioprio.h>
 #include <sys/mount.h>
+#include <linux/mount.h>
 #include <seccomp.h>
 #include <filesystem>
 namespace fs = std::filesystem;
 
 namespace OCIRuntime {
-        enum class CapabilityType : std::uint8_t {
-                PERMITTED   = 0,
-                EFFECTIVE   = 1,
-                INHERITABLE = 2,
-                BOUNDING    = 3,
-                AMBIENT     = 4
-        };
 
         const std::unordered_map<std::string, int> SCHEDULAR_POLICY_STR_MAP {
-                {"OTHER", SCHED_OTHER},
-                {"FIFO", SCHED_FIFO},
-                {"RR", SCHED_RR},
-                {"BATCH", SCHED_BATCH},
-                {"ISO", SCHED_ISO},
-                {"IDLE", SCHED_IDLE},
-                {"DEADLINE", SCHED_DEADLINE}
+                {"other", SCHED_OTHER},
+                {"fifo", SCHED_FIFO},
+                {"rr", SCHED_RR},
+                {"batch", SCHED_BATCH},
+                {"iso", SCHED_ISO},
+                {"idle", SCHED_IDLE},
+                {"deadline", SCHED_DEADLINE}
         };
 
         const std::unordered_map<std::string, int> SCHEDULAR_FLAGS_STR_MAP {
-                {"RESET_ON_FORK", SCHED_FLAG_RESET_ON_FORK},
-                {"RECLAIM", SCHED_FLAG_RECLAIM},
-                {"DL_OVERRUN", SCHED_FLAG_DL_OVERRUN},
-                {"KEEP_POLICY", SCHED_FLAG_KEEP_POLICY},
-                {"KEEP_PARAMS", SCHED_FLAG_KEEP_PARAMS},
-                {"UTIL_CLAMP_MIN", SCHED_FLAG_UTIL_CLAMP_MIN},
-                {"UTIL_CLAMP_MAX", SCHED_FLAG_UTIL_CLAMP_MAX}
+                {"reset_on_fork", SCHED_FLAG_RESET_ON_FORK},
+                {"reclaim", SCHED_FLAG_RECLAIM},
+                {"dl_overrun", SCHED_FLAG_DL_OVERRUN},
+                {"keep_policy", SCHED_FLAG_KEEP_POLICY},
+                {"keep_params", SCHED_FLAG_KEEP_PARAMS},
+                {"util_clamp_min", SCHED_FLAG_UTIL_CLAMP_MIN},
+                {"util_clamp_max", SCHED_FLAG_UTIL_CLAMP_MAX}
         };
 
         const std::unordered_map<std::string, int> IOPRIO_CLASS_STR_MAP {
-                {"RT", IOPRIO_CLASS_RT},
-                {"BE", IOPRIO_CLASS_BE},
-                {"IDLE", IOPRIO_CLASS_IDLE}
+                {"rt", IOPRIO_CLASS_RT},
+                {"be", IOPRIO_CLASS_BE},
+                {"idle", IOPRIO_CLASS_IDLE}
         };
 
         const std::unordered_map<std::string, int> RLIMIT_STR_MAP {
-                {"CPU", RLIMIT_CPU},
-                {"FSIZE", RLIMIT_FSIZE},
-                {"DATA", RLIMIT_DATA},
-                {"STACK", RLIMIT_STACK},
-                {"CORE", RLIMIT_CORE},
-                {"RSS", RLIMIT_RSS},
-                {"NPROC", RLIMIT_NPROC},
-                {"NOFILE", RLIMIT_NOFILE},
-                {"MEMLOCK", RLIMIT_MEMLOCK},
-                {"AS", RLIMIT_AS},
-                {"LOCKS", RLIMIT_LOCKS},
-                {"SIGPENDING", RLIMIT_SIGPENDING},
-                {"MSGQUEUE", RLIMIT_MSGQUEUE},
-                {"NICE", RLIMIT_NICE},
-                {"RTPRIO", RLIMIT_RTPRIO},
-                {"RTTIME", RLIMIT_RTTIME}
+                {"cpu", RLIMIT_CPU},
+                {"fsize", RLIMIT_FSIZE},
+                {"data", RLIMIT_DATA},
+                {"stack", RLIMIT_STACK},
+                {"core", RLIMIT_CORE},
+                {"rss", RLIMIT_RSS},
+                {"nproc", RLIMIT_NPROC},
+                {"nofile", RLIMIT_NOFILE},
+                {"memlock", RLIMIT_MEMLOCK},
+                {"as", RLIMIT_AS},
+                {"locks", RLIMIT_LOCKS},
+                {"sigpending", RLIMIT_SIGPENDING},
+                {"msgqueue", RLIMIT_MSGQUEUE},
+                {"nice", RLIMIT_NICE},
+                {"rtprio", RLIMIT_RTPRIO},
+                {"rttime", RLIMIT_RTTIME}
         };
 
         const std::unordered_map<std::string, int> ROOTFS_PROPAGATION_STR_MAP {
-                {"SLAVE", MS_SLAVE},
-                {"PRIVATE", MS_PRIVATE},
-                {"SHARED", MS_SHARED},
-                {"UNBINDABLE", MS_UNBINDABLE}
+                {"slave", MS_SLAVE},
+                {"private", MS_PRIVATE},
+                {"shared", MS_SHARED},
+                {"unbindable", MS_UNBINDABLE}
         };
 
         const std::unordered_map<std::string, int> SCMP_SYSCALL_OP_STR_MAP {
-                {"NE", SCMP_CMP_NE},
-                {"LT", SCMP_CMP_LT},
-                {"LE", SCMP_CMP_LE},
-                {"EQ", SCMP_CMP_EQ},
-                {"GE", SCMP_CMP_GE},
-                {"GT", SCMP_CMP_GT},
-                {"MASKED_EQ", SCMP_CMP_MASKED_EQ}
+                {"ne", SCMP_CMP_NE},
+                {"lt", SCMP_CMP_LT},
+                {"le", SCMP_CMP_LE},
+                {"eq", SCMP_CMP_EQ},
+                {"ge", SCMP_CMP_GE},
+                {"gt", SCMP_CMP_GT},
+                {"masked_eq", SCMP_CMP_MASKED_EQ}
         };
 
-        const std::unordered_map<std::string, int> SCMP_ARCH_STR_MAP { {"X86", SCMP_ARCH_X86},
-                {"X86_64", SCMP_ARCH_X86_64},
-                {"X32", SCMP_ARCH_X32}
+        const std::unordered_map<std::string, int> SCMP_ARCH_STR_MAP { {"x86", SCMP_ARCH_X86},
+                {"x86_64", SCMP_ARCH_X86_64},
+                {"x32", SCMP_ARCH_X32}
         };
 
         const std::unordered_map<std::string, int> SCMP_FLAGS_STR_MAP {
-                {"TSYNC", SECCOMP_FILTER_FLAG_TSYNC},
-                {"LOG", SECCOMP_FILTER_FLAG_LOG},
-                {"SPEC_ALLOW", SECCOMP_FILTER_FLAG_SPEC_ALLOW},
-                {"WAIT_KILLABLE_RECV", SECCOMP_FILTER_FLAG_WAIT_KILLABLE_RECV}
+                {"tsync", SECCOMP_FILTER_FLAG_TSYNC},
+                {"log", SECCOMP_FILTER_FLAG_LOG},
+                {"spec_allow", SECCOMP_FILTER_FLAG_SPEC_ALLOW},
+                {"wait_killable_recv", SECCOMP_FILTER_FLAG_WAIT_KILLABLE_RECV}
         };
 
         const std::unordered_map<std::string, int> TIMEOFFSET_STR_MAP {
-                {"MONOTONIC", CLOCK_MONOTONIC},
-                {"BOOTTIME", CLOCK_BOOTTIME}
+                {"monotonic", CLOCK_MONOTONIC},
+                {"boottime", CLOCK_BOOTTIME}
         };
 
         const std::unordered_map<std::string, int> NAMESPACE_STR_MAP {
-                {"PID", CLONE_NEWPID},
-                {"NETWORK", CLONE_NEWNET},
-                {"IPC", CLONE_NEWIPC},
-                {"UTS", CLONE_NEWUTS},
-                {"MOUNT", CLONE_NEWNS},
-                {"CGROUP", CLONE_NEWCGROUP},
-                {"TIME", CLONE_NEWTIME}
+                {"pid", CLONE_NEWPID},
+                {"network", CLONE_NEWNET},
+                {"ipc", CLONE_NEWIPC},
+                {"uts", CLONE_NEWUTS},
+                {"mount", CLONE_NEWNS},
+                {"cgroup", CLONE_NEWCGROUP},
+                {"time", CLONE_NEWTIME}
+        };
+
+        const std::unordered_map<std::string, unsigned long> MOUNT_FLAGS_STR_MAP {
+                {"async", 0},
+                {"atime", 0},
+                {"bind", MS_BIND},
+                {"defaults", 0},
+                {"dev", 0},
+                {"diratime", 0},
+                {"dirsync", MS_DIRSYNC},
+                {"exec", 0},
+                {"iversion", MS_I_VERSION},
+                {"lazytime", MS_LAZYTIME},
+                {"loud", 0},
+                {"mand", MS_MANDLOCK},
+                {"noatime", MS_NOATIME},
+                {"nodev", MS_NODEV},
+                {"nodiratime", MS_NODIRATIME},
+                {"noexec", MS_NOEXEC},
+                {"noiversion", 0},
+                {"nolazytime", 0},
+                {"nomand", 0},
+                {"norelatime", 0},
+                {"nostrictatime", 0},
+                {"nosuid", MS_NOSUID},
+                {"nosymfollow", MS_NOSYMFOLLOW},
+                {"private", MS_PRIVATE},
+                {"rbind", MS_BIND | MS_REC},
+                {"relatime", MS_RELATIME},
+                {"remount", MS_REMOUNT},
+                {"ro", MS_RDONLY},
+                {"rprivate", MS_PRIVATE | MS_REC},
+                {"rshared", MS_SHARED | MS_REC},
+                {"rslave", MS_SLAVE | MS_REC},
+                {"runbindable", MS_UNBINDABLE | MS_REC},
+                {"rw", 0},
+                {"shared", MS_SHARED},
+                {"silent", MS_SILENT},
+                {"slave", MS_SLAVE},
+                {"strictatime", MS_STRICTATIME},
+                {"suid", 0},
+                {"symfollow", 0},
+                {"sync", MS_SYNCHRONOUS},
+                {"unbindable", MS_UNBINDABLE}
+        };
+
+        const std::unordered_map<std::string, unsigned long> MOUNT_ATTR_STR_MAP {
+                {"rnoatime", MOUNT_ATTR_NOATIME},
+                {"rnodiratime", MOUNT_ATTR_NODIRATIME},
+                {"rnoexec", MOUNT_ATTR_NOEXEC},
+                {"rnosuid", MOUNT_ATTR_NOSUID},
+                {"rro", MOUNT_ATTR_RDONLY},
+                {"rstrictatime", MOUNT_ATTR_STRICTATIME},
+                {"rnosymfollow", MOUNT_ATTR_NOSYMFOLLOW},
+                {"idmap", MOUNT_ATTR_IDMAP},
+                {"ridmap", MOUNT_ATTR_IDMAP}
+        };
+
+        struct Root {
+                fs::path path{};
+                bool read_only{};
         };
 
         struct Terminal {
@@ -126,9 +181,20 @@ namespace OCIRuntime {
                 std::vector<gid_t> additional_gids{};
         };
 
-        struct
+        struct UidMapping {
+                std::uint32_t container_id{};
+                std::uint32_t host_id{};
+                std::uint32_t size{};
+        };
+
+        struct GidMapping {
+                std::uint32_t container_id{};
+                std::uint32_t host_id{};
+                std::uint32_t size{};
+        };
 
         struct Env {
+                std::vector<const char*> name{};
                 std::vector<const char*> value{};
         };
 
@@ -163,9 +229,12 @@ namespace OCIRuntime {
                 bool value{};
         };
 
-        struct Capability {
-                std::string name{};
-                CapabilityType type{};
+        struct Capabilities {
+                std::vector<std::string> bounding{};
+                std::vector<std::string> effective{};
+                std::vector<std::string> inheritable{};
+                std::vector<std::string> permitted{};
+                std::vector<std::string> ambient{};
         };
 
         struct RLimit {
@@ -179,12 +248,21 @@ namespace OCIRuntime {
                 std::string final{};
         };
 
-        struct Hook {
-                std::vector<std::string> args{};
-                std::vector<std::string> envs{};
-                fs::path path{};
-                std::string type{};
-                std::uint32_t timeout{};
+        struct Hooks {
+                struct Hook {
+                        std::vector<std::string> args{};
+                        std::vector<std::string> envs{};
+                        fs::path path{};
+                        std::string type{};
+                        std::uint32_t timeout{};
+                };
+
+                std::vector<Hook> prestart{};
+                std::vector<Hook> createRuntime{};
+                std::vector<Hook> createContainer{};
+                std::vector<Hook> startContainer{};
+                std::vector<Hook> poststart{};
+                std::vector<Hook> poststop{};
         };
 
         struct RootfsPropagation {
@@ -192,34 +270,55 @@ namespace OCIRuntime {
         };
 
         struct Seccomp {
-                private:
-                        struct arg {
-                                std::string op{};
-                                std::uint64_t value{};
-                                std::uint64_t value_two{};
-                                std::uint32_t index{};
-                        };
-                public:
-                        struct syscalls {
-                                std::vector<arg> args{};
-                                std::vector<std::string> names{};
-                                std::string action{};
-                                std::uint32_t errno_ret{};
-                        };
-                        std::vector<std::string> archs{};
-                        std::vector<std::string> flags{};
-                        std::string default_action{};
-                        std::uint32_t default_errno{};
+                struct Arg {
+                        std::string op{};
+                        std::uint64_t value{};
+                        std::uint64_t value_two{};
+                        std::uint32_t index{};
+                };
+
+                struct SyscallRule {
+                        std::vector<Arg> args{};
+                        std::vector<std::string> names{};
+                        std::string action{};
+                        std::uint32_t errno_ret{};
+                };
+
+                std::vector<SyscallRule> syscalls{};
+                std::vector<std::string> archs{};
+                std::vector<std::string> flags{};
+                std::string default_action{};
+                std::uint32_t default_errno{};
         };
 
         struct TimeOffset {
                 std::string type{};
-                std::uint32_t secs{};
-                std::uint32_t nanosecs{};
+                std::int64_t secs{};
+                std::int64_t nanosecs{};
+        };
+
+        struct Device {
+                std::string type{};
+                fs::path path{};
+                std::int64_t major{};
+                std::int64_t minor{};
+                std::uint32_t fileMode{};
+                uid_t uid{};
+                gid_t gid{};
         };
 
         struct Namespace {
-                std::string name{};
+                fs::path path{};
+                std::string type{};
+        };
+
+        struct Mount {
+                std::vector<std::string> options{};
+                std::vector<std::string> flags{};
+                std::vector<std::string> attrs{};
+                std::string destination{};
+                std::string type{};
+                std::string source{};
         };
 
         struct MaskedPath {
@@ -228,10 +327,5 @@ namespace OCIRuntime {
 
         struct ReadOnlyPath {
                 fs::path path{};
-        };
-
-        struct Annotation {
-                std::string key{};
-                std::string value{};
         };
 }

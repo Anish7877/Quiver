@@ -67,7 +67,8 @@ auto CGroupsManager::set_memory_swap(uint64_t limit_bytes) -> void {
         std::string value{};
         if (limit_bytes <= 0) {
                 value = "max";
-        } else {
+        }
+        else {
                 value = std::to_string(limit_bytes);
         }
 

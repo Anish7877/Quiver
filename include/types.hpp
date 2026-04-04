@@ -98,26 +98,10 @@ struct Status {
                 bool m_ok{false};
 };
 
-struct ContainerConfig {
-        fs::path new_fs{};
-        std::string id{};
-        std::string new_hostname{};
-        std::string overlay_opts{};
-        std::vector<std::pair<fs::path, fs::path>> volumes{};
-        std::vector<std::pair<fs::path, fs::path>> devices{};
-        uid_t uid{};
-        gid_t gid{};
-        int flags{};
-        bool tty{};
-        bool vfs{};
-        //TODO: parsed manifest information
-};
-
 struct ContainerType {
-        std::uint32_t pid{};
-        std::uint32_t net_pid{};
-        bool vfs{};
-        bool no_remove{};
+        std::vector<std::pair<std::string, std::string>> volumes{};
+        std::vector<std::string> devices{};
+        std::vector<std::pair<int, int>> ports{};
         std::string id{};
         std::string name{};
         std::string image{};
@@ -127,27 +111,28 @@ struct ContainerType {
         std::string filesystem_path{};
         std::string pty_shell{};
         std::string vfs_path{};
-        std::vector<std::pair<std::string, std::string>> volumes{};
-        std::vector<std::string> devices{};
-        std::vector<std::pair<int, int>> ports{};
+        std::uint32_t pid{};
+        std::uint32_t net_pid{};
+        bool vfs{};
+        bool no_remove{};
 };
 
 struct VolumeType {
+        std::vector<std::pair<std::string, std::string>> volumes{};
         std::string container_id{};
         std::string created_at{};
-        std::vector<std::pair<std::string, std::string>> volumes{};
 };
 
 struct DeviceType {
+        std::vector<std::string> devices{};
         std::string container_id{};
         std::string created_at{};
-        std::vector<std::string> devices{};
 };
 
 struct NetworkType{
+        std::vector<std::pair<int, int>> ports{};
         std::string container_id{};
         std::string created_at{};
-        std::vector<std::pair<int, int>> ports{};
 };
 
 struct ImageType {
