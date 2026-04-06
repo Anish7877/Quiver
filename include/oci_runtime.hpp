@@ -194,8 +194,7 @@ namespace OCIRuntime {
         };
 
         struct Env {
-                std::vector<const char*> name{};
-                std::vector<const char*> value{};
+                std::vector<std::string> value{};
         };
 
         struct Cwd {
@@ -220,11 +219,6 @@ namespace OCIRuntime {
                 std::int32_t priority{};
         };
 
-        struct IOPriority {
-                std::string name{};
-                std::uint8_t priority{};
-        };
-
         struct NoNewPrivileges {
                 bool value{};
         };
@@ -241,28 +235,6 @@ namespace OCIRuntime {
                 std::string name{};
                 std::uint64_t hard_limit{};
                 std::uint64_t soft_limit{};
-        };
-
-        struct CPUAffnity {
-                std::string initial{};
-                std::string final{};
-        };
-
-        struct Hooks {
-                struct Hook {
-                        std::vector<std::string> args{};
-                        std::vector<std::string> envs{};
-                        fs::path path{};
-                        std::string type{};
-                        std::uint32_t timeout{};
-                };
-
-                std::vector<Hook> prestart{};
-                std::vector<Hook> createRuntime{};
-                std::vector<Hook> createContainer{};
-                std::vector<Hook> startContainer{};
-                std::vector<Hook> poststart{};
-                std::vector<Hook> poststop{};
         };
 
         struct RootfsPropagation {
@@ -321,11 +293,11 @@ namespace OCIRuntime {
                 std::string source{};
         };
 
-        struct MaskedPath {
-                fs::path path{};
+        struct MaskedPaths {
+                std::vector<fs::path> paths{};
         };
 
-        struct ReadOnlyPath {
-                fs::path path{};
+        struct ReadOnlyPaths {
+                std::vector<fs::path> paths{};
         };
 }

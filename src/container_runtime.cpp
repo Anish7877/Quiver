@@ -2,6 +2,8 @@
 #include "caps_manager.hpp"
 #include "logger_command_queue.hpp"
 #include "mount.hpp"
+#include "oci_runtime.hpp"
+#include "schedular.hpp"
 #include "seccomp_profile_manager.hpp"
 #include "types.hpp"
 #include "utils.hpp"
@@ -10,10 +12,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <fcntl.h>
 #include <filesystem>
 #include <format>
 #include <memory>
 #include <sched.h>
+#include <stdexcept>
 #include <sys/mount.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -25,8 +29,7 @@
 #include <iostream>
 namespace chrono = std::chrono;
 
-ContainerRuntime::ContainerRuntime(const ContainerConfig& config) {
-        m_container_config = config;
+ContainerRuntime::ContainerRuntime(const ContainerConfig& config) : m_container_config{config} {
         m_value_heap = &ValueHeap::get_instance();
         m_log_cmd_queue = &LoggerCommandQueue::get_instance();
         m_value_heap->map_buffer(Utils::get_value_heap_buf_name(), ValueHeap::VALUE_HEAP_SIZE, false);
@@ -67,6 +70,54 @@ auto ContainerRuntime::restart_container() -> void {
 
 auto ContainerRuntime::run_container() -> void {
         int flags{};
+
+        for (const auto& [path, namespace_str] : m_container_config.namespaces) {
+                auto it{OCIRuntime::NAMESPACE_STR_MAP.find(namespace_str)};
+                if (path.empty()) {
+                        if (it != OCIRuntime::NAMESPACE_STR_MAP.end()) {
+                                flags |= it->second;
+                        }
+                        else [[unlikely]] {
+                                log_event(std::format("[{}] [{}] Container Runtime Error: Unknown or unsupported namespace requested -> {}.",
+                                                        std::chrono::system_clock::now(), m_container_config.container_id,
+                                                        namespace_str));
+                                _exit(EXIT_FAILURE);
+                        }
+                }
+                else {
+                        if (Utils::file_exists(path)) {
+                                int nstype{0};
+
+                                if (it != OCIRuntime::NAMESPACE_STR_MAP.end()) {
+                                        nstype = it->second;
+                                }
+                                else [[unlikely]] {
+                                        log_event(std::format("[{}] [{}] Container Runtime Error: Unknown or unsupported namespace requested -> {}.",
+                                                                std::chrono::system_clock::now(), m_container_config.container_id,
+                                                                namespace_str));
+                                        _exit(EXIT_FAILURE);
+                                }
+
+                                int fd{open(path.c_str(), O_RDONLY | O_CLOEXEC)};
+                                if (fd == -1) [[unlikely]] {
+                                        log_event(std::format("[{}] [{}] Container Runtime Error: Failed to open namespace path: {}.",
+                                                                std::chrono::system_clock::now(), m_container_config.container_id,
+                                                                path.string()));
+                                        _exit(EXIT_FAILURE);
+                                }
+
+                                if (setns(fd, nstype) == -1) [[unlikely]] {
+                                        log_event(std::format("[{}] [{}] Container Runtime Error: setns failed for path: {}. Errno: {}",
+                                                                std::chrono::system_clock::now(), m_container_config.container_id,
+                                                                path.string(), errno));
+                                        close(fd);
+                                        _exit(EXIT_FAILURE);
+                                }
+                                close(fd);
+                        }
+                }
+        }
+
         if (unshare(flags) == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: unshare failed.",
                                         chrono::system_clock::now(), m_container_config.container_id));
@@ -122,12 +173,16 @@ auto ContainerRuntime::execute_container_init() -> void {
         jail_process();
         mount_necessary_dirs();
         setup_standard_symlinks();
+        setup_security_paths();
+        setup_environment_variables();
         try {
+                Schedular::apply_opts(m_container_config.schedular_opts);
                 m_caps_manager->apply();
                 m_seccomp_profile_manager->apply();
         }
         catch (const std::exception& e) {
                 log_event(std::format("[{}] [{}] {}", chrono::system_clock::now(), m_container_config.container_id, e.what()));
+                _exit(EXIT_FAILURE);
         }
         execl("/bin/bash", "/bin/bash", static_cast<char*>(NULL));
         log_event(std::format("[{}] [{}] Container Runtime Error: execl failed.",
@@ -136,28 +191,69 @@ auto ContainerRuntime::execute_container_init() -> void {
 }
 
 auto ContainerRuntime::setup_root_filesystem() -> void {
-        if (!Mount::_private("/")) [[unlikely]] {
+        int prop_flags{-1};
+        fs::path final_filesystem{};
+        if (m_container_config.rootfs_propagation.type == "shared") {
+                m_container_config.rootfs_propagation.type = "slave";
+        }
+        auto it{OCIRuntime::ROOTFS_PROPAGATION_STR_MAP.find(m_container_config.rootfs_propagation.type)};
+        if (it != OCIRuntime::ROOTFS_PROPAGATION_STR_MAP.end()) {
+                prop_flags = it->second;
+        }
+        else [[unlikely]] {
+                prop_flags = MS_PRIVATE;
+        }
+
+        if (!Mount::_set_propagation("/", prop_flags)) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: root mount failed.",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
 
-
         if(!m_container_config.vfs) {
-                if(!Mount::_overlay_fs(m_container_config.rootfs.path, "")) [[unlikely]] {
+                fs::path lower_dir{m_container_config.rootfs.path};
+                fs::path upper_dir{Utils::get_base_dir() / "filesystems"
+                        / std::format("quiver_{}", m_container_config.container_id) / "upper_dir"};
+                fs::path work_dir{Utils::get_base_dir() / "filesystems"
+                        / std::format("quiver_{}", m_container_config.container_id) / "work_dir"};
+                fs::path merged_dir{Utils::get_base_dir() / "filesystems"
+                        / std::format("quiver_{}", m_container_config.container_id) / "merged_dir"};
+                try {
+                        Utils::ensure_dir(upper_dir);
+                        Utils::ensure_dir(work_dir);
+                        Utils::ensure_dir(merged_dir);
+                }
+                catch (const std::exception& e) {
+                        log_event(std::format("[{}] [{}] {}", chrono::system_clock::now(), m_container_config.container_id, e.what()));
+                        _exit(EXIT_FAILURE);
+                }
+                std::string opts{std::format("lowerdir={},upperdir={},workdir={}", lower_dir.string(), upper_dir.string(), work_dir.string())};
+                if(!Mount::_overlay_fs(merged_dir, opts)) [[unlikely]] {
                         log_event(std::format("[{}] [{}] Container Runtime Error: overlay filesystem mount failed.",
                                                 chrono::system_clock::now(), m_container_config.container_id));
                         _exit(EXIT_FAILURE);
                 }
+                final_filesystem = merged_dir;
+        }
+        else {
+                fs::path dest{Utils::get_base_dir() / "vfs" / std::format("quiver_{}", m_container_config.container_id)};
+                try {
+                        Utils::copy_directory(m_container_config.rootfs.path, dest);
+                }
+                catch (const std::exception& e) {
+                        log_event(std::format("[{}] [{}] {}", chrono::system_clock::now(), m_container_config.container_id, e.what()));
+                        _exit(EXIT_FAILURE);
+                }
+                final_filesystem = dest;
         }
 
-        if (!Mount::_new_filesystem(m_container_config.rootfs.path)) [[unlikely]] {
+        if (!Mount::_new_filesystem(final_filesystem)) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: new filesystem mount failed.",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
 
-        if (chdir(m_container_config.rootfs.path.c_str()) == -1) [[unlikely]] {
+        if (chdir(final_filesystem.c_str()) == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: chdir to new filesystem failed.",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
@@ -185,8 +281,8 @@ auto ContainerRuntime::jail_process() -> void {
                 _exit(EXIT_FAILURE);
         }
 
-        if (chdir(m_container_config.cwd.value.c_str()) == -1) [[unlikely]] {
-                log_event(std::format("[{}] [{}] Container Runtime Error: chdir failed.",
+        if (chdir("/") == -1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: chdir / failed.",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
@@ -199,6 +295,11 @@ auto ContainerRuntime::jail_process() -> void {
 
         if (rmdir("oldroot") == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: rmdir oldroot failed.",
+                                        chrono::system_clock::now(), m_container_config.container_id));
+                _exit(EXIT_FAILURE);
+        }
+        if (chdir(m_container_config.cwd.value.c_str()) == -1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: chdir to cwd failed.",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
@@ -281,15 +382,70 @@ auto ContainerRuntime::setup_environment_variables() -> void {
         if (clearenv() != 0) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: clearenv failed.",
                                         chrono::system_clock::now(), m_container_config.container_id));
-                return;
+                _exit(EXIT_FAILURE);
         }
-        const auto& names{m_container_config.env.name};
-        const auto& values{m_container_config.env.value};
-        for (std::size_t i{0}; i < names.size(); ++i) {
-                if (setenv(names[i], values[i], 1) == -1) [[unlikely]] {
-                        log_event(std::format("[{}] [{}] Container Runtime Error: setenv failed for name: {} -> value: {}.",
-                                        chrono::system_clock::now(), m_container_config.container_id,
-                                        names[i], values[i]));
+
+        for (const auto& env : m_container_config.env.value) {
+                auto it{env.find('=')};
+                if (it != std::string::npos && it > 0) {
+                        std::string name{env.substr(0, it)};
+                        std::string value{env.substr(it+1)};
+                        if (setenv(name.c_str(), value.c_str(), 1) != 0) [[unlikely]] {
+                                log_event(std::format("[{}] [{}] Container Runtime Error: setenv failed for -> {}.",
+                                                        chrono::system_clock::now(), m_container_config.container_id,
+                                                        env));
+                        }
+                }
+                else [[unlikely]] {
+                        log_event(std::format("[{}] [{}] Container Runtime Error: Invalid env format ignored -> {}.",
+                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                env));
+                }
+        }
+}
+
+auto ContainerRuntime::setup_security_paths() -> void {
+
+        for (const auto& path : m_container_config.masked_paths.paths) {
+                if (access(path.c_str(), F_OK) != 0) {
+                        continue;
+                }
+
+                if (fs::is_directory(path)) {
+                        if (mount("tmpfs", path.c_str(), "tmpfs", MS_RDONLY, "ro,mode=755") == -1) [[unlikely]] {
+                                log_event(std::format("[{}] [{}] Container Runtime Error: Failed to mask directory {} -> {}",
+                                                        chrono::system_clock::now(), m_container_config.container_id,
+                                                        path.string(), std::strerror(errno)));
+                                _exit(EXIT_FAILURE);
+                        }
+                }
+                else {
+                        if (mount("/dev/null", path.c_str(), "", MS_BIND, NULL) == -1) [[unlikely]] {
+                                log_event(std::format("[{}] [{}] Container Runtime Error: Failed to mask file {} -> {}",
+                                                        chrono::system_clock::now(), m_container_config.container_id,
+                                                        path.string(), std::strerror(errno)));
+                                _exit(EXIT_FAILURE);
+                        }
+                }
+        }
+
+        for (const auto& path : m_container_config.read_only_paths.paths) {
+                if (access(path.c_str(), F_OK) != 0) {
+                        continue;
+                }
+
+                if (mount(path.c_str(), path.c_str(), "", MS_BIND | MS_REC, NULL) == -1) [[unlikely]] {
+                        log_event(std::format("[{}] [{}] Container Runtime Error: Failed to bind-mount readonly path {} -> {}",
+                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                path.string(), std::strerror(errno)));
+                        _exit(EXIT_FAILURE);
+                }
+
+                if (mount(path.c_str(), path.c_str(), "", MS_BIND | MS_REMOUNT | MS_RDONLY | MS_REC, NULL) == -1) [[unlikely]] {
+                        log_event(std::format("[{}] [{}] Container Runtime Error: Failed to remount readonly path {} -> {}",
+                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                path.string(), std::strerror(errno)));
+                        _exit(EXIT_FAILURE);
                 }
         }
 }

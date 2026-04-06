@@ -128,13 +128,13 @@ auto Serialization::deserialize(const Types::Container* fb) -> ContainerType {
 
         if (fb->ports()) {
                 for (const auto* port : *fb->ports()) {
-                        obj.ports.push_back({port->host_port(), port->container_port()});
+                        obj.ports.emplace_back(std::make_pair(port->host_port(), port->container_port()));
                 }
         }
 
         if (fb->devices()) {
                 for (const auto* dev : *fb->devices()) {
-                        obj.devices.push_back(dev->str());
+                        obj.devices.emplace_back(dev->str());
                 }
         }
 

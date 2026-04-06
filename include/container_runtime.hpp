@@ -28,6 +28,7 @@ class ContainerRuntime {
                 auto mount_necessary_dirs() -> void;
                 auto setup_standard_symlinks() -> void;
                 auto setup_environment_variables() -> void;
+                auto setup_security_paths() -> void;
                 auto supervise_container(pid_t) -> void;
                 auto log_event(const std::string&) -> void;
                 ContainerConfig m_container_config{};

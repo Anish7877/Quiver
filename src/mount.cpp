@@ -1,6 +1,13 @@
 #include "mount.hpp"
 #include <sys/mount.h>
 
+auto Mount::_set_propagation(const fs::path& fs, int flags) -> bool {
+        if (mount("none", fs.c_str(), NULL, flags | MS_REC, NULL) == -1) [[unlikely]] {
+                return false;
+        }
+        return true;
+}
+
 auto Mount::_overlay_fs(const fs::path& fs, const std::string& overlay_opts) -> bool {
         if (mount("overlay", fs.c_str(), "overlay", MS_NODEV, overlay_opts.c_str()) == -1) [[unlikely]] {
                 return false;

@@ -5,7 +5,8 @@
 #include "value_heap.hpp"
 #include "logger_command_queue.hpp"
 #include "utils.hpp"
-#include "cgroups_manager.hpp"
+#include "cgroups_manager_interface.hpp"
+#include "cgroups_manager_creator.hpp"
 #include <chrono>
 #include <iostream>
 #include <cerrno>
@@ -15,6 +16,7 @@
 #include <memory>
 #include <sched.h>
 #include <sstream>
+#include <sys/ioctl.h>
 #include <sys/poll.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -30,6 +32,7 @@ auto ContainerMonitor::init(const ContainerConfig& config) -> void {
         m_value_heap = &ValueHeap::get_instance();
         m_log_cmd_queue = &LoggerCommandQueue::get_instance();
         m_pty_session_manager = &PtySessionManager::get_instance();
+        m_cgroups_manager = CGroupsManagerCreator::create_cgourps_manager(m_container_config.container_id, m_container_config.cgroups_path);
         m_value_heap->map_buffer(Utils::get_value_heap_buf_name(), ValueHeap::VALUE_HEAP_SIZE, false);
         if (!m_value_heap->ok()) [[unlikely]] {
                 throw std::runtime_error(m_value_heap->get_error());
@@ -49,7 +52,7 @@ auto ContainerMonitor::setup_usernamespace() -> void {
 auto ContainerMonitor::start_logging(int master_fd) -> bool {
         m_logging_active.store(true, std::memory_order_release);
         m_log_worker = std::thread([&]() {
-                                if(m_container_config.tty) {
+                                if(m_container_config.terminal.value) {
                                         pollfd fds[1];
                                         fds[0].fd = master_fd;
                                         fds[0].events = POLLIN;
@@ -73,7 +76,7 @@ auto ContainerMonitor::start_logging(int master_fd) -> bool {
                                                                                 m_container_id,
                                                                                 std::string(buffer, bytes_read))};
 
-                                                                log_event(log_data, TargetLog::CONTAINERLOG);
+                                                                this->log_event(log_data, TargetLog::CONTAINERLOG);
 
                                                         }
                                                 }
@@ -81,6 +84,10 @@ auto ContainerMonitor::start_logging(int master_fd) -> bool {
                                                 if (fds[0].fd != -1 && (fds[0].revents & POLLHUP)) {
                                                         fds[0].fd = -1;
                                                 }
+                                        }
+
+                                        if (master_fd != -1) {
+                                                close(master_fd);
                                         }
                                 }
                                 else {
@@ -132,6 +139,9 @@ auto ContainerMonitor::start_logging(int master_fd) -> bool {
                                                         --open_pipes;
                                                 }
                                         }
+
+                                        if (m_std_out_fd[0] != -1) close(m_std_out_fd[0]);
+                                        if (m_std_err_fd[0] != -1) close(m_std_err_fd[0]);
                                 }
                         });
         return true;
@@ -172,13 +182,13 @@ auto ContainerMonitor::invoke_container() -> void {
 
                 if (unshare(CLONE_NEWUSER) == -1) [[unlikely]] {
                         log_event(std::format("[{}] [{}] Container Runtime Error: unshare(CLONE_NEWUSER) failed.",
-                                                chrono::system_clock::now(), m_container_config.id), TargetLog::CONTAINERLOG);
+                                                chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
                         _exit(EXIT_FAILURE);
                 }
                 char ready{'1'};
                 if (write(m_container_to_monitor_fd[1], &ready, 1) == -1) [[unlikely]] {
                         log_event(std::format("[{}] [{}] Container Runtime Error: write to container_to_monitor_fd failed.",
-                                                chrono::system_clock::now(), m_container_config.id), TargetLog::CONTAINERLOG);
+                                                chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
                         close(m_container_to_monitor_fd[1]);
                         _exit(EXIT_FAILURE);
                 }
@@ -187,12 +197,12 @@ auto ContainerMonitor::invoke_container() -> void {
                 char go{};
                 if (read(m_monitor_to_container_fd[0], &go, 1) != 1) [[unlikely]] {
                         log_event(std::format("[{}] [{}] Container Runtime Error: read failed from monitor_to_container_fd.",
-                                                chrono::system_clock::now(), m_container_config.id), TargetLog::CONTAINERLOG);
+                                                chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
                         close(m_monitor_to_container_fd[0]);
                         _exit(EXIT_FAILURE);
                 }
                 close(m_monitor_to_container_fd[0]);
-                if (m_container_config.tty) {
+                if (m_container_config.terminal.value) {
                         close(m_control_sock[0]);
 
                         m_pty_session_manager->setup_pty();
@@ -230,7 +240,6 @@ auto ContainerMonitor::invoke_container() -> void {
                 close(m_container_to_monitor_fd[1]);
 
                 try {
-                        m_cgroups_manager = std::make_unique<CGroupsManager>(m_container_config.id);
                         m_cgroups_manager->attach_process(m_container_pid);
                 }
                 catch (const std::exception& e) {
@@ -239,7 +248,7 @@ auto ContainerMonitor::invoke_container() -> void {
                 char buf{};
                 if (read(m_container_to_monitor_fd[0], &buf, 1) != 1) [[unlikely]] {
                         log_event(std::format("[{}] Container Monitor Error: read from container_to_monitor_fd failed.",
-                                                m_container_config.id), TargetLog::CONTAINERLOG);
+                                                m_container_config.container_id), TargetLog::CONTAINERLOG);
                         close(m_container_to_monitor_fd[0]);
                         return;
                 }
@@ -248,16 +257,16 @@ auto ContainerMonitor::invoke_container() -> void {
                 setup_usernamespace();
 
                 char go_sig{'1'};
-                if (write(m_monitor_to_container_fd[1], &go_sig, 1) != -1) [[unlikely]] {
+                if (write(m_monitor_to_container_fd[1], &go_sig, 1) == -1) [[unlikely]] {
                         log_event(std::format("[{}] Container Monitor Error: write to monitor_to_container_fd failed.",
-                                                m_container_config.id), TargetLog::CONTAINERLOG);
+                                                m_container_config.container_id), TargetLog::CONTAINERLOG);
                         close(m_monitor_to_container_fd[1]);
                         return;
                 }
                 close(m_monitor_to_container_fd[1]);
 
                 int master_fd{-1};
-                if (m_container_config.tty) {
+                if (m_container_config.terminal.value) {
                         close(m_control_sock[1]);
 
                         master_fd = m_pty_session_manager->recv_master_fd(m_control_sock[0]);
@@ -278,7 +287,6 @@ auto ContainerMonitor::invoke_container() -> void {
                                         TargetLog::CONTAINERMON);
                         return;
                 }
-                m_cgroups_manager->destroy();
         }
 }
 
@@ -290,24 +298,26 @@ auto ContainerMonitor::setup_set_groups() -> void {
 
 auto ContainerMonitor::setup_uid_map() -> void {
         const char* newuidmap_path{"/usr/bin/newuidmap"};
-        std::string payload{std::format("0 {} 1\n", m_container_config.uid)};
+        std::string payload{std::format("{} {} {}\n", m_container_config.uid_mapping.host_id,
+                        m_container_config.uid_mapping.container_id, m_container_config.uid_mapping.size)};
         exec_mapping_tool(newuidmap_path, payload);
 }
 
 auto ContainerMonitor::setup_gid_map() -> void {
         const char* newgidmap_path{"/usr/bin/newgidmap"};
-        std::string payload{std::format("0 {} 1\n", m_container_config.gid)};
+        std::string payload{std::format("{} {} {}\n", m_container_config.gid_mapping.host_id,
+                        m_container_config.gid_mapping.container_id, m_container_config.gid_mapping.size)};
         payload += Utils::get_gid_map_payload(m_container_config.devices);
         exec_mapping_tool(newgidmap_path, payload);
 }
 
 auto ContainerMonitor::setup_socket_connection() -> void {
-        m_sock_path = Utils::get_sock_path(m_container_config.id);
+        m_sock_path = Utils::get_sock_path(m_container_config.container_id);
         unlink(m_sock_path.c_str());
 
         m_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (m_socket_fd == -1) [[unlikely]] {
-                log_event(std::format("[{}] Container Runtime Error: socket failed.", m_container_config.id), TargetLog::CONTAINERLOG);
+                log_event(std::format("[{}] Container Runtime Error: socket failed.", m_container_config.container_id), TargetLog::CONTAINERLOG);
                 _exit(EXIT_FAILURE);
         }
 
@@ -316,12 +326,12 @@ auto ContainerMonitor::setup_socket_connection() -> void {
         strncpy(addr.sun_path, m_sock_path.c_str(), sizeof(addr.sun_path)-1);
 
         if (bind(m_socket_fd, (sockaddr*)&addr, sizeof(addr)) == -1) [[unlikely]] {
-                log_event(std::format("[{}] Container Runtime Error: bind failed.", m_container_config.id), TargetLog::CONTAINERLOG);
+                log_event(std::format("[{}] Container Runtime Error: bind failed.", m_container_config.container_id), TargetLog::CONTAINERLOG);
                 _exit(EXIT_FAILURE);
         }
 
         if (listen(m_socket_fd, 1) == -1) [[unlikely]] {
-                log_event(std::format("[{}] Container Runtime Error: listen failed.", m_container_config.id), TargetLog::CONTAINERLOG);
+                log_event(std::format("[{}] Container Runtime Error: listen failed.", m_container_config.container_id), TargetLog::CONTAINERLOG);
                 _exit(EXIT_FAILURE);
         }
 }
@@ -335,8 +345,8 @@ auto ContainerMonitor::attach_to_container(const std::string& container_id) -> v
         strncpy(addr.sun_path, m_sock_path.c_str(), sizeof(addr.sun_path)-1);
 
         if (connect(m_connection_fd, (sockaddr*)&addr, sizeof(addr)) == -1) [[unlikely]] {
-                log_event(std::format("[{}] Container Runtime Error: Connection to socket failed.", m_container_config.id), TargetLog::CONTAINERLOG);
-                std::cerr << std::format("[{}] Container Runtime Error: Connection to socket failed.\n", m_container_config.id);
+                log_event(std::format("[{}] Container Runtime Error: Connection to socket failed.", m_container_config.container_id), TargetLog::CONTAINERLOG);
+                std::cerr << std::format("[{}] Container Runtime Error: Connection to socket failed.\n", m_container_config.container_id);
                 _exit(EXIT_FAILURE);
         }
 
@@ -348,9 +358,9 @@ auto ContainerMonitor::attach_to_container(const std::string& container_id) -> v
         fds[1].fd = m_connection_fd;
         fds[1].events = POLLIN;
 
-        bool saw_ctrlp { false };
-        bool should_run { true };
-        bool user_detached { false };
+        bool saw_ctrlp{false};
+        bool should_run{true};
+        bool user_detached{false};
 
         while (should_run) {
                 int ret{poll(fds, 2, -1)};
@@ -472,7 +482,7 @@ auto ContainerMonitor::exec_mapping_tool(const char* binary_path, const std::str
 }
 
 auto ContainerMonitor::attach_to_stdio() -> bool {
-        if (m_container_config.tty) {
+        if (m_container_config.terminal.value) {
                 if (socketpair(AF_UNIX, SOCK_STREAM, 0, m_control_sock) == -1) [[unlikely]] return false;
         }
         else {
@@ -510,7 +520,7 @@ ContainerMonitor::~ContainerMonitor() {
                 close(m_connection_fd);
         }
         if (m_socket_fd != -1) {
-                close(m_connection_fd);
+                close(m_socket_fd);
         }
         if (!m_sock_path.empty()) {
                 unlink(m_sock_path.c_str());

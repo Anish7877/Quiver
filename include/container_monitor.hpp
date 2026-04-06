@@ -1,6 +1,7 @@
 #pragma once
 #include "singleton.hpp"
 #include "types.hpp"
+#include "container_config.hpp"
 #include <atomic>
 #include <memory>
 #include <thread>
@@ -9,7 +10,7 @@ class LoggerCommandQueue;
 class ValueHeap;
 class PtySessionManager;
 class ContainerRuntime;
-class CGroupsManager;
+class CGroupsManagerInterface;
 class ContainerMonitor : public Singleton<ContainerMonitor> {
         friend class Singleton<ContainerMonitor>;
         private:
@@ -43,7 +44,7 @@ class ContainerMonitor : public Singleton<ContainerMonitor> {
                 std::string m_container_id{};
                 std::string m_sock_path{};
                 std::unique_ptr<ContainerRuntime> m_runtime{nullptr};
-                std::unique_ptr<CGroupsManager> m_cgroups_manager{nullptr};
+                std::unique_ptr<CGroupsManagerInterface> m_cgroups_manager{nullptr};
                 LoggerCommandQueue* m_log_cmd_queue{nullptr};
                 ValueHeap* m_value_heap{nullptr};
                 PtySessionManager* m_pty_session_manager{nullptr};

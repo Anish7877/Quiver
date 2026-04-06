@@ -29,7 +29,7 @@ SeccompProfileManager::SeccompProfileManager(const OCIRuntime::Seccomp& config) 
                                 throw std::runtime_error(std::format("Unknown seccomp operator: {}", arg.op));
                         }
 
-                        cmp_args.push_back(SCMP_CMP(
+                        cmp_args.emplace_back(SCMP_CMP(
                                 arg.index,
                                 static_cast<scmp_compare>(op_it->second),
                                 arg.value,

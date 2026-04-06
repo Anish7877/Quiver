@@ -1,7 +1,6 @@
 #pragma once
 #include "types.hpp"
 #include "new_database_manager.hpp"
-#include "container_config.hpp"
 #include "singleton.hpp"
 #include <filesystem>
 #include <rocksdb/db.h>
@@ -9,16 +8,16 @@ namespace fs = std::filesystem;
 
 class LoggerCommandQueue;
 class ValueHeap;
-class ContainerManager : public DatabaseManager<ContainerType>, public Singleton<ContainerManager> {
-        friend class Singleton<ContainerManager>;
+class ContainerDbManager : public DatabaseManager<ContainerType>, public Singleton<ContainerDbManager> {
+        friend class Singleton<ContainerDbManager>;
         private:
-                ContainerManager() = default;
-                ~ContainerManager();
+                ContainerDbManager() = default;
+                ~ContainerDbManager();
         public:
-                ContainerManager(const ContainerManager&) = delete;
-                ContainerManager(ContainerManager&&) = delete;
-                auto operator=(const ContainerManager&) -> ContainerManager& = delete;
-                auto operator=(ContainerManager&&) -> ContainerManager& = delete;
+                ContainerDbManager(const ContainerDbManager&) = delete;
+                ContainerDbManager(ContainerDbManager&&) = delete;
+                auto operator=(const ContainerDbManager&) -> ContainerDbManager& = delete;
+                auto operator=(ContainerDbManager&&) -> ContainerDbManager& = delete;
 
                 auto init() -> void override;
                 auto process_job(const DatabaseJobData&, const ContainerType&, Status&) -> void override;

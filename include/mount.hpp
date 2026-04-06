@@ -4,6 +4,7 @@
 namespace fs = std::filesystem;
 
 namespace Mount {
+        auto _set_propagation(const fs::path&, int flags) -> bool;
         auto _overlay_fs(const fs::path&, const std::string&) -> bool;
         auto _new_filesystem(const fs::path&) -> bool;
         auto _private(const fs::path&) -> bool;

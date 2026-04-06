@@ -88,11 +88,11 @@ struct Status {
                         return m_result;
                 }
         private:
-                friend class ContainerManager;
-                friend class VolumeManager;
-                friend class DeviceManager;
-                friend class NetworkManager;
-                friend class ImageManager;
+                friend class ContainerDbManager;
+                friend class VolumeDbManager;
+                friend class DeviceDbManager;
+                friend class NetworkDbManager;
+                friend class ImageDbManager;
                 std::string m_result{};
                 std::string m_error{};
                 bool m_ok{false};

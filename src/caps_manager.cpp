@@ -24,31 +24,50 @@ CapsManager::CapsManager(const OCIRuntime::Capabilities& capabilities) {
 
 
 auto CapsManager::apply() -> void {
+        if (prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) == -1) {
+                throw std::runtime_error("Capabilities Manager Error: Failed to set KEEPCAPS");
+        }
+
         for (std::size_t i{0}; i <= CAP_LAST_CAP; ++i) {
                 cap_value_t cap_value{static_cast<cap_value_t>(i)};
                 if (std::find(m_bounding.begin(), m_bounding.end(), cap_value) == m_bounding.end()) {
-                        if (prctl(PR_CAPBSET_DROP, cap_value, 0, 0, 0) == -1) [[unlikely]] {
-                                if (errno != EINVAL) [[unlikely]] {
-                                        throw std::runtime_error(std::format("Capabilities Manager Error: Failed to drop cap {} from bounding set. Errno: {}", i, errno));
+                        if (prctl(PR_CAPBSET_DROP, cap_value, 0, 0, 0) == -1) {
+                                if (errno != EINVAL && errno != EPERM) { // EPERM means it's already gone
+                                        throw std::runtime_error(std::format("Capabilities Manager Error: Failed to drop cap {} from bounding set.", i));
                                 }
                         }
                 }
         }
 
         cap_clear(m_cap);
-        if (cap_set_flag(m_cap, CAP_EFFECTIVE, static_cast<int>(m_effective.size()), m_effective.data(), CAP_SET) == -1 ||
-            cap_set_flag(m_cap, CAP_PERMITTED, static_cast<int>(m_permitted.size()), m_permitted.data(), CAP_SET) == -1 ||
-            cap_set_flag(m_cap, CAP_INHERITABLE, static_cast<int>(m_inheritable.size()), m_inheritable.data(), CAP_SET) == -1) [[unlikely]] {
-                throw std::runtime_error("Capabilities Manager Error: Failed to set caps flag.");
-        }
 
-        if (cap_set_proc(m_cap) == -1) [[unlikely]] {
-                throw std::runtime_error("Capabilities Manager Error: Failed to apply capabilities to process.");
+        auto cap_set{[&](cap_flag_t flag, const std::vector<cap_value_t>& caps) {
+                if (caps.empty()) return;
+                if (cap_set_flag(m_cap, flag, static_cast<int>(caps.size()), caps.data(), CAP_SET) == -1) {
+                        throw std::runtime_error("Capabilities Manager Error: Failed to set caps flag.");
+                }
+        }};
+
+        cap_set(CAP_EFFECTIVE, m_effective);
+        cap_set(CAP_PERMITTED, m_permitted);
+        cap_set(CAP_INHERITABLE, m_inheritable);
+
+        if (cap_set_proc(m_cap) == -1) {
+                if (errno == EPERM) {
+                        std::cerr << "WARN: Some requested capabilities were rejected by the host kernel.\n";
+                }
+                else {
+                        throw std::runtime_error("Capabilities Manager Error: Failed to apply capabilities.");
+                }
         }
 
         for (const auto& cap : m_ambient) {
-                if (prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, cap, 0, 0) == -1) [[unlikely]] {
-                        throw std::runtime_error(std::format("Capabilities Manager Error: Failed to raise ambient cap {}. Errno: {}", cap, errno));
+                if (prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, cap, 0, 0) == -1) {
+                        if (errno == EPERM) {
+                                std::cerr << std::format("WARN: System denied Ambient capability {}.\n", cap);
+                                continue;
+                        }
+                        throw std::runtime_error(std::format("Capabilities Manager Error: Failed to raise ambient cap {}.", cap));
                 }
         }
 }
