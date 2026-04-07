@@ -1,6 +1,5 @@
 #pragma once
 #include "oci_runtime.hpp"
-#include <vector>
 
 struct ContainerConfig {
         std::string container_id{};
@@ -26,6 +25,7 @@ struct ContainerConfig {
         OCIRuntime::Seccomp seccomp{};
         fs::path cgroups_path{};
         std::vector<OCIRuntime::Device> devices{};
+        OCIRuntime::Network networks{};
         std::vector<OCIRuntime::TimeOffset> timeoffsets{};
         std::vector<OCIRuntime::Namespace> namespaces{};
         std::vector<OCIRuntime::Mount> mounts{};

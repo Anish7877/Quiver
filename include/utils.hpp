@@ -24,6 +24,7 @@ namespace Utils {
     auto get_value_heap_buf_name() -> std::string;
     auto get_device_gid(const fs::path&) -> gid_t;
     auto get_gid_map_payload(const std::vector<std::pair<fs::path, fs::path>>&) -> std::string;
+    auto find_program_path(const std::string&) -> fs::path;
     auto generate_container_id() -> std::string;
     auto extract_tarball(const std::string&, const std::string&) -> void;
     auto print_usage() -> void;

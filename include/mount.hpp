@@ -1,10 +1,11 @@
 #pragma once
+#include "oci_runtime.hpp"
 #include <filesystem>
 #include <vector>
 namespace fs = std::filesystem;
 
 namespace Mount {
-        auto _set_propagation(const fs::path&, int flags) -> bool;
+        auto _set_propagation(const fs::path&, int) -> bool;
         auto _overlay_fs(const fs::path&, const std::string&) -> bool;
         auto _new_filesystem(const fs::path&) -> bool;
         auto _private(const fs::path&) -> bool;
@@ -14,6 +15,6 @@ namespace Mount {
         auto _tmpfs(const fs::path&, const std::string&) -> bool;
         auto _devpts(const fs::path&, const std::string&) -> bool;
         auto _unmount_filesystem(const fs::path&) -> bool;
-        auto _volumes(const std::vector<std::pair<fs::path, fs::path>>&) -> bool;
-        auto _devices(const std::vector<std::pair<fs::path, fs::path>>&) -> bool;
+        auto _volumes(const std::vector<OCIRuntime::Mount>&, const fs::path&) -> void;
+        auto _devices(const std::vector<OCIRuntime::Device>&, const fs::path&) -> void;
 }

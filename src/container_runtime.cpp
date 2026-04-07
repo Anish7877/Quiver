@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <format>
+#include <linux/prctl.h>
 #include <memory>
 #include <sched.h>
 #include <stdexcept>
@@ -26,6 +27,7 @@
 #include <unistd.h>
 #include <chrono>
 #include <sys/wait.h>
+#include <sys/prctl.h>
 #include <iostream>
 namespace chrono = std::chrono;
 
@@ -178,6 +180,13 @@ auto ContainerRuntime::execute_container_init() -> void {
         try {
                 Schedular::apply_opts(m_container_config.schedular_opts);
                 m_caps_manager->apply();
+                if (m_container_config.no_new_privileges.value) {
+                        if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == -1) [[unlikely]] {
+                                log_event(std::format("[{}] [{}] Container Runtime Error: prctl set no privileges failed.",
+                                                        chrono::system_clock::now(), m_container_config.container_id));
+                                _exit(EXIT_FAILURE);
+                        }
+                }
                 m_seccomp_profile_manager->apply();
         }
         catch (const std::exception& e) {
@@ -258,18 +267,8 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
-
-        if (!Mount::_volumes(m_container_config.volumes)) [[unlikely]] {
-                log_event(std::format("[{}] [{}] Container Runtime Error: volumes mount failed.",
-                                        chrono::system_clock::now(), m_container_config.container_id));
-                _exit(EXIT_FAILURE);
-        }
-
-        if (!Mount::_devices(m_container_config.)) [[unlikely]] {
-                log_event(std::format("[{}] [{}] Container Runtime Error: devices mount failed for container init.",
-                                        chrono::system_clock::now(), m_container_config.container_id));
-                _exit(EXIT_FAILURE);
-        }
+        Mount::_volumes(m_container_config.mounts, final_filesystem);
+        Mount::_devices(m_container_config.devices, final_filesystem);
 }
 
 auto ContainerRuntime::jail_process() -> void {
@@ -405,7 +404,6 @@ auto ContainerRuntime::setup_environment_variables() -> void {
 }
 
 auto ContainerRuntime::setup_security_paths() -> void {
-
         for (const auto& path : m_container_config.masked_paths.paths) {
                 if (access(path.c_str(), F_OK) != 0) {
                         continue;

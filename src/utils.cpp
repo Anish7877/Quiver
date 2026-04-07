@@ -5,6 +5,7 @@
 #include <format>
 #include <random>
 #include <blake3.h>
+#include <string>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <system_error>
@@ -154,6 +155,35 @@ auto Utils::get_gid_map_payload(const std::vector<std::pair<fs::path, fs::path>>
                 }
         }
         return payload;
+}
+
+auto Utils::find_program_path(const std::string& program_name) -> fs::path {
+        if (program_name.empty()) return "";
+        if (program_name[0] == '/') {
+                if (fs::exists(program_name) && fs::is_regular_file(program_name)) {
+                        if (access(program_name.c_str(), X_OK) != -1) {
+                                return program_name;
+                        }
+                }
+                return "";
+        }
+
+        const char* path_env{std::getenv("PATH")};
+        if (!path_env) return "";
+
+        std::stringstream ss{path_env};
+        std::string dir{};
+
+        while (std::getline(ss, dir, ':')) {
+                fs::path candidate{fs::path(dir) / program_name};
+
+                if (fs::exists(candidate) && fs::is_regular_file(candidate)) {
+                        if (access(candidate.c_str(), X_OK) != -1) {
+                                return candidate;
+                        }
+                }
+        }
+        return "";
 }
 
 auto Utils::generate_container_id() -> std::string {

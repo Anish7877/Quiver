@@ -270,13 +270,15 @@ namespace OCIRuntime {
         };
 
         struct Device {
-                std::string type{};
-                fs::path path{};
-                std::int64_t major{};
-                std::int64_t minor{};
-                std::uint32_t fileMode{};
-                uid_t uid{};
-                gid_t gid{};
+                fs::path host_path{};
+                fs::path container_path{};
+        };
+
+        struct Network {
+                std::vector<std::string> tcp_ports{};
+                std::vector<std::string> udp_ports{};
+                bool auto_tcp{};
+                bool auto_udp{};
         };
 
         struct Namespace {
