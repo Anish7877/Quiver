@@ -8,14 +8,7 @@
 #include <string>
 #include <unistd.h>
 
-auto PastaNetwork::setup_networking(pid_t container_pid) -> void {
-        OCIRuntime::Network network_config{};
-        network_config.auto_tcp = false;
-        network_config.auto_udp = false;
-        setup_networking_with_ports(container_pid, network_config);
-}
-
-auto PastaNetwork::setup_networking_with_ports(pid_t container_pid, const OCIRuntime::Network& networks) -> void {
+auto PastaNetwork::setup_networking(pid_t container_pid, const OCIRuntime::Network& networks) -> void {
         fs::path pasta_path{Utils::find_program_path("pasta")};
         if (pasta_path.empty()) {
                 std::cerr << "Network Error: 'pasta' executable not found on host.\n";
@@ -62,5 +55,4 @@ auto PastaNetwork::setup_networking_with_ports(pid_t container_pid, const OCIRun
                 std::cerr << std::format("Network Fatal: execv failed for pasta -> '{}'.\n", std::strerror(errno));
                 _exit(EXIT_FAILURE);
         }
-        return;
 }

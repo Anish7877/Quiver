@@ -71,61 +71,6 @@ auto ContainerRuntime::restart_container() -> void {
 }
 
 auto ContainerRuntime::run_container() -> void {
-        int flags{};
-
-        for (const auto& [path, namespace_str] : m_container_config.namespaces) {
-                auto it{OCIRuntime::NAMESPACE_STR_MAP.find(namespace_str)};
-                if (path.empty()) {
-                        if (it != OCIRuntime::NAMESPACE_STR_MAP.end()) {
-                                flags |= it->second;
-                        }
-                        else [[unlikely]] {
-                                log_event(std::format("[{}] [{}] Container Runtime Error: Unknown or unsupported namespace requested -> {}.",
-                                                        std::chrono::system_clock::now(), m_container_config.container_id,
-                                                        namespace_str));
-                                _exit(EXIT_FAILURE);
-                        }
-                }
-                else {
-                        if (Utils::file_exists(path)) {
-                                int nstype{0};
-
-                                if (it != OCIRuntime::NAMESPACE_STR_MAP.end()) {
-                                        nstype = it->second;
-                                }
-                                else [[unlikely]] {
-                                        log_event(std::format("[{}] [{}] Container Runtime Error: Unknown or unsupported namespace requested -> {}.",
-                                                                std::chrono::system_clock::now(), m_container_config.container_id,
-                                                                namespace_str));
-                                        _exit(EXIT_FAILURE);
-                                }
-
-                                int fd{open(path.c_str(), O_RDONLY | O_CLOEXEC)};
-                                if (fd == -1) [[unlikely]] {
-                                        log_event(std::format("[{}] [{}] Container Runtime Error: Failed to open namespace path: {}.",
-                                                                std::chrono::system_clock::now(), m_container_config.container_id,
-                                                                path.string()));
-                                        _exit(EXIT_FAILURE);
-                                }
-
-                                if (setns(fd, nstype) == -1) [[unlikely]] {
-                                        log_event(std::format("[{}] [{}] Container Runtime Error: setns failed for path: {}. Errno: {}",
-                                                                std::chrono::system_clock::now(), m_container_config.container_id,
-                                                                path.string(), errno));
-                                        close(fd);
-                                        _exit(EXIT_FAILURE);
-                                }
-                                close(fd);
-                        }
-                }
-        }
-
-        if (unshare(flags) == -1) [[unlikely]] {
-                log_event(std::format("[{}] [{}] Container Runtime Error: unshare failed.",
-                                        chrono::system_clock::now(), m_container_config.container_id));
-                _exit(EXIT_FAILURE);
-        }
-
         if(setgroups(0, NULL) == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: setgroups failed.",
                                         chrono::system_clock::now(), m_container_config.container_id));

@@ -35,12 +35,6 @@ namespace OCIRuntime {
                 {"util_clamp_max", SCHED_FLAG_UTIL_CLAMP_MAX}
         };
 
-        const std::unordered_map<std::string, int> IOPRIO_CLASS_STR_MAP {
-                {"rt", IOPRIO_CLASS_RT},
-                {"be", IOPRIO_CLASS_BE},
-                {"idle", IOPRIO_CLASS_IDLE}
-        };
-
         const std::unordered_map<std::string, int> RLIMIT_STR_MAP {
                 {"cpu", RLIMIT_CPU},
                 {"fsize", RLIMIT_FSIZE},
