@@ -42,21 +42,21 @@ auto Mount::_private(const fs::path& fs) -> bool {
 }
 
 auto Mount::_proc() -> bool {
-        if (mount("proc","/proc", "proc", MS_NOEXEC | MS_NODEV | MS_NOSUID, NULL) == -1) [[unlikely]] {
+        if (mount("proc","./proc", "proc", MS_NOEXEC | MS_NODEV | MS_NOSUID, NULL) == -1) [[unlikely]] {
                 return false;
         }
         return true;
 }
 
 auto Mount::_sys() -> bool {
-        if (mount("sysfs","/sys", "sysfs", MS_RDONLY | MS_NOEXEC | MS_NODEV | MS_NOSUID, NULL) == -1) [[unlikely]] {
+        if (mount("sysfs","./sys", "sysfs", MS_RDONLY | MS_NOEXEC | MS_NODEV | MS_NOSUID, NULL) == -1) [[unlikely]] {
                 return false;
         }
         return true;
 }
 
 auto Mount::_dev() -> bool {
-        if (mount("tmpfs","/dev", "tmpfs", MS_NOSUID | MS_STRICTATIME, "mode=755,size=65536K") == -1) [[unlikely]] {
+        if (mount("tmpfs","./dev", "tmpfs", MS_NOSUID | MS_STRICTATIME, "mode=755,size=65536K") == -1) [[unlikely]] {
                 return false;
         }
         return true;
@@ -70,7 +70,7 @@ auto Mount::_tmpfs(const fs::path& fs, const std::string& opts) -> bool {
 }
 
 auto Mount::_devpts(const fs::path& fs, const std::string& opts) -> bool {
-        if (mount("devpts", fs.c_str(), "devpts", MS_NOEXEC | MS_NOSUID, opts.c_str()) == -1) [[unlikely]] {
+        if (mount("devpts", fs.c_str(), "devpts", MS_NOSUID, opts.c_str()) == -1) [[unlikely]] {
                 return false;
         }
         return true;

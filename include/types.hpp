@@ -98,6 +98,11 @@ struct Status {
                 bool m_ok{false};
 };
 
+struct SubIDRange {
+    uint32_t start{};
+    uint32_t count{};
+};
+
 struct ContainerType {
         std::vector<std::pair<std::string, std::string>> volumes{};
         std::vector<std::string> devices{};
@@ -130,7 +135,7 @@ struct DeviceType {
 };
 
 struct NetworkType{
-        std::vector<std::pair<int, int>> ports{};
+        std::vector<std::pair<std::string, std::string>> ports{};
         std::string container_id{};
         std::string created_at{};
 };

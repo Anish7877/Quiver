@@ -7,12 +7,13 @@
 #include <iostream>
 #include <string>
 #include <unistd.h>
+#include <fcntl.h>
 
-auto PastaNetwork::setup_networking(pid_t container_pid, const OCIRuntime::Network& networks) -> void {
+auto PastaNetwork::setup_networking(pid_t container_pid, const OCIRuntime::Network& networks) -> pid_t {
         fs::path pasta_path{Utils::find_program_path("pasta")};
         if (pasta_path.empty()) {
                 std::cerr << "Network Error: 'pasta' executable not found on host.\n";
-                return;
+                return -1;
         }
         std::string container_pid_str{std::to_string(container_pid)};
 
@@ -43,16 +44,24 @@ auto PastaNetwork::setup_networking(pid_t container_pid, const OCIRuntime::Netwo
 
         pid_t pasta_pid{fork()};
         if (pasta_pid == -1) [[unlikely]] {
-                std::cerr << std::format("Network Error: pasta fork failed -> '{}'.", std::strerror(errno)) << '\n';
-                return;
+                std::cerr << std::format("Network Error: pasta fork failed -> '{}'.\n", std::strerror(errno)) << '\n';
+                return -1;
         }
         if (pasta_pid == 0) {
                 if (setsid() == -1) {
-                        std::cerr << std::format("Network Error: setsid failed -> '{}'.", std::strerror(errno)) << '\n';
+                        std::cerr << std::format("Network Error: setsid failed -> '{}'.\n", std::strerror(errno)) << '\n';
                         _exit(EXIT_FAILURE);
+                }
+                int null_fd{open("/dev/null", O_RDWR)};
+                if (null_fd != -1) {
+                        dup2(null_fd, STDIN_FILENO);
+                        dup2(null_fd, STDOUT_FILENO);
+                        dup2(null_fd, STDERR_FILENO);
+                        close(null_fd);
                 }
                 execv(pasta_path.c_str(), c_args.data());
                 std::cerr << std::format("Network Fatal: execv failed for pasta -> '{}'.\n", std::strerror(errno));
                 _exit(EXIT_FAILURE);
         }
+        return pasta_pid;
 }

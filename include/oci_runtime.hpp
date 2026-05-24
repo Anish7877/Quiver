@@ -163,6 +163,10 @@ namespace OCIRuntime {
                 bool value{};
         };
 
+        struct Detach {
+                bool value{};
+        };
+
         struct ConsoleSize {
                 std::uint32_t height{};
                 std::uint32_t width{};
@@ -171,7 +175,7 @@ namespace OCIRuntime {
         struct User {
                 uid_t uid{};
                 gid_t gid{};
-                std::uint32_t umask{};
+                mode_t umask{};
                 std::vector<gid_t> additional_gids{};
         };
 
@@ -196,7 +200,7 @@ namespace OCIRuntime {
         };
 
         struct Args {
-                std::vector<const char*> value{};
+                std::vector<std::string> value{};
         };
 
         struct OomScoreAdj {

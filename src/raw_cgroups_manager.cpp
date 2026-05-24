@@ -87,13 +87,13 @@ auto RawCGroupsManager::set_io_max(uint64_t major, uint64_t minor, const IOLimit
                 value += std::format(" rbps={}", io_limits.rbps);
         }
         if (io_limits.wbps > 0) {
-                value += std::format(" wbps={}", io_limits.rbps);
+                value += std::format(" wbps={}", io_limits.wbps);
         }
         if (io_limits.riops > 0) {
-                value += std::format(" riops={}", io_limits.rbps);
+                value += std::format(" riops={}", io_limits.riops);
         }
         if (io_limits.wiops > 0) {
-                value += std::format(" wiops={}", io_limits.rbps);
+                value += std::format(" wiops={}", io_limits.wiops);
         }
 
         try {
@@ -105,7 +105,7 @@ auto RawCGroupsManager::set_io_max(uint64_t major, uint64_t minor, const IOLimit
 }
 
 auto RawCGroupsManager::set_io_weight(uint64_t major, uint64_t minor, uint64_t weight) -> void {
-        if (weight < 0) weight = 1;
+        if (weight == 0) weight = 1;
         if (weight > 10000) weight = 10000;
 
         std::string value{std::format("{}:{} {}", major, minor, weight)};
@@ -170,18 +170,28 @@ auto RawCGroupsManager::write_cgroups_file(const std::string& filename, const st
         Utils::write_file(target_path, value);
 }
 
+auto RawCGroupsManager::stop() -> void {
+        if (!m_cgroups_path.empty()) {
+                try {
+                        Utils::remove_directory(m_cgroups_path);
+                }
+                catch (const std::exception& e) {
+                        std::cerr << e.what() << '\n';
+                }
+        }
+}
 
 auto RawCGroupsManager::resolve_cgroups_path(const fs::path& delegated_path) -> fs::path {
         if (geteuid() == 0) {
                 std::ifstream file{"/proc/self/cgroup"};
                 if (!file.is_open()) {
-                        throw std::runtime_error("RawCGroups Manager Error: Cannot open /proc/self/cgroup.");
+                        throw std::runtime_error("RawCGroups Manager Error: Cannot open /proc/self/cgroup.\n");
                 }
                 std::string line{};
                 std::getline(file, line);
                 auto pos{line.find("0::")};
                 if (pos == std::string::npos) {
-                        throw std::runtime_error("RawCGroups Manager Error: CGroups v2 is not being used.");
+                        throw std::runtime_error("RawCGroups Manager Error: CGroups v2 is not being used.\n");
                 }
                 std::string cgroups_suffix{line.substr(pos+3)};
                 return fs::path("/sys/fs/cgroup") / fs::relative(cgroups_suffix, "/");
@@ -191,21 +201,10 @@ auto RawCGroupsManager::resolve_cgroups_path(const fs::path& delegated_path) -> 
                         throw std::runtime_error(std::format(
                                                 "RawCgroups Manager Error: The directory {} does not exist. "
                                                 "Because systemd is not present, your system administrator must manually "
-                                                "create this directory and grant your user ownership of it to use resource limits.",
+                                                "create this directory and grant your user ownership of it to use resource limits.\n",
                                                 delegated_path.string()
                                                 ));
                 }
                 return delegated_path;
-        }
-}
-
-RawCGroupsManager::~RawCGroupsManager() {
-        if (!m_cgroups_path.empty()) {
-                try {
-                        Utils::remove_directory(m_cgroups_path);
-                }
-                catch (const std::exception& e) {
-                        std::cerr << e.what() << '\n';
-                }
         }
 }

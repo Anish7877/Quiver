@@ -18,6 +18,10 @@ auto LogJobProcessor::init() -> void {
         m_container_monitor_log_path = Utils::get_log_path("container_monitor");
         m_database_log_path = Utils::get_log_path("database");
         m_log_processor_log_path = Utils::get_log_path("log_processor");
+        Utils::ensure_file(m_container_log_path);
+        Utils::ensure_file(m_container_monitor_log_path);
+        Utils::ensure_file(m_database_log_path);
+        Utils::ensure_file(m_log_processor_log_path);
         m_log_file.open(m_log_processor_log_path, std::ios::app);
 
         m_value_heap = &ValueHeap::get_instance();
@@ -25,6 +29,7 @@ auto LogJobProcessor::init() -> void {
         if (!m_value_heap->ok()) [[unlikely]] {
                 throw std::runtime_error(m_value_heap->get_error());
         }
+        m_log_command_queue = &LoggerCommandQueue::get_instance();
         m_log_command_queue->map_buffer(Utils::get_logger_command_queue_buf_name(), true);
         if (!m_log_command_queue->ok()) [[unlikely]] {
                 throw std::runtime_error(m_log_command_queue->get_error());
@@ -42,14 +47,24 @@ auto LogJobProcessor::process_job() -> void {
                                         }
                                         this->route_job(log_data.value());
                                 }
-                                while(true) {
-                                        auto log_data{m_log_command_queue->atomic_pop()};
-                                        if (log_data == std::nullopt) {
-                                                break;
-                                        }
-                                        this->route_job(log_data.value());
-                                }
-                        });
+                      int retries_left = 50;
+
+                while(retries_left > 0) {
+                        auto log_data{m_log_command_queue->atomic_pop()};
+
+                        if (log_data != std::nullopt) {
+                                this->route_job(log_data.value());
+                                // We caught a late log! Reset the counter to
+                                // catch any immediate followers.
+                                retries_left = 50;
+                        } else {
+                                // The queue appears empty. Sleep for 2 milliseconds
+                                // and check again before we give up.
+                                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                                retries_left--;
+                        }
+                }
+        });
 }
 
 auto LogJobProcessor::stop() -> void {

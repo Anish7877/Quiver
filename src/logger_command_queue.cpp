@@ -16,7 +16,7 @@ auto LoggerCommandQueue::map_buffer(const std::string& buf_name, bool is_consume
         long page_size{sysconf(_SC_PAGESIZE)};
         if (page_size == -1) [[unlikely]] {
                 m_ok = false;
-		m_error = "Logger Command Queue Error: Failed to get system page size.";
+		m_error = "Logger Command Queue Error: Failed to get system page size.\n";
 		return;
         }
         std::size_t total_file_size{m_buf_size + page_size};
@@ -26,14 +26,14 @@ auto LoggerCommandQueue::map_buffer(const std::string& buf_name, bool is_consume
                 fd = shm_open(m_bufname.c_str(), O_CREAT | O_EXCL | O_RDWR, 0660);
                 if (fd == -1) [[unlikely]] {
                         m_ok = false;
-                        m_error = "Logger Command Queue Error: failed to create shared memory.";
+                        m_error = "Logger Command Queue Error: failed to create shared memory.\n";
                         return;
                 }
 
                 if (ftruncate(fd, total_file_size) == -1) [[unlikely]] {
                         close(fd);
                         m_ok = false;
-                        m_error = "Logger Command Queue Error: failed to set shared memory size.";
+                        m_error = "Logger Command Queue Error: failed to set shared memory size.\n";
                         return;
                 }
         }
@@ -41,7 +41,7 @@ auto LoggerCommandQueue::map_buffer(const std::string& buf_name, bool is_consume
                 fd = shm_open(m_bufname.c_str(), O_RDWR, 0660);
                 if (fd == -1) [[unlikely]] {
                         m_ok = false;
-                        m_error = "Logger Command Queue Error: Worker failed to connect.";
+                        m_error = "Logger Command Queue Error: Worker failed to connect.\n";
                         return;
                 }
         }
@@ -50,7 +50,7 @@ auto LoggerCommandQueue::map_buffer(const std::string& buf_name, bool is_consume
         if (header_addr == MAP_FAILED) [[unlikely]] {
                 close(fd);
                 m_ok = false;
-                m_error = "Logger Command Queue Error: failed to map header memory.";
+                m_error = "Logger Command Queue Error: failed to map header memory.\n";
                 return;
         }
 
@@ -58,7 +58,7 @@ auto LoggerCommandQueue::map_buffer(const std::string& buf_name, bool is_consume
         if (virtual_addr == MAP_FAILED) [[unlikely]] {
                 close(fd);
                 m_ok = false;
-                m_error = "Logger Command Queue Error: failed to reserve virtual memory.";
+                m_error = "Logger Command Queue Error: failed to reserve virtual memory.\n";
                 return;
         }
         close(fd);

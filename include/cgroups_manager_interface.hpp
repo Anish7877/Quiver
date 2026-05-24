@@ -29,4 +29,5 @@ class CGroupsManagerInterface {
                 virtual auto set_cpuset_cpus(const std::string&) -> void = 0;
                 virtual auto set_cpuset_mems(const std::string&) -> void = 0;
                 virtual auto set_freeze(const std::string&) -> void = 0;
+                virtual auto stop() -> void = 0;
 };

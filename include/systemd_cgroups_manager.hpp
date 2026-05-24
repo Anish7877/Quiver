@@ -22,6 +22,7 @@ class SystemdCGroupsManager : public CGroupsManagerInterface {
                 auto set_cpuset_cpus(const std::string&) -> void override;
                 auto set_cpuset_mems(const std::string&) -> void override;
                 auto set_freeze(const std::string&) -> void override;
+                auto stop() -> void override;
         private:
                 auto update_dbus_property(const std::string&, const sdbus::Variant&) -> void;
                 std::string m_container_id{};

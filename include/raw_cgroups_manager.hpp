@@ -6,7 +6,7 @@ namespace fs = std::filesystem;
 class RawCGroupsManager : public CGroupsManagerInterface {
         public:
                 explicit RawCGroupsManager(const std::string&, const fs::path&);
-                ~RawCGroupsManager();
+                ~RawCGroupsManager() = default;
                 RawCGroupsManager(const RawCGroupsManager&) = delete;
                 RawCGroupsManager(RawCGroupsManager&&) = delete;
                 auto operator=(const RawCGroupsManager&) -> RawCGroupsManager& = delete;
@@ -23,6 +23,7 @@ class RawCGroupsManager : public CGroupsManagerInterface {
                 auto set_cpuset_cpus(const std::string&) -> void override;
                 auto set_cpuset_mems(const std::string&) -> void override;
                 auto set_freeze(const std::string&) -> void override;
+                auto stop() -> void override;
         private:
                 auto write_cgroups_file(const std::string&, const std::string&) -> void;
                 auto resolve_cgroups_path(const fs::path& delegated_path) -> fs::path;

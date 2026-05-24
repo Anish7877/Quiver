@@ -19,6 +19,8 @@ class PtySessionManager : public Singleton<PtySessionManager>{
                 auto recv_master_fd(int) -> int;
                 auto ok() -> bool { return m_ok; }
                 auto get_master_fd() const -> int { return m_master_fd; }
+                auto get_slave_fd() const -> int { return m_slave_fd; }
+                auto get_slave_name() const -> std::string { return m_slave_name; }
                 auto get_error() -> std::string { return m_error; }
                 auto enable_raw_mode() -> void;
                 auto disable_raw_mode() -> void;

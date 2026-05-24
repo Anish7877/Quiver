@@ -15,7 +15,7 @@ auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_siz
         long page_size{sysconf(_SC_PAGESIZE)};
         if (page_size == -1) [[unlikely]] {
                 m_ok = false;
-                m_error = "Value Heap Error: Failed to get system page size.";
+                m_error = "Value Heap Error: Failed to get system page size.\n";
                 return;
         }
         std::size_t remainder{physical_size % page_size};
@@ -27,14 +27,14 @@ auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_siz
                 fd = shm_open(m_buf_name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0660);
                 if (fd == -1) [[unlikely]] {
                         m_ok = false;
-                        m_error = "Value Heap Error: failed to create shared memory.";
+                        m_error = "Value Heap Error: failed to create shared memory.\n";
                         return;
                 }
 
                 if (ftruncate(fd, total_file_size) == -1) [[unlikely]] {
                         close(fd);
                         m_ok = false;
-                        m_error = "Value Heap Error: failed to set shared memory size.";
+                        m_error = "Value Heap Error: failed to set shared memory size.\n";
                         return;
                 }
         }
@@ -42,7 +42,7 @@ auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_siz
                 fd = shm_open(m_buf_name.c_str(), O_RDWR, 0660);
                 if (fd == -1) [[unlikely]] {
                         m_ok = false;
-                        m_error = "Value Heap Error: Worker failed to connect.";
+                        m_error = "Value Heap Error: Worker failed to connect.\n";
                         return;
                 }
         }
@@ -51,7 +51,7 @@ auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_siz
         if (header_addr == MAP_FAILED) [[unlikely]] {
                 close(fd);
                 m_ok = false;
-                m_error = "Value Heap Error: failed to map header memory.";
+                m_error = "Value Heap Error: failed to map header memory.\n";
                 return;
         }
 
@@ -59,7 +59,7 @@ auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_siz
         if (virtual_addr == MAP_FAILED) [[unlikely]] {
                 close(fd);
                 m_ok = false;
-                m_error = "Value Heap Error: failed to reserve virtual memory.";
+                m_error = "Value Heap Error: failed to reserve virtual memory.\n";
                 return;
         }
 
@@ -70,7 +70,7 @@ auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_siz
 
         if (first_half == MAP_FAILED || second_half == MAP_FAILED) [[unlikely]] {
                 m_ok = false;
-                m_error = "Value Heap Error: failed to mirror memory mapping.";
+                m_error = "Value Heap Error: failed to mirror memory mapping.\n";
                 return;
         }
 

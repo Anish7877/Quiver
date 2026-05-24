@@ -7,7 +7,7 @@
 CapsManager::CapsManager(const OCIRuntime::Capabilities& capabilities) {
         m_cap = cap_init();
         if (m_cap == nullptr) [[unlikely]] {
-                throw std::runtime_error("Capabilities Manager Error: Failed to initialize cap state.");
+                throw std::runtime_error("Capabilities Manager Error: Failed to initialize cap state.\n");
         }
         m_permitted.reserve(capabilities.permitted.size());
         m_effective.reserve(capabilities.effective.size());
@@ -33,7 +33,7 @@ auto CapsManager::apply() -> void {
                 if (std::find(m_bounding.begin(), m_bounding.end(), cap_value) == m_bounding.end()) {
                         if (prctl(PR_CAPBSET_DROP, cap_value, 0, 0, 0) == -1) {
                                 if (errno != EINVAL && errno != EPERM) { // EPERM means it's already gone
-                                        throw std::runtime_error(std::format("Capabilities Manager Error: Failed to drop cap {} from bounding set.", i));
+                                        throw std::runtime_error(std::format("Capabilities Manager Error: Failed to drop cap {} from bounding set.\n", i));
                                 }
                         }
                 }
@@ -44,7 +44,7 @@ auto CapsManager::apply() -> void {
         auto cap_set{[&](cap_flag_t flag, const std::vector<cap_value_t>& caps) {
                 if (caps.empty()) return;
                 if (cap_set_flag(m_cap, flag, static_cast<int>(caps.size()), caps.data(), CAP_SET) == -1) {
-                        throw std::runtime_error("Capabilities Manager Error: Failed to set caps flag.");
+                        throw std::runtime_error("Capabilities Manager Error: Failed to set caps flag.\n");
                 }
         }};
 
@@ -57,7 +57,7 @@ auto CapsManager::apply() -> void {
                         std::cerr << "WARN: Some requested capabilities were rejected by the host kernel.\n";
                 }
                 else {
-                        throw std::runtime_error("Capabilities Manager Error: Failed to apply capabilities.");
+                        throw std::runtime_error("Capabilities Manager Error: Failed to apply capabilities.\n");
                 }
         }
 
@@ -67,7 +67,7 @@ auto CapsManager::apply() -> void {
                                 std::cerr << std::format("WARN: System denied Ambient capability {}.\n", cap);
                                 continue;
                         }
-                        throw std::runtime_error(std::format("Capabilities Manager Error: Failed to raise ambient cap {}.", cap));
+                        throw std::runtime_error(std::format("Capabilities Manager Error: Failed to raise ambient cap {}.\n", cap));
                 }
         }
 }
@@ -85,7 +85,7 @@ auto CapsManager::resolve_caps(const std::vector<std::string>& caps, std::vector
 }
 
 CapsManager::~CapsManager() {
-        if (m_cap != nullptr) [[unlikely]] {
+        if (m_cap != nullptr) [[likely]] {
                 cap_free(m_cap);
         }
 }

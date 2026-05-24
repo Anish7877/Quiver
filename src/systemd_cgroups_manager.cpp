@@ -207,12 +207,28 @@ auto SystemdCGroupsManager::set_freeze(const std::string& bit) -> void {
                                      .withArguments(unit_name);
                 }
                 else {
-                        throw std::invalid_argument(std::format("Invalid freeze bit '{}'. Expected '1' or '0'.", bit));
+                        throw std::invalid_argument(std::format("Invalid freeze bit '{}'. Expected '1' or '0'.\n", bit));
                 }
 
         }
         catch (const sdbus::Error& e) {
                 throw std::runtime_error(std::format("CGroups Manager Error: DBus Freeze/Thaw failed -> {}", e.getMessage()));
+        }
+}
+
+auto SystemdCGroupsManager::stop() -> void {
+        const std::string unit_name{std::format("quiver-{}.scope", m_container_id)};
+        try {
+                auto connection{sdbus::createSessionBusConnection()};
+                auto systemd_proxy{sdbus::createProxy(*connection,
+                                sdbus::ServiceName{"org.freedesktop.systemd1"},
+                                sdbus::ObjectPath{"/org/freedesktop/systemd1"})};
+
+                systemd_proxy->callMethod("StopUnit")
+                        .onInterface("org.freedesktop.systemd1.Manager")
+                        .withArguments(unit_name, "replace");
+        }
+        catch (...) {
         }
 }
 

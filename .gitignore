@@ -3,6 +3,7 @@
 /test_out/*
 /gen_schemas/*
 *.txt
+*.sh
 
 .vscode/**
 *.code-workspace

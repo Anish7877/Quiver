@@ -150,16 +150,16 @@ auto ContainerDbManager::process_delete_job(const DatabaseJobData& job, Status& 
 }
 
 auto ContainerDbManager::log_event(const std::string& log_data) -> void {
-                std::size_t offset{};
-                while (!m_value_heap->write_job_data(log_data, offset)) {
-                        std::this_thread::yield();
-                };
-                m_log_job_data.target_log = TargetLog::DBLOG;
-                m_log_job_data.value_offset = offset;
-                m_log_job_data.value_length = log_data.size();
-                while (!m_log_cmd_queue->atomic_push(m_log_job_data)) {
-                        std::this_thread::yield();
-                }
+        std::size_t offset{};
+        while (!m_value_heap->write_job_data(log_data, offset)) {
+                std::this_thread::yield();
+        };
+        m_log_job_data.target_log = TargetLog::DBLOG;
+        m_log_job_data.value_offset = offset;
+        m_log_job_data.value_length = log_data.size();
+        while (!m_log_cmd_queue->atomic_push(m_log_job_data)) {
+                std::this_thread::yield();
+        }
 }
 
 ContainerDbManager::~ContainerDbManager() {

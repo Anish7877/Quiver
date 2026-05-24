@@ -1,9 +1,9 @@
-CXX ?= g++
+CXX ?= g+
 MIN_CXX_VER = 15
 STD = -std=c++20
 OPTFLAGS = -O3
 CXXFLAGS = -Wall -Wextra -Wpedantic -march=native
-LDFLAGS = -lcpr -lcurl -lz -pthread -lutil -lrocksdb -lblake3
+LDFLAGS = -lcpr -lcurl -lz -lpthread -lutil -lrocksdb -lblake3 -lsdbus-c++ -lseccomp -lcap -lrt
 DEBUG_FLAGS = -g
 DEPFLAGS = -MMD -MP
 
@@ -46,7 +46,7 @@ CXX_VERSION := $(shell $(CXX) -dumpversion | cut -f1 -d.)
 IS_SUPPORTED := $(shell [ "$(CXX_VERSION)" -ge "$(MIN_CXX_VER)" ] && echo true || echo false)
 FLATC_CC_PATH = $(shell command -v $(FLATC_CC) 2> /dev/null)
 
-ifeq ($(CXX_PATH),)
+ifeq ($(CXX_PATH),false)
 	$(error "Error: '$(CXX)' not found.")
 endif
 
@@ -54,7 +54,7 @@ ifeq ($(IS_SUPPORTED),false)
 	$(error "Error: '$(CXX)' >= $(MIN_CXX_VER)")
 endif
 
-ifeq ($(FLATC_CC_PATH),)
+ifeq ($(FLATC_CC_PATH),false)
 	$(error "Error: '$(FLATC_CC)' not found.")
 endif
 

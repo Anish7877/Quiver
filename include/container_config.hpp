@@ -5,10 +5,15 @@ struct ContainerConfig {
         std::string container_id{};
         std::string hostname{};
         std::string domain_name{};
+        std::string pty_slave_name{};
+        int pty_slave_fd{};
+        int control_sock{};
         pid_t pid{};
+        pid_t net_pid{};
         bool vfs{};
         OCIRuntime::Root rootfs{};
         OCIRuntime::Terminal terminal{};
+        OCIRuntime::Detach detach{};
         OCIRuntime::ConsoleSize console_size{};
         OCIRuntime::User user{};
         OCIRuntime::UidMapping uid_mapping{};

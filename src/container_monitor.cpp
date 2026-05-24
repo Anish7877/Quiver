@@ -1,32 +1,41 @@
+#include "cgroups_manager_creator.hpp"
+#include "cgroups_manager_interface.hpp"
 #include "container_monitor.hpp"
 #include "container_runtime.hpp"
+#include "logger_command_queue.hpp"
 #include "pasta_network.hpp"
 #include "pty_session_manager.hpp"
+#include "scoped_guard.hpp"
 #include "types.hpp"
-#include "value_heap.hpp"
-#include "logger_command_queue.hpp"
 #include "utils.hpp"
-#include "cgroups_manager_interface.hpp"
-#include "cgroups_manager_creator.hpp"
-#include <chrono>
-#include <iostream>
+#include "value_heap.hpp"
+#include <atomic>
+#include <csignal>
 #include <cerrno>
+#include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <format>
 #include <fstream>
-#include <cstdlib>
+#include <iostream>
 #include <memory>
+#include <poll.h>
+#include <pty.h>
+#include <pwd.h>
 #include <sched.h>
+#include <stdexcept>
 #include <sys/ioctl.h>
 #include <sys/poll.h>
+#include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
-#include <sys/socket.h>
-#include <stdexcept>
 #include <thread>
 #include <unistd.h>
-#include <poll.h>
+#include <vector>
+#include <fcntl.h>
 namespace chrono = std::chrono;
+
+ContainerMonitor::ContainerMonitor() = default;
 
 auto ContainerMonitor::init(const ContainerConfig& config) -> void {
         m_container_config = config;
@@ -45,7 +54,6 @@ auto ContainerMonitor::init(const ContainerConfig& config) -> void {
 }
 
 auto ContainerMonitor::setup_usernamespace() -> void {
-        setup_set_groups();
         setup_uid_map();
         setup_gid_map();
 }
@@ -53,45 +61,6 @@ auto ContainerMonitor::setup_usernamespace() -> void {
 auto ContainerMonitor::start_logging(int master_fd) -> bool {
         m_logging_active.store(true, std::memory_order_release);
         m_log_worker = std::thread([&]() {
-                        if(m_container_config.terminal.value) {
-                        pollfd fds[1];
-                        fds[0].fd = master_fd;
-                        fds[0].events = POLLIN;
-
-                        while(m_logging_active.load(std::memory_order_acquire) && fds[0].fd != -1) {
-                        int ret{poll(fds, 1, 100)};
-
-                        if (ret < 0) {
-                        if(errno == EINTR) continue;
-                        break;
-                        }
-                        if (ret == 0) continue;
-
-                        if (fds[0].fd != -1 && (fds[0].revents & POLLIN)) {
-                        char buffer[4096];
-                        ssize_t bytes_read{read(fds[0].fd, buffer, sizeof(buffer))};
-
-                        if (bytes_read > 0) {
-                        std::string log_data{std::format("[{}] [{}] [PTY] {}.",
-                                        chrono::system_clock::now(),
-                                        m_container_id,
-                                        std::string(buffer, bytes_read))};
-
-                        this->log_event(log_data, TargetLog::CONTAINERLOG);
-
-                        }
-                        }
-
-                        if (fds[0].fd != -1 && (fds[0].revents & POLLHUP)) {
-                                fds[0].fd = -1;
-                        }
-                        }
-
-                        if (master_fd != -1) {
-                                close(master_fd);
-                        }
-                        }
-                        else {
                                 pollfd fds[2];
                                 fds[0].fd = m_std_out_fd[0];
                                 fds[0].events = POLLIN;
@@ -113,9 +82,9 @@ auto ContainerMonitor::start_logging(int master_fd) -> bool {
                                                 char buffer[4096];
                                                 ssize_t bytes_read{read(fds[0].fd, buffer, sizeof(buffer))};
                                                 if (bytes_read > 0) {
-                                                        std::string log_data{std::format("[{}] [{}] [STDOUT] {}.",
-                                                                        chrono::system_clock::now(),
-                                                                        m_container_id,
+                                                        std::cout << std::string(buffer, bytes_read);
+                                                        std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
+                                                                        chrono::system_clock::now(), m_container_config.container_id,
                                                                         std::string(buffer, bytes_read))};
                                                         this->log_event(log_data, TargetLog::CONTAINERLOG);
                                                 }
@@ -127,10 +96,10 @@ auto ContainerMonitor::start_logging(int master_fd) -> bool {
                                         if (fds[1].fd != -1 && (fds[1].revents & POLLIN)) {
                                                 char buffer[4096];
                                                 ssize_t bytes_read{read(fds[1].fd, buffer, sizeof(buffer))};
-                                                if (bytes_read > 1) {
-                                                        std::string log_data{std::format("[{}] [{}] [STDERR] {}.",
-                                                                        chrono::system_clock::now(),
-                                                                        m_container_id,
+                                                if (bytes_read > 0) {
+                                                        std::cout << std::string(buffer, bytes_read);
+                                                        std::string log_data{std::format("[{}] [{}] [STDERR] {}.\n",
+                                                                        chrono::system_clock::now(), m_container_config.container_id,
                                                                         std::string(buffer, bytes_read))};
                                                         this->log_event(log_data, TargetLog::CONTAINERLOG);
                                                 }
@@ -143,8 +112,78 @@ auto ContainerMonitor::start_logging(int master_fd) -> bool {
 
                                 if (m_std_out_fd[0] != -1) close(m_std_out_fd[0]);
                                 if (m_std_err_fd[0] != -1) close(m_std_err_fd[0]);
+                        });
+        return true;
+}
+
+auto ContainerMonitor::foreground_logging() -> bool {
+        pollfd fds[2];
+
+        fds[0].fd = m_std_out_fd[0];
+        fds[0].events = POLLIN;
+
+        fds[1].fd = m_std_err_fd[0];
+        fds[1].events = POLLIN;
+
+        int open_pipes{2};
+
+        while (open_pipes > 0) {
+                int ret = poll(fds, 2, -1);
+
+                if (ret == -1) {
+                        if (errno == EINTR)
+                                continue;
+
+                        return EXIT_FAILURE;
+                }
+
+                if (fds[0].fd != -1 && (fds[0].revents & POLLIN)) {
+                        char buffer[4096];
+
+                        ssize_t n = read(fds[0].fd, buffer, sizeof(buffer));
+
+                        if (n > 0) {
+                                if (!Utils::write_all(STDOUT_FILENO, buffer, n)) {
+                                        return false;
+                                }
+                                std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
+                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                std::string(buffer, n))};
+                                this->log_event(log_data, TargetLog::CONTAINERLOG);
                         }
-        });
+                }
+
+                if (fds[0].fd != -1 && (fds[0].revents & (POLLHUP | POLLERR))) {
+
+                        close(fds[0].fd);
+                        fds[0].fd = -1;
+                        --open_pipes;
+                }
+
+                if (fds[1].fd != -1 && (fds[1].revents & POLLIN)) {
+                        char buffer[4096];
+
+                        ssize_t n = read(fds[1].fd, buffer, sizeof(buffer));
+
+                        if (n > 0) {
+                                if (!Utils::write_all(STDERR_FILENO, buffer, n)) {
+                                        return false;
+                                }
+                                std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
+                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                std::string(buffer, n))};
+                                this->log_event(log_data, TargetLog::CONTAINERLOG);
+                        }
+                }
+
+                if (fds[1].fd != -1 && (fds[1].revents & (POLLHUP | POLLERR))) {
+
+                        close(fds[1].fd);
+                        fds[1].fd = -1;
+                        --open_pipes;
+                }
+        }
+
         return true;
 }
 
@@ -152,256 +191,352 @@ auto ContainerMonitor::invoke_container() -> void {
         m_monitor_pid = fork();
 
         if (m_monitor_pid == -1) [[unlikely]] {
-                throw std::runtime_error(std::format("[{}] [{}] Container Monitor Error: fork failed -> {}.",
+                throw std::runtime_error(std::format("[{}] [{}] Container Monitor Error: fork failed -> {}.\n",
                                         chrono::system_clock::now(), m_container_config.container_id, std::strerror(errno)));
         }
-        if(m_monitor_pid > 0) return;
-        if (setsid() == -1) [[unlikely]] {
-                std::string err{std::format("[{}] [{}] Container Monitor Fatal: setsid failed -> {}.",
-                                chrono::system_clock::now(), m_container_config.container_id, std::strerror(errno))};
-                log_event(err, TargetLog::CONTAINERMON);
+
+        if (m_monitor_pid > 0) {
+
+                if (m_container_config.terminal.value || m_container_config.detach.value) {
+                        return;
+                }
+
+                int status{};
+                while (waitpid(m_monitor_pid, &status, 0) == -1) {
+                        if (errno == EINTR)
+                                continue;
+
+                        return;
+                }
+                if (WIFEXITED(status)) {
+                        exit(WEXITSTATUS(status));
+                }
+                if (WIFSIGNALED(status)) {
+                        exit(128 + WTERMSIG(status));
+                }
                 return;
+        }
+
+        if (m_container_config.detach.value) {
+                if (setsid() == -1) [[unlikely]] {
+                        std::cerr << "Daemon Fatal: setsid failed.\n";
+                        _exit(EXIT_FAILURE);
+                }
         }
         if (!attach_to_stdio()) [[unlikely]] {
-                log_event(std::format("[{}] [{}] Container Monitor Fatal: Failed to attach stdio.",
-                                        chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERMON);
-                return;
-        }
-        if (pipe(m_container_to_monitor_fd) == -1 || pipe(m_monitor_to_container_fd) == -1) [[unlikely]] {
-                std::string err{std::format("[{}] [{}] Container Monitor Fatal: pipe creation failed.",
-                                chrono::system_clock::now(), m_container_config.container_id)};
-                log_event(err, TargetLog::CONTAINERMON);
-                return;
-        }
-        m_container_pid = fork();
-        if (m_container_pid == -1) [[unlikely]] {
-                std::string err{std::format("[{}] [{}] Container Monitor Error: fork failed -> {}.",
-                                chrono::system_clock::now(), m_container_config.container_id, std::strerror(errno))};
-                log_event(err, TargetLog::CONTAINERMON);
-                return;
-        }
-        if (m_container_pid == 0) {
-                close(m_container_to_monitor_fd[0]);
-                close(m_monitor_to_container_fd[1]);
-
-                int flags{};
-                for (const auto& [path, namespace_str] : m_container_config.namespaces) {
-                        auto it{OCIRuntime::NAMESPACE_STR_MAP.find(namespace_str)};
-                        if (path.empty()) {
-                                if (it != OCIRuntime::NAMESPACE_STR_MAP.end()) {
-                                        flags |= it->second;
-                                }
-                                else [[unlikely]] {
-                                        log_event(std::format("[{}] [{}] Container Runtime Error: Unknown or unsupported namespace requested -> {}.",
-                                                                std::chrono::system_clock::now(), m_container_config.container_id,
-                                                                namespace_str), TargetLog::CONTAINERLOG);
-                                        _exit(EXIT_FAILURE);
-                                }
-                        }
-                        else {
-                                if (Utils::file_exists(path)) {
-                                        int nstype{0};
-
-                                        if (it != OCIRuntime::NAMESPACE_STR_MAP.end()) {
-                                                nstype = it->second;
-                                        }
-                                        else [[unlikely]] {
-                                                log_event(std::format("[{}] [{}] Container Runtime Error: Unknown or unsupported namespace requested -> {}.",
-                                                                        std::chrono::system_clock::now(), m_container_config.container_id,
-                                                                        namespace_str), TargetLog::CONTAINERLOG);
-                                                _exit(EXIT_FAILURE);
-                                        }
-
-                                        int fd{open(path.c_str(), O_RDONLY | O_CLOEXEC)};
-                                        if (fd == -1) [[unlikely]] {
-                                                log_event(std::format("[{}] [{}] Container Runtime Error: Failed to open namespace path: {}.",
-                                                                        std::chrono::system_clock::now(), m_container_config.container_id,
-                                                                        path.string()), TargetLog::CONTAINERLOG);
-                                                _exit(EXIT_FAILURE);
-                                        }
-
-                                        if (setns(fd, nstype) == -1) [[unlikely]] {
-                                                log_event(std::format("[{}] [{}] Container Runtime Error: setns failed for path: {}. Errno: {}",
-                                                                        std::chrono::system_clock::now(), m_container_config.container_id,
-                                                                        path.string(), errno), TargetLog::CONTAINERLOG);
-                                                close(fd);
-                                                _exit(EXIT_FAILURE);
-                                        }
-                                        close(fd);
-                                }
-                                else [[unlikely]] {
-                                        log_event(std::format("[{}] [{}] Container Runtime Error: Namespace path doesn't exist: {}.",
-                                                                std::chrono::system_clock::now(), m_container_config.container_id,
-                                                                path.string()), TargetLog::CONTAINERLOG);
-                                        _exit(EXIT_FAILURE);
-                                }
-                        }
-                }
-                if (unshare(CLONE_NEWUSER | flags) == -1) [[unlikely]] {
-                        log_event(std::format("[{}] [{}] Container Runtime Error: unshare(CLONE_NEWUSER) failed.",
-                                                chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
-                        _exit(EXIT_FAILURE);
-                }
-                char ready{'1'};
-                if (write(m_container_to_monitor_fd[1], &ready, 1) == -1) [[unlikely]] {
-                        log_event(std::format("[{}] [{}] Container Runtime Error: write to container_to_monitor_fd failed.",
-                                                chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
-                        close(m_container_to_monitor_fd[1]);
-                        _exit(EXIT_FAILURE);
-                }
-                close(m_container_to_monitor_fd[1]);
-
-                char go{};
-                if (read(m_monitor_to_container_fd[0], &go, 1) != 1) [[unlikely]] {
-                        log_event(std::format("[{}] [{}] Container Runtime Error: read failed from monitor_to_container_fd.",
-                                                chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
-                        close(m_monitor_to_container_fd[0]);
-                        _exit(EXIT_FAILURE);
-                }
-                close(m_monitor_to_container_fd[0]);
-                if (m_container_config.terminal.value) {
-                        close(m_control_sock[0]);
-
-                        m_pty_session_manager->setup_pty();
-                        if (!m_pty_session_manager->ok()) [[unlikely]] {
-                                log_event(m_pty_session_manager->get_error(), TargetLog::CONTAINERMON);
-                                _exit(EXIT_FAILURE);
-                        }
-
-                        m_pty_session_manager->send_master_fd(m_control_sock[1], m_pty_session_manager->get_master_fd());
-                        if (!m_pty_session_manager->ok()) {
-                                log_event(m_pty_session_manager->get_error(), TargetLog::CONTAINERMON);
-                                _exit(EXIT_FAILURE);
-                        }
-                        setup_socket_connection();
-
-                        close(m_control_sock[1]);
-                        close(m_pty_session_manager->get_master_fd());
-                }
-                else {
-                        close(m_std_out_fd[0]);
-                        close(m_std_err_fd[0]);
-
-                        dup2(m_std_out_fd[1], STDOUT_FILENO);
-                        dup2(m_std_err_fd[1], STDERR_FILENO);
-
-                        close(m_std_out_fd[1]);
-                        close(m_std_err_fd[1]);
-                }
-                m_runtime = std::make_unique<ContainerRuntime>(m_container_config);
-                m_runtime->run_container();
+                std::cerr << "Daemon Fatal: Failed to attach stdio.\n";
                 _exit(EXIT_FAILURE);
         }
-        else {
-                close(m_monitor_to_container_fd[0]);
-                close(m_container_to_monitor_fd[1]);
-
-                try {
-                        m_cgroups_manager->attach_process(m_container_pid);
-                }
-                catch (const std::exception& e) {
-                        log_event(std::format("[{}] {}", chrono::system_clock::now(), e.what()), TargetLog::CONTAINERMON);
-                }
-                char buf{};
-                if (read(m_container_to_monitor_fd[0], &buf, 1) != 1) [[unlikely]] {
-                        log_event(std::format("[{}] [{}] Container Monitor Error: read from container_to_monitor_fd failed.",
-                                                chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
+        if (pipe(m_container_to_monitor_fd) == -1 || pipe(m_monitor_to_container_fd) == -1) [[unlikely]] {
+                std::cerr << "Daemon Fatal: pipe creation failed.\n";
+                _exit(EXIT_FAILURE);
+        }
+        ScopeGuard fork_guard{[this]() -> void {
                         close(m_container_to_monitor_fd[0]);
-                        return;
-                }
-                close(m_container_to_monitor_fd[0]);
-
-                setup_usernamespace();
-                PastaNetwork::setup_networking(m_container_pid, m_container_config.networks);
-
-                bool network_ready{false};
-                int max_retries{200};
-
-                while (max_retries > 0) {
-                        std::ifstream net_dev(std::format("/proc/{}/net/dev", m_container_pid));
-                        if (net_dev.is_open()) {
-                                std::string line;
-                                std::getline(net_dev, line);
-                                std::getline(net_dev, line);
-
-                                while (std::getline(net_dev, line)) {
-                                        if (line.find("lo:") == std::string::npos &&
-                                            line.find("sit0:") == std::string::npos &&
-                                            line.find("tunl0:") == std::string::npos &&
-                                            line.find(":") != std::string::npos) {
-                                                network_ready = true;
-                                                break;
-                                        }
-                                }
-                        }
-
-                        if (network_ready) {
-                                break;
-                        }
-
-                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                        max_retries--;
-                }
-
-                if (!network_ready) [[unlikely]] {
-                        log_event(std::format("[{}] Container Monitor Fatal: pasta failed to configure network within 1 second.",
-                                                m_container_config.container_id), TargetLog::CONTAINERLOG);
+                        close(m_container_to_monitor_fd[1]);
+                        close(m_monitor_to_container_fd[0]);
                         close(m_monitor_to_container_fd[1]);
-                        return;
                 }
-
-                char go_sig{'1'};
-                if (write(m_monitor_to_container_fd[1], &go_sig, 1) == -1) [[unlikely]] {
-                        log_event(std::format("[{}] Container Monitor Error: write to monitor_to_container_fd failed.",
-                                                m_container_config.container_id), TargetLog::CONTAINERLOG);
-                        close(m_monitor_to_container_fd[1]);
-                        return;
-                }
-                close(m_monitor_to_container_fd[1]);
-
-                int master_fd{-1};
-                if (m_container_config.terminal.value) {
-                        close(m_control_sock[1]);
-
-                        master_fd = m_pty_session_manager->recv_master_fd(m_control_sock[0]);
-                        if (!m_pty_session_manager->ok()) [[unlikely]] {
-                                log_event(m_pty_session_manager->get_error(), TargetLog::CONTAINERMON);
-                                return;
-                        }
-                        close(m_control_sock[0]);
-                }
-                else {
-                        close(m_std_out_fd[1]);
-                        close(m_std_err_fd[1]);
-                }
-                start_logging(master_fd);
-                int status{};
-                if (waitpid(m_container_pid, &status, 0) == -1) [[unlikely]] {
-                        log_event(std::format("[{}] [{}] Container Monitor Error: waitpid failed - '{}'.",
-                                                chrono::system_clock::now(), m_container_config.container_id, std::strerror(errno)),
-                                        TargetLog::CONTAINERMON);
-                        return;
-                }
+        };
+        m_container_pid = fork();
+        if (m_container_pid == -1) [[unlikely]] {
+                std::cerr << "Daemon Fatal: fork failed.\n";
+                _exit(EXIT_FAILURE);
+        }
+        if (m_container_pid == 0) {
+                fork_guard.dismiss();
+                run_container_child();
+        }
+        else {
+                fork_guard.dismiss();
+                m_container_config.pid = m_container_pid;
+                run_monitor_parent();
         }
 }
 
-auto ContainerMonitor::setup_set_groups() -> void {
-        fs::path set_groups_path{std::format("/proc/{}/setgroups", m_container_pid)};
-        std::string buf{"deny"};
-        Utils::write_file(set_groups_path, buf);
+auto ContainerMonitor::run_container_child() -> void {
+        close(m_container_to_monitor_fd[0]);
+        close(m_monitor_to_container_fd[1]);
+
+        int flags{resolve_namespaces()};
+        if (unshare(CLONE_NEWUSER | flags) == -1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: unshare(CLONE_NEWUSER) failed.\n",
+                                        chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
+                _exit(EXIT_FAILURE);
+        }
+        char ready{'1'};
+        if (write(m_container_to_monitor_fd[1], &ready, 1) == -1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: write to container_to_monitor_fd failed.\n",
+                                        chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
+                close(m_container_to_monitor_fd[1]);
+                _exit(EXIT_FAILURE);
+        }
+        close(m_container_to_monitor_fd[1]);
+
+        char go{};
+        if (read(m_monitor_to_container_fd[0], &go, 1) != 1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: read failed from monitor_to_container_fd.\n",
+                                        chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
+                close(m_monitor_to_container_fd[0]);
+                _exit(EXIT_FAILURE);
+        }
+        close(m_monitor_to_container_fd[0]);
+        if (m_container_config.terminal.value) {
+                close(m_control_sock[0]);
+                m_container_config.control_sock = m_control_sock[1];
+                //int null_fd = open("/dev/null", O_RDWR);
+                //if (null_fd != -1) {
+                //dup2(null_fd, STDIN_FILENO);
+                //dup2(null_fd, STDOUT_FILENO);
+                //dup2(null_fd, STDERR_FILENO);
+                //close(null_fd);
+                //}
+        }
+        else {
+                close(m_std_out_fd[0]);
+                close(m_std_err_fd[0]);
+                dup2(m_std_out_fd[1], STDOUT_FILENO);
+                dup2(m_std_err_fd[1], STDERR_FILENO);
+                close(m_std_out_fd[1]);
+                close(m_std_err_fd[1]);
+        }
+        m_runtime = std::make_unique<ContainerRuntime>(m_container_config);
+        m_runtime->run_container();
+        _exit(EXIT_FAILURE);
+}
+
+auto ContainerMonitor::run_monitor_parent() -> void {
+        close(m_monitor_to_container_fd[0]);
+        close(m_container_to_monitor_fd[1]);
+
+        try {
+                m_cgroups_manager->attach_process(m_container_pid);
+        }
+        catch (const std::exception& e) {
+                log_event(std::format("[{}] {}", chrono::system_clock::now(), e.what()), TargetLog::CONTAINERMON);
+        }
+        ScopeGuard cgroups_guard{[this]() -> void {
+                m_cgroups_manager->stop();
+                kill(m_container_pid, SIGKILL);
+        }};
+
+        char buf{};
+        if (read(m_container_to_monitor_fd[0], &buf, 1) != 1) [[unlikely]] {
+                std::cerr << "\n[Daemon Error] Child failed during unshare() or setup!\n";
+                close(m_container_to_monitor_fd[0]);
+                _exit(EXIT_FAILURE);
+        }
+        close(m_container_to_monitor_fd[0]);
+
+        try {
+                setup_usernamespace();
+        }
+        catch (const std::exception& e) {
+                std::cerr << "\n[Daemon Error] User Namespace mapping failed: " << e.what() << "\n";
+                _exit(EXIT_FAILURE);
+        }
+        m_container_config.net_pid = PastaNetwork::setup_networking(m_container_pid, m_container_config.networks);
+
+        ScopeGuard pasta_guard{[this]() -> void {
+                        kill(m_container_config.net_pid, SIGTERM);
+        }};
+
+        bool network_ready{wait_for_network()};
+
+        if (!network_ready) [[unlikely]] {
+                std::cerr << "\n[Daemon Error] Pasta failed to configure network within 1 second.\n";
+                close(m_monitor_to_container_fd[1]);
+                _exit(EXIT_FAILURE);
+        }
+
+        char go_sig{'1'};
+        if (write(m_monitor_to_container_fd[1], &go_sig, 1) == -1) [[unlikely]] {
+                close(m_monitor_to_container_fd[1]);
+                _exit(EXIT_FAILURE);
+        }
+        close(m_monitor_to_container_fd[1]);
+
+        int master_fd{-1};
+        if (m_container_config.terminal.value) {
+                close(m_control_sock[1]);
+
+                int slave_fd{-1};
+                if (openpty(&master_fd, &slave_fd, nullptr, nullptr, nullptr) == -1) {
+                        std::cerr << "openpty failed\n";
+                        _exit(EXIT_FAILURE);
+                }
+
+                m_pty_session_manager->send_master_fd(m_control_sock[0], slave_fd);
+                close(slave_fd);
+
+                if (!m_pty_session_manager->ok()) {
+                        _exit(EXIT_FAILURE);
+                }
+
+                close(m_control_sock[0]);
+        }
+        else {
+                close(m_std_out_fd[1]);
+                close(m_std_err_fd[1]);
+        }
+
+        cgroups_guard.dismiss();
+        pasta_guard.dismiss();
+
+        if (m_container_config.terminal.value) {
+                setup_socket_connection();
+
+                std::thread([this, master_fd]() {
+                        while (true) {
+                                int client_fd{accept(m_socket_fd, nullptr, nullptr)};
+                                if (client_fd == -1) break;
+                                m_pty_session_manager->send_master_fd(client_fd, master_fd);
+                                close(client_fd);
+                        }
+                }).detach();
+        }
+        else if (!m_container_config.detach.value) {
+                foreground_logging();
+        }
+        else {
+                start_logging(master_fd);
+        }
+
+        std::atomic<bool> container_running{true};
+
+        std::thread watchdog_thread{[&container_running]() {
+                while (container_running.load(std::memory_order_acquire)) {
+                        for (int i = 0; i < 100 && container_running.load(std::memory_order_acquire); ++i) {
+                                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        }
+                        if (container_running.load(std::memory_order_acquire)) {
+                                Utils::spawn_new_consumer();
+                        }
+                }
+        }};
+
+        ScopeGuard container_teardown_guard{[&]() -> void {
+                m_cgroups_manager->stop();
+                if (m_container_config.net_pid > 0) {
+                        kill(m_container_config.net_pid, SIGTERM);
+                }
+                container_running.store(false, std::memory_order_release);
+                if (watchdog_thread.joinable()) {
+                        watchdog_thread.join();
+                }
+        }};
+
+        int status{};
+        while (waitpid(m_container_pid, &status, 0) == -1) {
+                if (errno == EINTR) continue;
+                _exit(EXIT_FAILURE);
+        }
+        if (WIFEXITED(status)) {
+                _exit(WEXITSTATUS(status));
+        } else if (WIFSIGNALED(status)) {
+                _exit(128 + WTERMSIG(status));
+        }
+        _exit(EXIT_FAILURE);
+}
+
+auto ContainerMonitor::resolve_namespaces() -> int {
+        int flags{};
+        for (const auto& [path, namespace_str] : m_container_config.namespaces) {
+                auto it{OCIRuntime::NAMESPACE_STR_MAP.find(namespace_str)};
+                if (path.empty()) {
+                        if (it != OCIRuntime::NAMESPACE_STR_MAP.end()) {
+                                flags |= it->second;
+                        }
+                        else [[unlikely]] {
+                                log_event(std::format("[{}] [{}] Container Runtime Error: Unknown or unsupported namespace requested -> {}.\n",
+                                                        chrono::system_clock::now(), m_container_config.container_id,
+                                                        namespace_str), TargetLog::CONTAINERLOG);
+                                _exit(EXIT_FAILURE);
+                        }
+                }
+                else {
+                        if (Utils::file_exists(path)) {
+                                int nstype{0};
+
+                                if (it != OCIRuntime::NAMESPACE_STR_MAP.end()) {
+                                        nstype = it->second;
+                                }
+                                else [[unlikely]] {
+                                        log_event(std::format("[{}] [{}] Container Runtime Error: Unknown or unsupported namespace requested -> {}.\n",
+                                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                                namespace_str), TargetLog::CONTAINERLOG);
+                                        _exit(EXIT_FAILURE);
+                                }
+
+                                int fd{open(path.c_str(), O_RDONLY | O_CLOEXEC)};
+                                if (fd == -1) [[unlikely]] {
+                                        log_event(std::format("[{}] [{}] Container Runtime Error: Failed to open namespace path: {}.\n",
+                                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                                path.string()), TargetLog::CONTAINERLOG);
+                                        _exit(EXIT_FAILURE);
+                                }
+
+                                if (setns(fd, nstype) == -1) [[unlikely]] {
+                                        log_event(std::format("[{}] [{}] Container Runtime Error: setns failed for path: {}. Errno: {}",
+                                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                                path.string(), errno), TargetLog::CONTAINERLOG);
+                                        close(fd);
+                                        _exit(EXIT_FAILURE);
+                                }
+                                close(fd);
+                        }
+                        else [[unlikely]] {
+                                log_event(std::format("[{}] [{}] Container Runtime Error: Namespace path doesn't exist: {}.\n",
+                                                        chrono::system_clock::now(), m_container_config.container_id,
+                                                        path.string()), TargetLog::CONTAINERLOG);
+                                _exit(EXIT_FAILURE);
+                        }
+                }
+        }
+        return flags;
+}
+
+auto ContainerMonitor::wait_for_network() -> bool {
+        bool network_ready{false};
+        int max_retries{200};
+        while (max_retries > 0) {
+                std::ifstream net_dev(std::format("/proc/{}/net/dev", m_container_pid));
+                if (net_dev.is_open()) {
+                        std::string line;
+                        std::getline(net_dev, line);
+                        std::getline(net_dev, line);
+
+                        while (std::getline(net_dev, line)) {
+                                if (line.find("lo:") == std::string::npos &&
+                                                line.find("sit0:") == std::string::npos &&
+                                                line.find("tunl0:") == std::string::npos &&
+                                                line.find(":") != std::string::npos) {
+                                        network_ready = true;
+                                        break;
+                                }
+                        }
+                }
+
+                if (network_ready) {
+                        break;
+                }
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                max_retries--;
+        }
+        return network_ready;
 }
 
 auto ContainerMonitor::setup_uid_map() -> void {
         const char* newuidmap_path{"/usr/bin/newuidmap"};
-        std::string payload{std::format("{} {} {}\n", m_container_config.uid_mapping.host_id,
-                        m_container_config.uid_mapping.container_id, m_container_config.uid_mapping.size)};
+        std::string payload{std::format("{} {} {}\n", m_container_config.uid_mapping.container_id,
+                        m_container_config.uid_mapping.host_id, m_container_config.uid_mapping.size)};
         exec_mapping_tool(newuidmap_path, payload);
 }
 
 auto ContainerMonitor::setup_gid_map() -> void {
         const char* newgidmap_path{"/usr/bin/newgidmap"};
-        std::string payload{std::format("{} {} {}\n", m_container_config.gid_mapping.host_id,
-                        m_container_config.gid_mapping.container_id, m_container_config.gid_mapping.size)};
+        std::string payload{Utils::build_gid_map_payload(m_container_pid)};
         payload += Utils::get_gid_map_payload(m_container_config.devices);
         exec_mapping_tool(newgidmap_path, payload);
 }
@@ -412,7 +547,8 @@ auto ContainerMonitor::setup_socket_connection() -> void {
 
         m_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (m_socket_fd == -1) [[unlikely]] {
-                log_event(std::format("[{}] Container Runtime Error: socket failed.", m_container_config.container_id), TargetLog::CONTAINERLOG);
+                log_event(std::format("[{}] [{}] Container Runtime Error: socket failed.\n",
+                                        chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
                 _exit(EXIT_FAILURE);
         }
 
@@ -421,12 +557,14 @@ auto ContainerMonitor::setup_socket_connection() -> void {
         strncpy(addr.sun_path, m_sock_path.c_str(), sizeof(addr.sun_path)-1);
 
         if (bind(m_socket_fd, (sockaddr*)&addr, sizeof(addr)) == -1) [[unlikely]] {
-                log_event(std::format("[{}] Container Runtime Error: bind failed.", m_container_config.container_id), TargetLog::CONTAINERLOG);
+                log_event(std::format("[{}] [{}] Container Runtime Error: bind failed.\n",
+                                        chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
                 _exit(EXIT_FAILURE);
         }
 
         if (listen(m_socket_fd, 1) == -1) [[unlikely]] {
-                log_event(std::format("[{}] Container Runtime Error: listen failed.", m_container_config.container_id), TargetLog::CONTAINERLOG);
+                log_event(std::format("[{}] [{}] Container Runtime Error: listen failed.\n",
+                                        chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
                 _exit(EXIT_FAILURE);
         }
 }
@@ -434,106 +572,180 @@ auto ContainerMonitor::setup_socket_connection() -> void {
 auto ContainerMonitor::attach_to_container(const std::string& container_id) -> void {
         m_sock_path = Utils::get_sock_path(container_id);
 
-        m_connection_fd = socket(AF_UNIX, SOCK_STREAM, 0);
         sockaddr_un addr{};
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, m_sock_path.c_str(), sizeof(addr.sun_path)-1);
 
-        if (connect(m_connection_fd, (sockaddr*)&addr, sizeof(addr)) == -1) [[unlikely]] {
-                log_event(std::format("[{}] Container Runtime Error: Connection to socket failed.", m_container_config.container_id), TargetLog::CONTAINERLOG);
-                std::cerr << std::format("[{}] Container Runtime Error: Connection to socket failed.\n", m_container_config.container_id);
+        int retries{0};
+        while (true) {
+                if (m_connection_fd != -1) close(m_connection_fd);
+                m_connection_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+
+                if (connect(m_connection_fd, (sockaddr*)&addr, sizeof(addr)) == 0) {
+                        break;
+                }
+
+                if (errno != ENOENT && errno != ECONNREFUSED) {
+                        std::cerr << std::format("[{}] Container Runtime Error: connect failed -> {}.\n",
+                                container_id, std::strerror(errno));
+                        _exit(EXIT_FAILURE);
+                }
+
+                if (retries++ > 100) {
+                        std::cerr << std::format("[{}] Container Runtime Error: Timed out connecting to socket.\n",
+                                container_id);
+                        _exit(EXIT_FAILURE);
+                }
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        int master_fd = m_pty_session_manager->recv_master_fd(m_connection_fd);
+        close(m_connection_fd);
+        m_connection_fd = -1;
+
+        if (!m_pty_session_manager->ok() || master_fd == -1) {
+                std::cerr << "Container Runtime Error: Failed to receive PTY master fd.\n";
                 _exit(EXIT_FAILURE);
         }
 
         m_pty_session_manager->enable_raw_mode();
 
-        pollfd fds[2];
+        struct winsize ws{};
+        if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 && ws.ws_col > 0) {
+                ioctl(master_fd, TIOCSWINSZ, &ws);
+        }
+
+        int sigwinch_pipe[2];
+        if (pipe2(sigwinch_pipe, O_NONBLOCK | O_CLOEXEC) == -1) {
+                close(master_fd);
+                m_pty_session_manager->disable_raw_mode();
+                std::cerr << "Container Runtime Error: pipe2 failed.\n";
+                return;
+        }
+
+        static int s_sigwinch_write_fd{-1};
+        s_sigwinch_write_fd = sigwinch_pipe[1];
+
+        struct sigaction sa{};
+        sa.sa_handler = [](int) {
+                char c = 'W';
+                (void)write(s_sigwinch_write_fd, &c, 1);
+        };
+        sa.sa_flags = 0;
+        sigaction(SIGWINCH, &sa, nullptr);
+
+        pollfd fds[3];
         fds[0].fd = STDIN_FILENO;
         fds[0].events = POLLIN;
-        fds[1].fd = m_connection_fd;
+        fds[1].fd = master_fd;
         fds[1].events = POLLIN;
+        fds[2].fd = sigwinch_pipe[0];
+        fds[2].events = POLLIN;
 
-        bool saw_ctrlp{false};
-        bool should_run{true};
-        bool user_detached{false};
+        bool running{true};
+        bool is_detached{false};
+        bool saw_ctrl_p{false};
 
-        while (should_run) {
-                int ret{poll(fds, 2, -1)};
-
-                if (ret < 0) {
+        while (running) {
+                int n_ready = poll(fds, 3, -1);
+                if (n_ready == -1) {
                         if (errno == EINTR) continue;
                         break;
                 }
 
-                if ((fds[0].revents | fds[1].revents) & (POLLERR | POLLHUP | POLLNVAL)) {
-                        break;
+                if (fds[2].revents & POLLIN) {
+                        char drain[64];
+                        while (read(sigwinch_pipe[0], drain, sizeof(drain)) > 0) {}
+                        struct winsize new_ws{};
+                        if (ioctl(STDIN_FILENO, TIOCGWINSZ, &new_ws) == 0 &&
+                            new_ws.ws_row > 0 && new_ws.ws_col > 0) {
+                                ioctl(master_fd, TIOCSWINSZ, &new_ws);
+                        }
                 }
 
                 if (fds[0].revents & POLLIN) {
                         char buf[4096];
-                        ssize_t n{read(fds[0].fd, buf, sizeof(buf))};
-                        if (n <= 0) {
-                                should_run = false;
-                                break;
-                        }
-
-                        for (ssize_t i = 0; i < n; ++i) {
-                                unsigned char c{static_cast<unsigned char>(buf[i])};
-
-                                if (saw_ctrlp) {
-                                        if (c == 0x11) {
-                                                should_run = false;
-                                                user_detached = true;
-                                                break;
+                        ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
+                        if (n == 0) { running = false; break; }
+                        if (n < 0) {
+                                if (errno == EAGAIN || errno == EINTR) {}
+                                else { running = false; break; }
+                        } else {
+                                std::vector<char> out{};
+                                out.reserve(n);
+                                for (ssize_t i{0}; i < n; ++i) {
+                                        unsigned char c{static_cast<unsigned char>(buf[i])};
+                                        if (saw_ctrl_p) {
+                                                saw_ctrl_p = false;
+                                                if (c == CTRL_Q) {
+                                                        is_detached = true;
+                                                        running = false;
+                                                        break;
+                                                }
+                                                out.push_back(CTRL_P);
                                         }
-                                        unsigned char seq[2] { 0x10, c };
-                                        if (write(m_connection_fd, seq, 2) <= 0) {
-                                                should_run = false;
-                                                break;
+                                        if (c == CTRL_P) {
+                                                saw_ctrl_p = true;
+                                                continue;
                                         }
-                                        saw_ctrlp = false;
-                                } else if (c == 0x10) {
-                                        saw_ctrlp = true;
-                                } else {
-                                        if (write(m_connection_fd, &c, 1) <= 0) {
-                                                should_run = false;
-                                                break;
+                                        out.push_back(static_cast<char>(c));
+                                }
+                                if (!out.empty()) {
+                                        if (!Utils::write_all(master_fd, out.data(), out.size())) {
+                                                running = false;
                                         }
                                 }
                         }
                 }
 
-                if (!should_run) break;
-
                 if (fds[1].revents & POLLIN) {
                         char buf[4096];
-                        ssize_t n {read(fds[1].fd, buf, sizeof(buf))};
-                        if (n <= 0) {
-                                should_run = false;
-                                break;
-                        }
-                        if (write(STDOUT_FILENO, buf, n) <= 0) {
-                                should_run = false;
-                                break;
+                        ssize_t n{read(master_fd, buf, sizeof(buf))};
+                        if (n == 0) {
+                        } else if (n < 0) {
+                                if (errno == EAGAIN || errno == EINTR) {}
+                                else { running = false; break; }
+                        } else {
+                                if (!Utils::write_all(STDOUT_FILENO, buf, n)) {
+                                        running = false;
+                                }
+                                std::string log_data{std::format("[{}] [{}] [PTY] {}.\n",
+                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                std::string(buf, n))};
+                                this->log_event(log_data, TargetLog::CONTAINERLOG);
                         }
                 }
-        }
-        m_pty_session_manager->disable_raw_mode();
-        if (user_detached) {
-                fprintf(stderr, "[Detached]\n");
-        }
-        else {
-                fprintf(stderr, "[Session Terminated]\n");
+
+                if ((fds[1].revents & POLLHUP) || (fds[1].revents & POLLERR)) {
+                        char buf[4096];
+                        ssize_t n;
+                        while ((n = read(master_fd, buf, sizeof(buf))) > 0) {
+                                Utils::write_all(STDOUT_FILENO, buf, n);
+                        }
+                        running = false;
+                }
         }
 
-        close (m_connection_fd);
+        close(master_fd);
+        close(sigwinch_pipe[0]);
+        close(sigwinch_pipe[1]);
+
+        m_pty_session_manager->disable_raw_mode();
+        if (is_detached) {
+                std::cerr << "[Detached]\n";
+        }
+        else {
+                std::cerr << "[Session Terminated]\n";
+        }
 }
 
 auto ContainerMonitor::exec_mapping_tool(const char* binary_path, const std::string& payload) -> void {
         pid_t pid{fork()};
 
         if (pid == -1) [[unlikely]] {
-                throw std::runtime_error(std::format("Container Monitor Error: fork failed for {} -> {}.",
+                throw std::runtime_error(std::format("[{}] [{}] Container Monitor Error: fork failed for {} -> {}.\n",
+                                        chrono::system_clock::now(), m_container_config.container_id,
                                         binary_path, std::strerror(errno)));
         }
         else if (pid == 0) {
@@ -553,7 +765,8 @@ auto ContainerMonitor::exec_mapping_tool(const char* binary_path, const std::str
 
                 execv(binary_path, c_args.data());
 
-                std::cerr << std::format("Container Monitor Fatal: execl failed for {} -> {}.\n", binary_path, std::strerror(errno));
+                std::cerr << std::format("[{}] [{}] Container Monitor Fatal: execl failed for {} -> {}.\n",
+                                chrono::system_clock::now(), m_container_config.container_id, binary_path, std::strerror(errno));
                 _exit(EXIT_FAILURE);
         }
         else {
@@ -565,14 +778,15 @@ auto ContainerMonitor::exec_mapping_tool(const char* binary_path, const std::str
                 if (WIFEXITED(status)) {
                         int exit_code{WEXITSTATUS(status)};
                         if (exit_code > 0) [[unlikely]] {
-                                throw std::runtime_error(std::format("Container Monitor Error: {} failed with user exit code {}.",
+                                throw std::runtime_error(std::format("Container Monitor Error: {} failed with user exit code {}.\n",
                                                         binary_path, exit_code));
                         }
                 }
                 else if (WIFSIGNALED(status)) {
-                        throw std::runtime_error(std::format("Container Monitor Error: {} was terminated by signal {}.",
+                        throw std::runtime_error(std::format("Container Monitor Error: {} was terminated by signal {}.\n",
                                                 binary_path, WTERMSIG(status)));
                 }
+                destroy = true;
         }
 }
 
@@ -604,20 +818,22 @@ auto ContainerMonitor::log_event(const std::string& log_data, TargetLog target_l
         m_log_job_data.value_offset = offset;
         m_log_job_data.value_length = log_data.size();
         while(!m_log_cmd_queue->atomic_push(m_log_job_data)) {
-                std::this_thread::yield();
+                std::this_thread::sleep_for(chrono::milliseconds(1));
         }
 }
 
 ContainerMonitor::~ContainerMonitor() {
-        stop_logging();
+        if (destroy) {
+                stop_logging();
 
-        if (m_connection_fd != -1) {
-                close(m_connection_fd);
-        }
-        if (m_socket_fd != -1) {
-                close(m_socket_fd);
-        }
-        if (!m_sock_path.empty()) {
-                unlink(m_sock_path.c_str());
+                if (m_connection_fd != -1) {
+                        close(m_connection_fd);
+                }
+                if (m_socket_fd != -1) {
+                        close(m_socket_fd);
+                }
+                if (!m_sock_path.empty()) {
+                        unlink(m_sock_path.c_str());
+                }
         }
 }

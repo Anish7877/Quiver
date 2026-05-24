@@ -12,19 +12,19 @@ auto PtySessionManager::setup_pty() -> void {
         m_master_fd = open("/dev/ptmx", O_NOCTTY | O_RDWR);
         if (m_master_fd == -1) [[unlikely]] {
                 m_ok = false;
-                m_error = "Pty Session Manager Error: cannot open /dev/ptmx.";
+                m_error = "Pty Session Manager Error: cannot open /dev/ptmx.\n";
                 return;
         }
 
         if (grantpt(m_master_fd) == -1) [[unlikely]] {
                 m_ok = false;
-                m_error = "Pty Session Manager Error: grantpt failed.";
+                m_error = "Pty Session Manager Error: grantpt failed.\n";
                 close(m_master_fd);
                 return;
         }
         if (unlockpt(m_master_fd) == -1) [[unlikely]] {
                 m_ok = false;
-                m_error = "Pty Session Manager Error: unlockpt failed.";
+                m_error = "Pty Session Manager Error: unlockpt failed.\n";
                 close(m_master_fd);
                 return;
         }
@@ -32,26 +32,20 @@ auto PtySessionManager::setup_pty() -> void {
         char* slave_ptr{ptsname(m_master_fd)};
         if (slave_ptr == nullptr) [[unlikely]] {
                 m_ok = false;
-                m_error = "Pty Session Manager Error: cannot get slave name.";
+                m_error = "Pty Session Manager Error: cannot get slave name.\n";
                 close(m_master_fd);
                 return;
         }
 
         m_slave_name = slave_ptr;
-        m_slave_fd = open(m_slave_name.c_str(), O_NOCTTY | O_RDWR);
+        m_slave_fd = open(m_slave_name.c_str(), O_RDWR);
         if (m_slave_fd == -1) [[unlikely]] {
                 m_ok = false;
-                m_error = "Pty Session Manager Error: cannot open slave pts.";
+                m_error = "Pty Session Manager Error: cannot open slave pts.\n";
                 close(m_master_fd);
                 return;
         }
 
-        dup2(m_slave_fd, STDIN_FILENO);
-        dup2(m_slave_fd, STDOUT_FILENO);
-        dup2(m_slave_fd, STDERR_FILENO);
-
-        close(m_slave_fd);
-        m_slave_fd = -1;
         m_ok = true;
 }
 
@@ -83,7 +77,7 @@ auto PtySessionManager::send_master_fd(int control_sock, int fd) -> void {
 
         if (sendmsg(control_sock, &msg, 0) == -1) {
                 m_ok = false;
-                m_error = std::format("Pty Session Manager: sendmsg failed -> '{}'.", std::strerror(errno));
+                m_error = std::format("Pty Session Manager: sendmsg failed -> '{}'.\n", std::strerror(errno));
                 return;
         }
         m_ok = true;
@@ -111,7 +105,7 @@ auto PtySessionManager::recv_master_fd(int control_sock) -> int {
 
         if (recvmsg(control_sock, &msg, 0) <= 0) {
                 m_ok = false;
-                m_error = std::format("Pty Session Manager: recvmsg failed -> '{}'.", std::strerror(errno));
+                m_error = std::format("Pty Session Manager: recvmsg failed -> '{}'.\n", std::strerror(errno));
                 return -1;
         }
 
@@ -125,14 +119,14 @@ auto PtySessionManager::recv_master_fd(int control_sock) -> int {
                 return received_fd;
         }
         m_ok = false;
-        m_error = "Pty Session Manager: cmsg header properties are not identical.";
+        m_error = "Pty Session Manager: cmsg header properties are not identical.\n";
         return -1;
 }
 
 auto PtySessionManager::enable_raw_mode() -> void {
         if (tcgetattr(STDIN_FILENO, &m_orig_term) == -1) {
                 m_ok = false;
-                m_error = "Pty Session Manager: tcgetattr failed.";
+                m_error = "Pty Session Manager: tcgetattr failed.\n";
                 return;
         }
         termios new_term{m_orig_term};
@@ -143,7 +137,7 @@ auto PtySessionManager::enable_raw_mode() -> void {
                 });
         if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &new_term) == -1) {
                 m_ok = false;
-                m_error = "Pty Session Manager: tcsetattr failed for enable.";
+                m_error = "Pty Session Manager: tcsetattr failed for enable.\n";
                 return;
         }
         m_ok = true;
@@ -153,7 +147,7 @@ auto PtySessionManager::enable_raw_mode() -> void {
 auto PtySessionManager::disable_raw_mode() -> void {
         if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &m_orig_term) == -1) {
                 m_ok = false;
-                m_error = "Pty Session Manager: tcsetattr failed for disable.";
+                m_error = "Pty Session Manager: tcsetattr failed for disable.\n";
                 return;
         }
         m_ok = true;

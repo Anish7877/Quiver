@@ -8,7 +8,7 @@ SeccompProfileManager::SeccompProfileManager(const OCIRuntime::Seccomp& config) 
         uint32_t def_action{resolve_action(config.default_action, config.default_errno)};
         m_ctx = seccomp_init(def_action);
         if (m_ctx == nullptr) [[unlikely]] {
-                throw std::runtime_error("Seccomp Profile Manager Error: Failed to initialize filter context.");
+                throw std::runtime_error("Seccomp Profile Manager Error: Failed to initialize filter context.\n");
         }
 
         for (const auto& arch_str : config.archs) {
@@ -51,7 +51,7 @@ SeccompProfileManager::SeccompProfileManager(const OCIRuntime::Seccomp& config) 
 
 auto SeccompProfileManager::apply() -> void {
         if (seccomp_load(m_ctx) < 0) [[unlikely]] {
-                throw std::runtime_error("Seccomp Profile Manager Error: Failed to load profile into kernel.");
+                throw std::runtime_error("Seccomp Profile Manager Error: Failed to load profile into kernel.\n");
         }
 }
 
@@ -68,7 +68,7 @@ auto SeccompProfileManager::resolve_action(const std::string& action_str, uint32
 }
 
 SeccompProfileManager::~SeccompProfileManager() {
-        if (m_ctx != nullptr) [[unlikely]] {
+        if (m_ctx != nullptr) [[likely]] {
                 seccomp_release(m_ctx);
         }
 }
