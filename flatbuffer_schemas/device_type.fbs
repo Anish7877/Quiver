@@ -1,9 +1,0 @@
-namespace Types;
-
-table Device {
-        container_id: string;
-        created_at: string;
-        paths: [string];
-}
-
-root_type Device;

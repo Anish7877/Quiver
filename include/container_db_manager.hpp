@@ -1,5 +1,6 @@
 #pragma once
 #include "types.hpp"
+#include "container_config.hpp"
 #include "new_database_manager.hpp"
 #include "singleton.hpp"
 #include <filesystem>
@@ -8,7 +9,7 @@ namespace fs = std::filesystem;
 
 class LoggerCommandQueue;
 class ValueHeap;
-class ContainerDbManager : public DatabaseManager<ContainerType>, public Singleton<ContainerDbManager> {
+class ContainerDbManager : public DatabaseManager<ContainerConfig>, public Singleton<ContainerDbManager> {
         friend class Singleton<ContainerDbManager>;
         private:
                 ContainerDbManager() = default;
@@ -20,12 +21,12 @@ class ContainerDbManager : public DatabaseManager<ContainerType>, public Singlet
                 auto operator=(ContainerDbManager&&) -> ContainerDbManager& = delete;
 
                 auto init() -> void override;
-                auto process_job(const DatabaseJobData&, const ContainerType&, Status&) -> void override;
-                auto extract_container(const std::string&, Status&) -> ContainerType;
+                auto process_job(const DatabaseJobData&, const ContainerConfig&, Status&) -> void override;
+                auto extract_container(const std::string&, Status&) -> ContainerConfig;
         private:
                 auto process_get_job(const DatabaseJobData&, Status&) -> void override;
-                auto process_put_job(const DatabaseJobData&, const ContainerType&, Status&) -> void override;
-                auto process_update_job(const DatabaseJobData&, const ContainerType&, Status&) -> void override;
+                auto process_put_job(const DatabaseJobData&, const ContainerConfig&, Status&) -> void override;
+                auto process_update_job(const DatabaseJobData&, const ContainerConfig&, Status&) -> void override;
                 auto process_delete_job(const DatabaseJobData&, Status&) -> void override;
                 auto log_event(const std::string&) -> void;
                 LogJobData m_log_job_data{};

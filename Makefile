@@ -2,8 +2,8 @@ CXX ?= g+
 MIN_CXX_VER = 15
 STD = -std=c++20
 OPTFLAGS = -O3
-CXXFLAGS = -Wall -Wextra -Wpedantic -march=native
-LDFLAGS = -lcpr -lcurl -lz -lpthread -lutil -lrocksdb -lblake3 -lsdbus-c++ -lseccomp -lcap -lrt
+CXXFLAGS = -Wall -Wextra -Wpedantic -Wno-interference-size -march=native
+LDFLAGS = -lcpr -lcurl -lz -lpthread -lutil -lrocksdb -lblake3 -lsdbus-c++ -lseccomp -lcap -lrt -lflatbuffers
 DEBUG_FLAGS = -g
 DEPFLAGS = -MMD -MP
 

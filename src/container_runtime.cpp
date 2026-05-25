@@ -1,5 +1,5 @@
-#include "container_runtime.hpp"
 #include "caps_manager.hpp"
+#include "container_runtime.hpp"
 #include "logger_command_queue.hpp"
 #include "mount.hpp"
 #include "oci_runtime.hpp"
@@ -11,31 +11,32 @@
 #include "value_heap.hpp"
 #include <asm-generic/ioctls.h>
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <fcntl.h>
 #include <filesystem>
 #include <format>
+#include <fstream>
+#include <grp.h>
+#include <iostream>
 #include <linux/prctl.h>
 #include <memory>
+#include <pwd.h>
 #include <sched.h>
 #include <stdexcept>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
-#include <sys/stat.h>
-#include <grp.h>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
-#include <chrono>
-#include <sys/wait.h>
-#include <sys/prctl.h>
-#include <iostream>
-#include <grp.h>
-#include <pwd.h>
+
 namespace chrono = std::chrono;
 
 ContainerRuntime::ContainerRuntime(const ContainerConfig& config) : m_container_config{config} {
@@ -92,7 +93,7 @@ auto ContainerRuntime::exec_commands() -> void {
 
 auto ContainerRuntime::execute_container_init() -> void {
         if (m_container_config.terminal.value) {
-                int slave_fd = m_pty_session_manager->recv_master_fd(m_container_config.control_sock);
+                int slave_fd{m_pty_session_manager->recv_master_fd(m_container_config.control_sock)};
                 if (!m_pty_session_manager->ok() || slave_fd == -1) {
                         log_event("Container Runtime Error: Failed to receive slave_fd\\n");
                         _exit(EXIT_FAILURE);
@@ -114,7 +115,6 @@ auto ContainerRuntime::execute_container_init() -> void {
                         _exit(EXIT_FAILURE);
                 }
 
-                // Ignore tty job-control signals
                 dup2(slave_fd, STDIN_FILENO);
                 dup2(slave_fd, STDOUT_FILENO);
                 dup2(slave_fd, STDERR_FILENO);
@@ -124,7 +124,7 @@ auto ContainerRuntime::execute_container_init() -> void {
                 }
         }
 
-        struct passwd* pw{getpwuid(m_container_config.user.uid)};
+        passwd* pw{getpwuid(m_container_config.user.uid)};
         if (!pw) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: getpwuid failed.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
@@ -200,6 +200,8 @@ auto ContainerRuntime::execute_container_init() -> void {
 
 auto ContainerRuntime::setup_root_filesystem() -> void {
         int prop_flags{-1};
+        bool is_overlay_mounted{false};
+        int overlay_err{-1};
         fs::path final_filesystem{};
         std::string propagation_type{m_container_config.rootfs_propagation.type};
         if (propagation_type == "shared") {
@@ -233,33 +235,64 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                         Utils::ensure_dir(merged_dir);
                 }
                 catch (const std::exception& e) {
-                        log_event(std::format("[{}] [{}] {}", chrono::system_clock::now(), m_container_config.container_id, e.what()));
+                        log_event(std::format("[{}] [{}] {}", chrono::system_clock::now(),
+                                                m_container_config.container_id, e.what()));
                         _exit(EXIT_FAILURE);
                 }
-                std::string opts{std::format("lowerdir={},upperdir={},workdir={}", lower_dir.string(), upper_dir.string(), work_dir.string())};
-                if (mount("overlay",
-                                        merged_dir.c_str(),
-                                        "overlay",
-                                        0,
-                                        opts.c_str()) == -1) {
-
-                        log_event(std::format(
-                                                "[{}] [{}] OverlayFS mount failed -> {}.\n",
-                                                chrono::system_clock::now(),
-                                                m_container_config.container_id,
-                                                std::strerror(errno)));
-
-                        _exit(EXIT_FAILURE);
+                std::string opts{std::format("lowerdir={},upperdir={},workdir={}", lower_dir.string(),
+                                              upper_dir.string(), work_dir.string())};
+                if (mount("overlay", merged_dir.c_str(), "overlay", 0,opts.c_str()) == 0) {
+                        is_overlay_mounted = true;
                 }
-                //pid_t pid = fork();
-                //if (pid == 0) {
-                //        execlp("fuse-overlayfs", "fuse-overlayfs",
-                //                        "-o", opts.c_str(),
-                //                        merged_dir.c_str(),
-                //                        nullptr);
-                //        _exit(1);
-                //}
-                //waitpid(pid, nullptr, 0);
+                else {
+                        overlay_err = errno;
+                        log_event(std::format("[{}] [{}] OverlayFS mount failed -> {}.\n", chrono::system_clock::now(),
+                                                m_container_config.container_id, std::strerror(errno)));
+                }
+                if (!is_overlay_mounted) {
+                        if (overlay_err == EPERM || overlay_err == EINVAL || overlay_err == ENODEV || overlay_err == EOPNOTSUPP) {
+                                log_event(std::format("[{}] [{}] Falling back to FUSE overlayfs.\n", chrono::system_clock::now(),
+                                                        m_container_config.container_id));
+                                pid_t fuse_pid{fork()};
+                                if (fuse_pid == -1) [[unlikely]] {
+                                        log_event(std::format("[{}] [{}] Container Runtime Fatal: FUSE overlayfs fork failed -> {}.\n",
+                                                                chrono::system_clock::now(),m_container_config.container_id,
+                                                                std::strerror(errno)));
+                                }
+                                if (fuse_pid == 0) {
+                                        execlp("fuse-overlayfs", "fuse-overlayfs", "-o", opts.c_str(), merged_dir.c_str(),nullptr);
+                                        _exit(EXIT_FAILURE);
+                                }
+
+                                bool mounted{false};
+                                for (size_t i{0}; i < 100; ++i) {
+                                        std::ifstream mounts("/proc/self/mountinfo");
+                                        std::string line{};
+                                        while (std::getline(mounts, line)) {
+                                                if (line.find(merged_dir.string()) != std::string::npos
+                                                                && line.find("fuse-overlayfs") != std::string::npos) {
+                                                        mounted = true;
+                                                        break;
+                                                }
+                                        }
+                                        if (mounted) {
+                                                is_overlay_mounted = true;
+                                                break;
+                                        }
+                                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                                }
+                                if (!mounted) {
+                                        log_event(std::format("[{}] [{}] Container Runtime Fatal: fuse-overlayfs mount verification failed.\n",
+                                                                chrono::system_clock::now(), m_container_config.container_id));
+                                        _exit(EXIT_FAILURE);
+                                }
+                        }
+                        else {
+                                        log_event(std::format("[{}] [{}] Container Runtime Fatal: Filesystem mount failed.\n",
+                                                                chrono::system_clock::now(), m_container_config.container_id));
+                                        _exit(EXIT_FAILURE);
+                        }
+                }
                 final_filesystem = merged_dir;
         }
         else {
@@ -359,8 +392,6 @@ auto ContainerRuntime::mount_necessary_dirs() -> void {
         Utils::ensure_dir("./dev/shm");
         Utils::ensure_dir("./dev/pts");
 
-        // Bind-mount essential device nodes from the host
-        // (host filesystem is still accessible before pivot_root)
         struct { const char* host_path; const char* container_path; } essential_devices[] = {
                 {"/dev/null",    "./dev/null"},
                 {"/dev/zero",    "./dev/zero"},

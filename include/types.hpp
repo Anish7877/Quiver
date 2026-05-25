@@ -140,11 +140,14 @@ struct NetworkType{
         std::string created_at{};
 };
 
-struct ImageType {
+struct ImageMetadata {
         std::string id{};
         std::string name{};
         std::string tag{};
+        std::string digest{};
         std::string path{};
-        std::string created_at{};
+        uint64_t size_bytes{};
+        int64_t created_at{};
+        std::string architecture{"amd64"};
+        std::string source{};
 };
-

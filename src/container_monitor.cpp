@@ -128,7 +128,7 @@ auto ContainerMonitor::foreground_logging() -> bool {
         int open_pipes{2};
 
         while (open_pipes > 0) {
-                int ret = poll(fds, 2, -1);
+                int ret{poll(fds, 2, -1)};
 
                 if (ret == -1) {
                         if (errno == EINTR)
@@ -140,15 +140,15 @@ auto ContainerMonitor::foreground_logging() -> bool {
                 if (fds[0].fd != -1 && (fds[0].revents & POLLIN)) {
                         char buffer[4096];
 
-                        ssize_t n = read(fds[0].fd, buffer, sizeof(buffer));
+                        ssize_t bytes_read{read(fds[0].fd, buffer, sizeof(buffer))};
 
-                        if (n > 0) {
-                                if (!Utils::write_all(STDOUT_FILENO, buffer, n)) {
+                        if (bytes_read > 0) {
+                                if (!Utils::write_all(STDOUT_FILENO, buffer, bytes_read)) {
                                         return false;
                                 }
                                 std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
                                                 chrono::system_clock::now(), m_container_config.container_id,
-                                                std::string(buffer, n))};
+                                                std::string(buffer, bytes_read))};
                                 this->log_event(log_data, TargetLog::CONTAINERLOG);
                         }
                 }
@@ -163,15 +163,15 @@ auto ContainerMonitor::foreground_logging() -> bool {
                 if (fds[1].fd != -1 && (fds[1].revents & POLLIN)) {
                         char buffer[4096];
 
-                        ssize_t n = read(fds[1].fd, buffer, sizeof(buffer));
+                        ssize_t bytes_read{read(fds[1].fd, buffer, sizeof(buffer))};
 
-                        if (n > 0) {
-                                if (!Utils::write_all(STDERR_FILENO, buffer, n)) {
+                        if (bytes_read > 0) {
+                                if (!Utils::write_all(STDERR_FILENO, buffer, bytes_read)) {
                                         return false;
                                 }
                                 std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
                                                 chrono::system_clock::now(), m_container_config.container_id,
-                                                std::string(buffer, n))};
+                                                std::string(buffer, bytes_read))};
                                 this->log_event(log_data, TargetLog::CONTAINERLOG);
                         }
                 }
@@ -284,13 +284,6 @@ auto ContainerMonitor::run_container_child() -> void {
         if (m_container_config.terminal.value) {
                 close(m_control_sock[0]);
                 m_container_config.control_sock = m_control_sock[1];
-                //int null_fd = open("/dev/null", O_RDWR);
-                //if (null_fd != -1) {
-                //dup2(null_fd, STDIN_FILENO);
-                //dup2(null_fd, STDOUT_FILENO);
-                //dup2(null_fd, STDERR_FILENO);
-                //close(null_fd);
-                //}
         }
         else {
                 close(m_std_out_fd[0]);
@@ -406,7 +399,7 @@ auto ContainerMonitor::run_monitor_parent() -> void {
 
         std::thread watchdog_thread{[&container_running]() {
                 while (container_running.load(std::memory_order_acquire)) {
-                        for (int i = 0; i < 100 && container_running.load(std::memory_order_acquire); ++i) {
+                        for (size_t i{0}; i < 100 && container_running.load(std::memory_order_acquire); ++i) {
                                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                         }
                         if (container_running.load(std::memory_order_acquire)) {
@@ -629,7 +622,7 @@ auto ContainerMonitor::attach_to_container(const std::string& container_id) -> v
 
         struct sigaction sa{};
         sa.sa_handler = [](int) {
-                char c = 'W';
+                char c{'W'};
                 (void)write(s_sigwinch_write_fd, &c, 1);
         };
         sa.sa_flags = 0;
@@ -648,7 +641,7 @@ auto ContainerMonitor::attach_to_container(const std::string& container_id) -> v
         bool saw_ctrl_p{false};
 
         while (running) {
-                int n_ready = poll(fds, 3, -1);
+                int n_ready{poll(fds, 3, -1)};
                 if (n_ready == -1) {
                         if (errno == EINTR) continue;
                         break;
@@ -666,7 +659,7 @@ auto ContainerMonitor::attach_to_container(const std::string& container_id) -> v
 
                 if (fds[0].revents & POLLIN) {
                         char buf[4096];
-                        ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
+                        ssize_t n{read(STDIN_FILENO, buf, sizeof(buf))};
                         if (n == 0) { running = false; break; }
                         if (n < 0) {
                                 if (errno == EAGAIN || errno == EINTR) {}

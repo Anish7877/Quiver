@@ -1,0 +1,196 @@
+namespace FB.OCIRuntime;
+
+struct Terminal {
+  value : bool;
+}
+
+struct Detach {
+  value : bool;
+}
+
+struct ConsoleSize {
+  height : uint32;
+  width  : uint32;
+}
+
+struct NoNewPrivileges {
+  value : bool;
+}
+
+struct OomScoreAdj {
+  value : int32;
+}
+
+table Root {
+  path      : string;
+  read_only : bool;
+}
+
+table User {
+  uid             : uint32;
+  gid             : uint32;
+  umask           : uint32;
+  additional_gids : [uint32];
+}
+
+table UidMapping {
+  container_id : uint32;
+  host_id      : uint32;
+  size         : uint32;
+}
+
+table GidMapping {
+  container_id : uint32;
+  host_id      : uint32;
+  size         : uint32;
+}
+
+table Env {
+  value : [string];
+}
+
+table Cwd {
+  value : string;
+}
+
+table Args {
+  value : [string];
+}
+
+table SchedularOpts {
+  flags    : [string];
+  policy   : string;
+  runtime  : uint64;
+  deadline : uint64;
+  period   : uint64;
+  nice     : int32;
+  priority : int32;
+}
+
+table Capabilities {
+  bounding    : [string];
+  effective   : [string];
+  inheritable : [string];
+  permitted   : [string];
+  ambient     : [string];
+}
+
+table RLimit {
+  name       : string;
+  hard_limit : uint64;
+  soft_limit : uint64;
+}
+
+table RootfsPropagation {
+  type : string;
+}
+
+table SeccompArg {
+  op        : string;
+  value     : uint64;
+  value_two : uint64;
+  index     : uint32;
+}
+
+table SyscallRule {
+  args      : [SeccompArg];
+  names     : [string];
+  action    : string;
+  errno_ret : uint32;
+}
+
+table Seccomp {
+  syscalls       : [SyscallRule];
+  archs          : [string];
+  flags          : [string];
+  default_action : string;
+  default_errno  : uint32;
+}
+
+table TimeOffset {
+  type    : string;
+  secs    : int64;
+  nanosecs: int64;
+}
+
+table Device {
+  host_path      : string;
+  container_path : string;
+}
+
+table Network {
+  tcp_ports : [string];
+  udp_ports : [string];
+  auto_tcp  : bool;
+  auto_udp  : bool;
+}
+
+table Namespace {
+  path : string;
+  type : string;
+}
+
+table Mount {
+  options     : [string];
+  flags       : [string];
+  attrs       : [string];
+  destination : string;
+  type        : string;
+  source      : string;
+}
+
+table MaskedPaths {
+  paths : [string];
+}
+
+table ReadOnlyPaths {
+  paths : [string];
+}
+
+namespace FB;
+
+table ContainerConfig {
+  container_id   : string;
+  hostname       : string;
+  domain_name    : string;
+  pty_slave_name : string;
+  pty_slave_fd   : int32;
+  control_sock   : int32;
+  pid            : int32;
+  net_pid        : int32;
+  vfs            : bool;
+
+  rootfs             : FB.OCIRuntime.Root;
+  rootfs_propagation : FB.OCIRuntime.RootfsPropagation;
+  cgroups_path       : string;
+  mounts             : [FB.OCIRuntime.Mount];
+  masked_paths       : FB.OCIRuntime.MaskedPaths;
+  read_only_paths    : FB.OCIRuntime.ReadOnlyPaths;
+
+  terminal     : FB.OCIRuntime.Terminal;
+  detach       : FB.OCIRuntime.Detach;
+  console_size : FB.OCIRuntime.ConsoleSize;
+
+  user        : FB.OCIRuntime.User;
+  uid_mapping : FB.OCIRuntime.UidMapping;
+  gid_mapping : FB.OCIRuntime.GidMapping;
+  env         : FB.OCIRuntime.Env;
+  cwd         : FB.OCIRuntime.Cwd;
+  args        : FB.OCIRuntime.Args;
+
+  oom_score         : FB.OCIRuntime.OomScoreAdj;
+  schedular_opts    : FB.OCIRuntime.SchedularOpts;
+  no_new_privileges : FB.OCIRuntime.NoNewPrivileges;
+  capabilities      : FB.OCIRuntime.Capabilities;
+  rlimits           : [FB.OCIRuntime.RLimit];
+
+  seccomp : FB.OCIRuntime.Seccomp;
+
+  devices  : [FB.OCIRuntime.Device];
+  networks : FB.OCIRuntime.Network;
+
+  namespaces  : [FB.OCIRuntime.Namespace];
+  timeoffsets : [FB.OCIRuntime.TimeOffset];
+}
+
+root_type ContainerConfig;

@@ -1,5 +1,5 @@
 #include "container_db_manager.hpp"
-#include "container_type_generated.h"
+#include "container_config_generated.h"
 #include "logger_command_queue.hpp"
 #include "value_heap.hpp"
 #include "types.hpp"
