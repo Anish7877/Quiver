@@ -146,11 +146,13 @@ auto DatabaseCommandQueue::is_empty() const -> bool {
 }
 
 DatabaseCommandQueue::~DatabaseCommandQueue() {
+        std::uint64_t active_connections{0};
         if(!m_is_consumer && m_header != nullptr) {
                 m_header->connections.fetch_sub(1, std::memory_order_release);
         }
 
         if (m_header != nullptr) {
+                active_connections = m_header->connections.load(std::memory_order_acquire);
                 long page_size{sysconf(_SC_PAGESIZE)};
                 if (munmap(m_header, page_size) == -1) {
                         std::cerr << "Database Command Queue Error: failed to unmap header.\n";
@@ -165,7 +167,7 @@ DatabaseCommandQueue::~DatabaseCommandQueue() {
                 m_mapped_address = nullptr;
         }
 
-        if(m_is_consumer && !m_buf_name.empty()) {
+        if(active_connections == 0 && m_is_consumer && !m_buf_name.empty()) {
                 if(shm_unlink(m_buf_name.c_str()) == -1) {
                         std::cerr << "Database Command Queue Error : shared memory unlink failed.\n";
                 }

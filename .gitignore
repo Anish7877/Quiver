@@ -4,6 +4,7 @@
 /gen_schemas/*
 *.txt
 *.sh
+Quiverfile
 
 .vscode/**
 *.code-workspace

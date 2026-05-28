@@ -313,14 +313,13 @@ auto Utils::spawn_new_consumer() -> pid_t {
         std::signal(SIGINT, handler);
         auto& log_job_processor{LogJobProcessor::get_instance()};
         log_job_processor.init();
-        log_job_processor.process_job();
-
         pid_t my_pid{getpid()};
         if (write(sync_pipe[1], &my_pid, sizeof(my_pid)) != static_cast<ssize_t>(sizeof(my_pid))) {
                 close(sync_pipe[1]);
                 _exit(EXIT_FAILURE);
         }
         close(sync_pipe[1]);
+        log_job_processor.process_job();
 
         while (job_processor_running.load(std::memory_order_acquire)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
