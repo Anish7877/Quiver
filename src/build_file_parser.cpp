@@ -76,22 +76,22 @@
                                         return static_cast<char>(std::toupper(c));
                                 });
 
-                auto it{INSTRUCTION_STR_TO_TYPE.find(instruction_token)};
+                auto it{Instruction::INSTRUCTION_STR_TO_TYPE.find(instruction_token)};
 
-                if (it == INSTRUCTION_STR_TO_TYPE.end()) {
+                if (it == Instruction::INSTRUCTION_STR_TO_TYPE.end()) {
                         throw std::runtime_error(std::format("Parser Error [Line {}]: Unknown instruction '{}'.",
                                                 m_current_line_number, instruction_token));
                 }
 
-                InstructionType type{it->second};
+                Instruction::InstructionType type{it->second};
                 bool supports_instruction_options{
-                        type == InstructionType::RUN ||
-                        type == InstructionType::COPY ||
-                        type == InstructionType::ADD ||
-                        type == InstructionType::FROM
+                        type == Instruction::InstructionType::RUN ||
+                        type == Instruction::InstructionType::COPY ||
+                        type == Instruction::InstructionType::ADD ||
+                        type == Instruction::InstructionType::FROM
                 };
 
-                std::vector<InstructionOption> opts{};
+                std::vector<Instruction::InstructionOption> opts{};
                 if (supports_instruction_options) {
                         opts = parse_instruction_options(opts_line);
                         args_line = strip_instruction_options(opts_line);
@@ -100,7 +100,7 @@
                 }
                 trim(args_line);
 
-                if (type == InstructionType::ONBUILD) {
+                if (type == Instruction::InstructionType::ONBUILD) {
                         instruction.type = type;
                         instruction.opts = opts;
                         instruction.raw_payload = args_line;
@@ -112,10 +112,10 @@
                 }
 
                 bool supports_exec_form{
-                        type == InstructionType::RUN ||
-                        type == InstructionType::CMD ||
-                        type == InstructionType::ENTRYPOINT ||
-                        type == InstructionType::SHELL
+                        type == Instruction::InstructionType::RUN ||
+                        type == Instruction::InstructionType::CMD ||
+                        type == Instruction::InstructionType::ENTRYPOINT ||
+                        type == Instruction::InstructionType::SHELL
                 };
                 bool looks_like_json{
                         supports_exec_form &&
@@ -123,7 +123,7 @@
                         args_line.front() == '['
                 };
                 if (!looks_like_json) {
-                        if (type == InstructionType::RUN) {
+                        if (type == Instruction::InstructionType::RUN) {
                                 instruction.heredoc = parse_heredocs(file, args_line);
                         }
                 }
@@ -317,8 +317,8 @@ auto BuildFileParser::parse_parser_directives(std::ifstream& file) -> void {
         return result_line;
 }
 
-[[nodiscard]] auto BuildFileParser::parse_instruction_options(const std::string& opts_line) -> std::vector<InstructionOption> {
-        std::vector<InstructionOption> opts{};
+[[nodiscard]] auto BuildFileParser::parse_instruction_options(const std::string& opts_line) -> std::vector<Instruction::InstructionOption> {
+        std::vector<Instruction::InstructionOption> opts{};
         std::stringstream iss{opts_line};
         std::string token{};
         while (iss >> token) {
@@ -326,7 +326,7 @@ auto BuildFileParser::parse_parser_directives(std::ifstream& file) -> void {
                         break;
                 }
                 token.erase(0,2);
-                InstructionOption opt{};
+                Instruction::InstructionOption opt{};
                 size_t eq_index{token.find('=')};
                 if (eq_index == std::string::npos) {
                         throw std::runtime_error(std::format("Parser Error [Line {}]: Invalid option syntax '--{}'. Expected --key=value format.",
@@ -343,14 +343,18 @@ auto BuildFileParser::parse_parser_directives(std::ifstream& file) -> void {
                                 throw std::runtime_error(std::format("Parser Error [Line {}]: Key is empty.",
                                                         m_current_line_number));
                         }
+                        if (opt.value.empty()) {
+                                throw std::runtime_error(std::format("Parser Error [Line {}]: Value is empty.",
+                                                        m_current_line_number));
+                        }
                         opts.emplace_back(std::move(opt));
                 }
         }
         return opts;
 }
 
-[[nodiscard]] auto BuildFileParser::parse_heredocs(std::ifstream& file, const std::string& line) -> std::optional<Heredoc> {
-        Heredoc heredoc{};
+[[nodiscard]] auto BuildFileParser::parse_heredocs(std::ifstream& file, const std::string& line) -> std::optional<Instruction::Heredoc> {
+        Instruction::Heredoc heredoc{};
         if (!line.starts_with("<<")) {
                 return std::nullopt;
         }
@@ -426,21 +430,21 @@ auto BuildFileParser::parse_json_form(BuildInstruction& instruction, const std::
                         [](unsigned char c) -> char {
                                 return static_cast<char>(std::toupper(c));
                         });
-        auto it{INSTRUCTION_STR_TO_TYPE.find(token)};
-        if (it == INSTRUCTION_STR_TO_TYPE.end()) {
+        auto it{Instruction::INSTRUCTION_STR_TO_TYPE.find(token)};
+        if (it == Instruction::INSTRUCTION_STR_TO_TYPE.end()) {
                 throw std::runtime_error(std::format("Parser Error [Line {}]: Unknown instruction '{}' inside ONBUILD.",
                                         m_current_line_number, token));
         }
-        InstructionType type{it->second};
+        Instruction::InstructionType type{it->second};
         auto inner = std::make_shared<BuildInstruction>();
         inner->type = type;
         inner->line_number = m_current_line_number;
 
         bool supports_opts{
-                type == InstructionType::RUN ||
-                type == InstructionType::COPY ||
-                type == InstructionType::ADD ||
-                type == InstructionType::FROM
+                type == Instruction::InstructionType::RUN ||
+                type == Instruction::InstructionType::COPY ||
+                type == Instruction::InstructionType::ADD ||
+                type == Instruction::InstructionType::FROM
         };
         if (supports_opts) {
                 inner->opts = parse_instruction_options(opts_line);
@@ -451,10 +455,10 @@ auto BuildFileParser::parse_json_form(BuildInstruction& instruction, const std::
         trim(inner_args_line);
 
         bool supports_exec{
-                type == InstructionType::RUN ||
-                type == InstructionType::CMD ||
-                type == InstructionType::ENTRYPOINT ||
-                type == InstructionType::SHELL
+                type == Instruction::InstructionType::RUN ||
+                type == Instruction::InstructionType::CMD ||
+                type == Instruction::InstructionType::ENTRYPOINT ||
+                type == Instruction::InstructionType::SHELL
         };
         bool looks_json{
                 supports_exec &&

@@ -1,51 +1,23 @@
 #pragma once
+#include "instruction_types.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 namespace fs = std::filesystem;
 
 class BuildFileParser {
         public:
-                enum class InstructionType {
-                        ADD,
-                        ARG,
-                        CMD,
-                        COPY,
-                        ENTRYPOINT,
-                        ENV,
-                        EXPOSE,
-                        FROM,
-                        HEALTHCHECK,
-                        LABEL,
-                        MAINTAINER,
-                        ONBUILD,
-                        RUN,
-                        SHELL,
-                        STOPSIGNAL,
-                        USER,
-                        VOLUME,
-                        WORKDIR
-                };
                 struct ParserDirectives {
                         char escape{'\\'};
                 };
-                struct InstructionOption {
-                        std::string key{};
-                        std::string value{};
-                };
-                struct Heredoc {
-                        std::vector<std::string> content{};
-                        std::string delimiter{};
-                };
                 struct BuildInstruction {
-                        InstructionType type{};
-                        std::vector<InstructionOption> opts{};
-                        std::optional<Heredoc> heredoc{};
+                        Instruction::InstructionType type{};
+                        std::vector<Instruction::InstructionOption> opts{};
+                        std::optional<Instruction::Heredoc> heredoc{};
                         std::vector<std::string> json_args{};
                         std::string raw_payload{};
                         std::string shell_form{};
@@ -68,34 +40,13 @@ class BuildFileParser {
                 [[nodiscard]] auto strip_comments(const std::string&) -> std::string;
                 [[nodiscard]] auto strip_instruction_options(const std::string&) -> std::string;
                 [[nodiscard]] auto complete_escape_line(std::ifstream&, const std::string&) -> std::string;
-                [[nodiscard]] auto parse_instruction_options(const std::string&) -> std::vector<InstructionOption>;
-                [[nodiscard]] auto parse_heredocs(std::ifstream&, const std::string&) -> std::optional<Heredoc>;
+                [[nodiscard]] auto parse_instruction_options(const std::string&) -> std::vector<Instruction::InstructionOption>;
+                [[nodiscard]] auto parse_heredocs(std::ifstream&, const std::string&) -> std::optional<Instruction::Heredoc>;
+                [[nodiscard]] auto parse_onbuild_inner(const std::string&) -> std::shared_ptr<BuildInstruction>;
                 auto parse_shell_form(BuildInstruction&, const std::string&) -> void;
                 auto parse_json_form(BuildInstruction&, const std::string&) -> void;
-                [[nodiscard]] auto parse_onbuild_inner(const std::string&) -> std::shared_ptr<BuildInstruction>;
 
                 std::uint32_t m_current_line_number{0};
                 std::uint32_t m_logical_current_line_number{0};
                 ParserDirectives m_parser_directive{};
-
-                const std::unordered_map<std::string, InstructionType> INSTRUCTION_STR_TO_TYPE {
-                        {"ADD", InstructionType::ADD},
-                        {"ARG", InstructionType::ARG},
-                        {"CMD", InstructionType::CMD},
-                        {"COPY", InstructionType::COPY},
-                        {"ENTRYPOINT", InstructionType::ENTRYPOINT},
-                        {"ENV", InstructionType::ENV},
-                        {"EXPOSE", InstructionType::EXPOSE},
-                        {"FROM", InstructionType::FROM},
-                        {"HEALTHCHECK", InstructionType::HEALTHCHECK},
-                        {"LABEL", InstructionType::LABEL},
-                        {"MAINTAINER", InstructionType::MAINTAINER},
-                        {"ONBUILD", InstructionType::ONBUILD},
-                        {"RUN", InstructionType::RUN},
-                        {"SHELL", InstructionType::SHELL},
-                        {"STOPSIGNAL", InstructionType::STOPSIGNAL},
-                        {"USER", InstructionType::USER},
-                        {"VOLUME", InstructionType::VOLUME},
-                        {"WORKDIR", InstructionType::WORKDIR}
-                };
 };
