@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiver Authorization</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#F97316',
+                        zinc: {
+                            850: '#1f1f22',
+                            900: '#18181b',
+                            950: '#09090b'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #09090b;
+            color: #fafafa;
+            font-family: ui-sans-serif, system-ui, sans-serif;
+        }
+
+        .shake {
+            animation: shake 0.3s ease-in-out;
+        }
+
+        @keyframes shake {
+            0%,100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+    </style>
+</head>
+
+<body class="min-h-screen flex items-center justify-center p-4">
+
+<div class="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-8">
+
+    <div class="text-center mb-8">
+        <img
+            src="https://github.com/Anish7877/Quiver/blob/quiver-gui/assets/icons/Quiver.svg?raw=true"
+            class="w-16 h-16 mx-auto mb-4"
+            alt="Quiver Logo">
+
+        <h1 class="text-3xl font-bold tracking-widest text-white mb-2">
+            QUIVER
+        </h1>
+
+        <p class="text-zinc-400 text-sm">
+            Authorize the desktop application
+        </p>
+    </div>
+
+    <div
+        id="alertBox"
+        class="hidden rounded-lg p-3 text-sm text-center mb-5">
+    </div>
+
+    <form id="authForm" class="space-y-4">
+
+        <div id="signupFields" class="hidden space-y-4">
+
+            <div class="flex gap-4">
+                <input
+                    type="text"
+                    id="firstName"
+                    placeholder="First Name"
+                    class="w-1/2 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary">
+
+                <input
+                    type="text"
+                    id="lastName"
+                    placeholder="Last Name"
+                    class="w-1/2 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary">
+            </div>
+
+            <input
+                type="text"
+                id="username"
+                maxlength="50"
+                placeholder="Username"
+                class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary">
+
+            <input
+                type="email"
+                id="email"
+                placeholder="Email Address"
+                class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary">
+        </div>
+
+        <input
+            type="text"
+            id="identity"
+            placeholder="Email or Username"
+            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary">
+
+        <div class="relative">
+            <input
+                type="password"
+                id="password"
+                maxlength="100"
+                autocomplete="current-password"
+                placeholder="Password"
+                class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary">
+
+            <button
+                type="button"
+                id="togglePassword"
+                class="absolute right-3 top-3 text-zinc-400 text-sm">
+                Show
+            </button>
+        </div>
+
+        <div id="strengthWrapper" class="hidden">
+            <div class="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
+                <div
+                    id="strengthBar"
+                    class="h-full rounded-full transition-all duration-300 w-0">
+                </div>
+            </div>
+
+            <p
+                id="strengthText"
+                class="text-xs text-zinc-400 mt-2">
+                Password Strength
+            </p>
+        </div>
+
+        <div id="confirmPasswordWrapper" class="hidden">
+            <div class="relative">
+                <input
+                    type="password"
+                    id="confirmPassword"
+                    autocomplete="new-password"
+                    placeholder="Confirm Password"
+                    class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-primary">
+
+                <button
+                    type="button"
+                    id="toggleConfirmPassword"
+                    class="absolute right-3 top-3 text-zinc-400 text-sm">
+                    Show
+                </button>
+            </div>
+
+            <p
+                id="matchMessage"
+                class="text-xs mt-2 text-zinc-400">
+            </p>
+        </div>
+
+        <button
+            type="submit"
+            id="submitBtn"
+            class="w-full bg-primary hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-lg transition-colors">
+            Sign In
+        </button>
+
+    </form>
+
+    <div class="mt-6 text-center">
+        <button
+            id="toggleModeBtn"
+            class="text-zinc-400 hover:text-white text-sm">
+            Don't have an account? Sign Up
+        </button>
+    </div>
+
+</div>
+
+<script>
+
+const redirectPort = "{{ .redirectPort }}";
+
+let isLoginMode = true;
+
+const form = document.getElementById("authForm");
+const alertBox = document.getElementById("alertBox");
+const passwordInput = document.getElementById("password");
+const confirmPassword = document.getElementById("confirmPassword");
+
+let debounceTimer;
+
+
+
+function showError(message) {
+    alertBox.textContent = message;
+    alertBox.className =
+        "rounded-lg p-3 text-sm text-center mb-5 border border-red-500 bg-red-500/10 text-red-400";
+    alertBox.classList.remove("hidden");
+}
+
+function showSuccess(message) {
+    alertBox.textContent = message;
+    alertBox.className =
+        "rounded-lg p-3 text-sm text-center mb-5 border border-green-500 bg-green-500/10 text-green-400";
+    alertBox.classList.remove("hidden");
+}
+
+function hideAlert() {
+    alertBox.classList.add("hidden");
+}
+
+
+
+document.getElementById("toggleModeBtn")
+.addEventListener("click", () => {
+
+    isLoginMode = !isLoginMode;
+
+    document.getElementById("signupFields")
+        .classList.toggle("hidden", isLoginMode);
+
+    document.getElementById("identity")
+        .classList.toggle("hidden", !isLoginMode);
+
+    document.getElementById("confirmPasswordWrapper")
+        .classList.toggle("hidden", isLoginMode);
+
+    document.getElementById("strengthWrapper")
+        .classList.toggle("hidden", isLoginMode);
+
+    document.getElementById("submitBtn")
+        .textContent = isLoginMode
+        ? "Sign In"
+        : "Create Account";
+
+    document.getElementById("toggleModeBtn")
+        .textContent = isLoginMode
+        ? "Don't have an account? Sign Up"
+        : "Already have an account? Sign In";
+
+    hideAlert();
+    
+    evaluatePassword(passwordInput.value);
+});
+
+
+
+document.getElementById("togglePassword")
+.addEventListener("click", () => {
+
+    if(passwordInput.type === "password") {
+        passwordInput.type = "text";
+        document.getElementById("togglePassword").textContent = "Hide";
+    } else {
+        passwordInput.type = "password";
+        document.getElementById("togglePassword").textContent = "Show";
+    }
+});
+
+document.getElementById("toggleConfirmPassword")
+.addEventListener("click", () => {
+
+    if(confirmPassword.type === "password") {
+        confirmPassword.type = "text";
+        document.getElementById("toggleConfirmPassword").textContent = "Hide";
+    } else {
+        confirmPassword.type = "password";
+        document.getElementById("toggleConfirmPassword").textContent = "Show";
+    }
+});
+
+
+
+function evaluatePassword(password) {
+    const bar = document.getElementById("strengthBar");
+    const text = document.getElementById("strengthText");
+
+   
+    if (!password) {
+        bar.className = "h-full rounded-full transition-all duration-300 w-0";
+        bar.style.width = "0%";
+        text.textContent = "Password Strength";
+        return;
+    }
+
+    let score = 0;
+    if(password.length >= 8) score++;
+    if(password.length >= 12) score++;
+    if(/[A-Z]/.test(password)) score++;
+    if(/[0-9]/.test(password)) score++;
+    if(/[^A-Za-z0-9]/.test(password)) score++;
+
+    if(score <= 2) {
+        bar.className =
+            "h-full bg-red-500 rounded-full transition-all duration-300";
+        bar.style.width = "30%";
+        text.textContent = "Weak Password";
+    }
+    else if(score <= 4) {
+        bar.className =
+            "h-full bg-yellow-500 rounded-full transition-all duration-300";
+        bar.style.width = "70%";
+        text.textContent = "Moderate Password";
+    }
+    else {
+        bar.className =
+            "h-full bg-green-500 rounded-full transition-all duration-300";
+        bar.style.width = "100%";
+        text.textContent = "Strong Password";
+    }
+}
+
+passwordInput.addEventListener("input", () => {
+
+    if(isLoginMode) return;
+
+    clearTimeout(debounceTimer);
+
+    debounceTimer = setTimeout(() => {
+        evaluatePassword(passwordInput.value);
+        validateMatch();
+    }, 300);
+});
+
+
+
+function validateMatch() {
+
+    const msg = document.getElementById("matchMessage");
+
+    if(!confirmPassword.value) {
+        msg.textContent = "";
+        return;
+    }
+
+    if(passwordInput.value === confirmPassword.value) {
+        msg.textContent = "Passwords match ✓";
+        msg.className = "text-xs mt-2 text-green-400";
+    } else {
+        msg.textContent = "Passwords do not match";
+        msg.className = "text-xs mt-2 text-red-400";
+    }
+}
+
+confirmPassword.addEventListener("input", validateMatch);
+
+
+
+form.addEventListener("submit", async (e) => {
+
+    e.preventDefault();
+
+    hideAlert();
+
+    const submitBtn = document.getElementById("submitBtn");
+
+    try {
+
+        let payload = {};
+
+        if(isLoginMode) {
+
+            payload = {
+                identity:
+                    document.getElementById("identity").value.trim(),
+                password:
+                    passwordInput.value
+            };
+
+            if(!payload.identity || !payload.password) {
+                throw new Error("Please enter email/username and password.");
+            }
+
+        } else {
+
+            payload = {
+                first_name:
+                    document.getElementById("firstName").value.trim(),
+
+                last_name:
+                    document.getElementById("lastName").value.trim(),
+
+                username:
+                    document.getElementById("username").value.trim(),
+
+                email:
+                    document.getElementById("email").value.trim(),
+
+                password:
+                    passwordInput.value
+            };
+
+            if(Object.values(payload).some(v => !v)) {
+                throw new Error("Please fill all required fields.");
+            }
+
+            const emailRegex =
+                /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+            if(!emailRegex.test(payload.email)) {
+                throw new Error("Invalid email address.");
+            }
+
+            if(payload.password.length < 8) {
+                throw new Error(
+                    "Password must be at least 8 characters."
+                );
+            }
+
+            if(payload.password !== confirmPassword.value) {
+                throw new Error("Passwords do not match.");
+            }
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Processing...";
+
+        const endpoint =
+            isLoginMode
+            ? "/api/auth/signin"
+            : "/api/auth/signup";
+
+        const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+                "Content-Type":"application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if(!response.ok) {
+            throw new Error(
+                data.error ||
+                "Authentication failed"
+            );
+        }
+
+        showSuccess("Authentication successful.");
+
+        document.body.innerHTML = `
+            <div class="min-h-screen flex items-center justify-center">
+                <div class="text-center">
+                    <h2 class="text-2xl font-bold mb-2">
+                        Authentication Successful
+                    </h2>
+                    <p class="text-zinc-400">
+                        Redirecting back to Quiver...
+                    </p>
+                </div>
+            </div>
+        `;
+
+        setTimeout(() => {
+            
+            window.location.href = `http://localhost:${redirectPort}/callback?token=${data.token}`;
+        }, 1000);
+
+    } catch(err) {
+
+        showError(err.message);
+
+        document.querySelector(".max-w-md")
+            .classList.add("shake");
+
+        setTimeout(() => {
+            document.querySelector(".max-w-md")
+                .classList.remove("shake");
+        }, 300);
+
+        submitBtn.disabled = false;
+
+        submitBtn.textContent =
+            isLoginMode
+            ? "Sign In"
+            : "Create Account";
+    }
+});
+</script>
+
+</body>
+</html>

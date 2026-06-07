@@ -16,7 +16,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// POST /api/auth/signup
+
 func SignUp(c *gin.Context) {
 	var req models.SignUpRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -24,7 +24,7 @@ func SignUp(c *gin.Context) {
 		return
 	}
 
-	// Normalize inputs
+	
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.Username = strings.ToLower(strings.TrimSpace(req.Username))
 
@@ -32,7 +32,6 @@ func SignUp(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Check if email already exists
 	emailCount, err := collection.CountDocuments(ctx, bson.M{"email": req.Email})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
@@ -43,7 +42,6 @@ func SignUp(c *gin.Context) {
 		return
 	}
 
-	// Check if username already exists
 	userCount, err := collection.CountDocuments(ctx, bson.M{"username": req.Username})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
@@ -54,7 +52,7 @@ func SignUp(c *gin.Context) {
 		return
 	}
 
-	// Hash password (bcrypt cost 12 is good balance of security vs speed)
+	
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to secure password"})
@@ -80,7 +78,7 @@ func SignUp(c *gin.Context) {
 		return
 	}
 
-	// Generate token immediately so user is logged in after registration
+	
 	token, err := utils.GenerateToken(user.ID.Hex(), user.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Account created but failed to generate token"})
@@ -94,7 +92,7 @@ func SignUp(c *gin.Context) {
 	})
 }
 
-// POST /api/auth/signin
+
 func SignIn(c *gin.Context) {
 	var req models.SignInRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -108,7 +106,6 @@ func SignIn(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Find by email OR username
 	filter := bson.M{
 		"$or": bson.A{
 			bson.M{"email": identity},
@@ -119,18 +116,17 @@ func SignIn(c *gin.Context) {
 	var user models.User
 	err := collection.FindOne(ctx, filter).Decode(&user)
 	if err != nil {
-		// Use a generic message to avoid user enumeration attacks
+		
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
-	// Compare password
+	
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
-	// Generate JWT
 	token, err := utils.GenerateToken(user.ID.Hex(), user.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
@@ -144,20 +140,26 @@ func SignIn(c *gin.Context) {
 	})
 }
 
-// POST /api/auth/logout  (protected)
-// JWT is stateless — the client drops the token.
-// This endpoint exists for future token blacklisting or audit logging.
 func Logout(c *gin.Context) {
-	// In a stateless JWT system, logout is handled client-side
-	// (the Qt app deletes the stored token from QSettings).
-	// This endpoint is here to acknowledge the logout server-side
-	// and can be extended with a token blacklist (Redis) if needed.
+	
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Logged out successfully. Please discard your token.",
 	})
 }
 
-// formatValidationError provides user-friendly validation messages
+
 func formatValidationError(err error) string {
 	return err.Error()
+}
+
+func WebAuthPortal(c *gin.Context) {
+	port := c.Query("port")
+	if port == "" {
+		c.String(http.StatusBadRequest, "Missing redirect port. This page must be opened from the Quiver Desktop App.")
+		return
+	}
+
+	c.HTML(http.StatusOK, "auth.html", gin.H{
+		"redirectPort": port,
+	})
 }

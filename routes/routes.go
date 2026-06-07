@@ -18,10 +18,15 @@ func SetupRoutes(router *gin.Engine) {
 		auth.POST("/signup", handlers.SignUp)
 		auth.POST("/signin", handlers.SignIn)
 	}
+	// ──────────────────────────────────────────
+	// Web Portal Routes (For desktop OAuth flow)
+	// ──────────────────────────────────────────
+	web := router.Group("/web")
+	{
+		web.GET("/auth", handlers.WebAuthPortal)
+	}
 
-	// ──────────────────────────────────────────
-	// Protected Routes (Bearer token required)
-	// ──────────────────────────────────────────
+	
 	protected := api.Group("")
 	protected.Use(middleware.AuthRequired())
 	{
@@ -30,7 +35,7 @@ func SetupRoutes(router *gin.Engine) {
 
 		// Profile
 		protected.GET("/profile/me", handlers.GetProfile)
-		protected.PATCH("/profile/update", handlers.UpdateProfile)    // JSON: first_name, last_name, username
-		protected.POST("/profile/avatar", handlers.UpdateAvatar)      // multipart/form-data: avatar file
+		protected.PATCH("/profile/update", handlers.UpdateProfile)    
+		protected.POST("/profile/avatar", handlers.UpdateAvatar)      
 	}
 }

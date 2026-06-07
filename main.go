@@ -47,7 +47,7 @@ func main() {
 		}
 		c.Next()
 	})
-
+	router.LoadHTMLGlob("templates/*")
 	// Register all routes
 	routes.SetupRoutes(router)
 
