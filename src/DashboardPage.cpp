@@ -187,7 +187,7 @@ static auto create_image_card(const QString& name, const QString& tag, const QSt
     auto* run_btn = new QPushButton("▶ Run");
     run_btn->setObjectName("PrimaryButton");
     run_btn->setCursor(Qt::PointingHandCursor);
-    run_btn->setFixedSize(60, 28);
+    run_btn->setFixedSize(75, 28);
 
     layout->addWidget(name_lbl);
     layout->addWidget(tag_lbl);

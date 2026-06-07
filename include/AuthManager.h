@@ -4,7 +4,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <memory>
-
+class QTcpServer;
 namespace Quiver {
 
 class AuthManager : public QObject {
@@ -19,7 +19,9 @@ public:
 QString get_avatar_path() const;
     void set_avatar_path(const QString& path);
     void update_profile(const QString& full_name, const QString& username);
-  
+
+    void start_browser_login();
+    
     void login(const QString& identity, const QString& password);
     void logout();
     void signUp(const QString& first_name, const QString& last_name,

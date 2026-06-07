@@ -558,7 +558,7 @@ SettingsPage::SettingsPage(QWidget* parent)
         return out;
     };
 
-    avatar_display->setPixmap(get_circular_pixmap(AuthManager::get_instance().get_cached_avatar_path(), 86)); /
+    avatar_display->setPixmap(get_circular_pixmap(AuthManager::get_instance().get_cached_avatar_path(), 86)); 
     
     auto* upload_btn { new QPushButton("Upload Image") };
     upload_btn->setObjectName("SecondaryBtn");
@@ -584,6 +584,11 @@ SettingsPage::SettingsPage(QWidget* parent)
     user_input->setText(AuthManager::get_instance().get_username());
     user_input->setFixedHeight(36);
     
+    connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this, [name_input, user_input]() {
+        name_input->setText(AuthManager::get_instance().get_full_name());
+        user_input->setText(AuthManager::get_instance().get_username());
+    });
+    
     auto* save_btn { new QPushButton("Save Changes") };
     save_btn->setObjectName("PrimaryButton");
     save_btn->setCursor(Qt::PointingHandCursor);
@@ -605,24 +610,49 @@ SettingsPage::SettingsPage(QWidget* parent)
     scroll_area->setWidget(scroll_content);
     main_layout->addWidget(scroll_area);
 
-    connect(upload_btn, &QPushButton::clicked, this, [avatar_display, get_circular_pixmap, this]() {
-    QString file_name = QFileDialog::getOpenFileName(
-        this, "Select Profile Picture", "", "Images (*.png *.jpg *.jpeg *.webp)");
-    if (file_name.isEmpty()) return;
+//     connect(upload_btn, &QPushButton::clicked, this, [avatar_display, get_circular_pixmap, this]() {
+//     QString file_name = QFileDialog::getOpenFileName(
+//         this, "Select Profile Picture", "", "Images (*.png *.jpg *.jpeg *.webp)");
+//     if (file_name.isEmpty()) return;
 
-    avatar_display->setPixmap(get_circular_pixmap(file_name, 86));
+//     avatar_display->setPixmap(get_circular_pixmap(file_name, 86));
 
 
-    AuthManager::get_instance().upload_avatar(file_name);
-});
-connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this,
-    [avatar_display, get_circular_pixmap]() {
-        QSettings settings("QuiverApp", "Quiver");
-        QString url = settings.value("avatar_url").toString();
-        if (!url.isEmpty() && !url.startsWith(":/")) {
+//     AuthManager::get_instance().upload_avatar(file_name);
+// });
+// connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this,
+//     [avatar_display, get_circular_pixmap]() {
+//         QSettings settings("QuiverApp", "Quiver");
+//         QString url = settings.value("avatar_url").toString();
+//         if (!url.isEmpty() && !url.startsWith(":/")) {
            
-        }
+//         }
+//     });
+connect(upload_btn, &QPushButton::clicked, this, [avatar_display, get_circular_pixmap, this]() {
+        QString file_name = QFileDialog::getOpenFileName(
+            this, "Select Profile Picture", "", "Images (*.png *.jpg *.jpeg *.webp)");
+        if (file_name.isEmpty()) return;
+
+        // Optimistically update the UI immediately
+        avatar_display->setPixmap(get_circular_pixmap(file_name, 86));
+
+        // Send to backend
+        AuthManager::get_instance().upload_avatar(file_name);
     });
+
+    // FIX: Properly update the settings avatar when AuthManager says profile changed
+    connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this,
+        [avatar_display, get_circular_pixmap]() {
+            // Get the latest cached avatar path from AuthManager
+            QString latest_avatar = AuthManager::get_instance().get_cached_avatar_path();
+            
+            // Check if it exists, otherwise it defaults back to profile.svg
+            if (!latest_avatar.isEmpty()) {
+                avatar_display->setPixmap(get_circular_pixmap(latest_avatar, 86));
+            } else {
+                avatar_display->setPixmap(get_circular_pixmap(":/assets/icons/profile.svg", 86));
+            }
+        });
 
 connect(save_btn, &QPushButton::clicked, this, [name_input, user_input, save_btn]() {
     save_btn->setText("Saving...");

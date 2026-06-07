@@ -11,11 +11,17 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QCryptographicHash>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QRegularExpression>
 namespace Quiver {
 
 struct AuthManager::Impl {
     QNetworkAccessManager network_;
     QString api_base_url_ { "http://localhost:8080/api" }; 
+    QTcpServer* auth_server_ { nullptr };
 };
 
 AuthManager::AuthManager() : pimpl_{std::make_unique<Impl>()} {}
@@ -45,15 +51,67 @@ QString AuthManager::get_token() const {
     QSettings settings("QuiverApp", "Quiver");
     return settings.value("jwt_token").toString();
 }
+void AuthManager::start_browser_login() {
+    if (!pimpl_->auth_server_) {
+        pimpl_->auth_server_ = new QTcpServer(this);
+        
+        connect(pimpl_->auth_server_, &QTcpServer::newConnection, this, [this]() {
+            QTcpSocket* socket = pimpl_->auth_server_->nextPendingConnection();
+            
+            connect(socket, &QTcpSocket::readyRead, this, [this, socket]() {
+                QByteArray request = socket->readAll();
+                
+                
+                QRegularExpression rx("GET /callback\\?token=([^\\s]+)");
+                QRegularExpressionMatch match = rx.match(QString(request));
+
+                if (match.hasMatch()) {
+                    QString token = match.captured(1);
+                    
+                    
+                    QByteArray response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
+                                          "<html><body style='background:#09090b; color:#fafafa; font-family:sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;'>"
+                                          "<div style='text-align:center;'><h2>Authentication Successful</h2><p style='color:#a1a1aa;'>You can safely close this tab and return to Quiver.</p></div>"
+                                          "<script>setTimeout(()=>window.close(), 2000);</script></body></html>";
+                    socket->write(response);
+                    socket->flush();
+                    socket->disconnectFromHost();
+
+                    
+                    QSettings settings("QuiverApp", "Quiver");
+                    settings.setValue("jwt_token", token);
+                    
+                    pimpl_->auth_server_->close(); 
+                    
+                    fetch_profile(); 
+                    emit login_success(); 
+                }
+            });
+        });
+    }
+
+    if (!pimpl_->auth_server_->isListening()) {
+        pimpl_->auth_server_->listen(QHostAddress::LocalHost, 54321);
+    }
+
+ 
+    QDesktopServices::openUrl(QUrl("http://localhost:8080/web/auth?port=54321"));
+}
+
 
 void AuthManager::logout() {
     QSettings settings("QuiverApp", "Quiver");
     settings.remove("jwt_token");
     settings.remove("username");
     settings.remove("full_name");
+    
+   
+    settings.remove("avatar_url");
+    settings.remove("avatar_cache_path");
+    settings.remove("avatar_hash");
+    
     emit logged_out();
 }
-
 
 
 void AuthManager::login(const QString& identity, const QString& password) {
@@ -92,8 +150,6 @@ connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     emit signup_success();
 });
 }
-
-/
 void AuthManager::signUp(const QString& first_name, const QString& last_name,
                           const QString& username, const QString& email, const QString& password) {
     QNetworkRequest request(QUrl(pimpl_->api_base_url_ + "/auth/signup"));
@@ -285,17 +341,19 @@ QString AuthManager::get_cached_avatar_path() const {
     return ":/assets/icons/profile.svg"; 
 }
 
+
 void AuthManager::download_and_cache_avatar() {
     QSettings settings("QuiverApp", "Quiver");
     QString url = settings.value("avatar_url").toString();
+    QString username = settings.value("username").toString().remove("@"); 
 
     if (url.isEmpty() || url.startsWith(":/")) return;
 
     QNetworkRequest request{QUrl(url)};
     QNetworkReply* reply = pimpl_->network_.get(request);
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-    reply->deleteLater();
+    connect(reply, &QNetworkReply::finished, this, [this, reply, username]() {
+        reply->deleteLater();
        
         if (reply->error() != QNetworkReply::NoError) {
             qDebug() << "Avatar download failed:" << reply->errorString();
@@ -304,9 +362,10 @@ void AuthManager::download_and_cache_avatar() {
 
         QByteArray data = reply->readAll();
 
-      
-        QString cache_path = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/quiver_avatar.jpg";
-        QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::CacheLocation));
+        
+        QString cache_dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+        QDir().mkpath(cache_dir);
+        QString cache_path = cache_dir + "/quiver_avatar_" + username + ".jpg";
 
         QFile f(cache_path);
         if (f.open(QIODevice::WriteOnly)) {

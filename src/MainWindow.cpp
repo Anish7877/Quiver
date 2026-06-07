@@ -2,6 +2,8 @@
 #include "include/Components.h"
 #include "include/TablePages.h"
 #include "include/FlowLayout.h"
+#include <QDesktopServices>
+#include <QUrl>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QScrollArea>
@@ -40,7 +42,8 @@ struct MainWindow::Impl {
     VolumesPage*    volumes_page_    {};
     PortsPage*      ports_page_      {};
     DevicesPage*    devices_page_    {};
-
+    QWidget* auth_page_       {}; 
+    QFrame* top_bar_         {}; 
     QScrollArea*    scroll_area_     {};
     FlowLayout*     container_grid_  {};
 
@@ -80,6 +83,30 @@ MainWindow::MainWindow(QWidget* parent)
 
     setup_content();
     root->addWidget(pimpl_->central_widget_);
+
+    
+    if (!AuthManager::get_instance().is_logged_in()) {
+        pimpl_->sidebar_->hide();
+        pimpl_->top_bar_->hide();
+        pimpl_->main_stack_->setCurrentWidget(pimpl_->auth_page_);
+    } else {
+        AuthManager::get_instance().fetch_profile();
+        pimpl_->main_stack_->setCurrentIndex(1); 
+    }
+
+   
+    connect(&AuthManager::get_instance(), &AuthManager::login_success, this, [this]() {
+        pimpl_->sidebar_->show();
+        pimpl_->top_bar_->show();
+        pimpl_->main_stack_->setCurrentIndex(1); 
+    });
+
+   
+    connect(&AuthManager::get_instance(), &AuthManager::logged_out, this, [this]() {
+        pimpl_->sidebar_->hide();
+        pimpl_->top_bar_->hide();
+        pimpl_->main_stack_->setCurrentWidget(pimpl_->auth_page_);
+    });
 }
 
 MainWindow::~MainWindow() = default;
@@ -147,8 +174,30 @@ auto MainWindow::setup_sidebar() -> void {
     pimpl_->sidebar_layout_->addStretch(); 
 
    
-    add_nav(":/assets/icons/help.svg", "Help", 6, false);
-    add_nav(":/assets/icons/docs.svg", "Documentation", 7, false);
+
+
+
+    auto* help_btn { new QPushButton("  Help") };
+    help_btn->setObjectName("NavButton");
+    help_btn->setProperty("iconPath", ":/assets/icons/help.svg");
+    help_btn->setProperty("navText", "  Help");
+    help_btn->setProperty("expanded", true);
+    help_btn->setCursor(Qt::PointingHandCursor);
+    pimpl_->sidebar_layout_->addWidget(help_btn);
+
+  
+    auto* docs_btn { new QPushButton("  Documentation") };
+    docs_btn->setObjectName("NavButton");
+    docs_btn->setProperty("iconPath", ":/assets/icons/docs.svg");
+    docs_btn->setProperty("navText", "  Documentation");
+    docs_btn->setProperty("expanded", true);
+    docs_btn->setCursor(Qt::PointingHandCursor);
+    connect(docs_btn, &QPushButton::clicked, this, []() {
+        
+        QDesktopServices::openUrl(QUrl("https://quiver-containers.docs.com")); 
+    });
+    pimpl_->sidebar_layout_->addWidget(docs_btn);
+
     auto* divider { new QFrame };
     divider->setFrameShape(QFrame::HLine);
     divider->setStyleSheet("background-color: #27272A; max-height: 1px; margin: 10px 0px;");
@@ -246,11 +295,10 @@ auto MainWindow::setup_content() -> void {
     main_v_layout->setContentsMargins(0, 0, 0, 0);
     main_v_layout->setSpacing(0);
 
-
-    auto* top_bar { new QFrame };
-    top_bar->setObjectName("TopNavBar");
-    top_bar->setFixedHeight(65);
-    auto* top_layout { new QHBoxLayout(top_bar) };
+    pimpl_->top_bar_ = new QFrame;
+    pimpl_->top_bar_->setObjectName("TopNavBar");
+    pimpl_->top_bar_->setFixedHeight(65);
+    auto* top_layout { new QHBoxLayout(pimpl_->top_bar_) };
     top_layout->setContentsMargins(40, 0, 40, 0);
     top_layout->setAlignment(Qt::AlignVCenter);
 
@@ -273,7 +321,7 @@ auto MainWindow::setup_content() -> void {
     top_layout->addStretch(); 
     top_layout->addWidget(pimpl_->settings_btn_);
 
-    main_v_layout->addWidget(top_bar);
+    main_v_layout->addWidget(pimpl_->top_bar_);
 
     
     auto* content_wrapper { new QWidget };
@@ -284,6 +332,42 @@ auto MainWindow::setup_content() -> void {
     layout->addWidget(pimpl_->main_stack_);
     main_v_layout->addWidget(content_wrapper);
     
+  
+    pimpl_->auth_page_ = new QWidget;
+    auto* auth_layout { new QVBoxLayout(pimpl_->auth_page_) };
+    auth_layout->setAlignment(Qt::AlignCenter);
+    auth_layout->setSpacing(10);
+    
+auto* logo_lbl = new QLabel;
+    QPixmap logo_px(":/assets/icons/Quiver.svg"); 
+    if (!logo_px.isNull()) {
+        logo_lbl->setPixmap(logo_px.scaled(80, 80, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        logo_lbl->setAlignment(Qt::AlignCenter);
+        auth_layout->addWidget(logo_lbl);
+    }
+
+    auto* auth_title = new QLabel("Welcome to Quiver");
+    auth_title->setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 10px;");
+    auth_title->setAlignment(Qt::AlignCenter);
+    
+    auto* auth_subtitle = new QLabel("Please sign in to manage your containers.");
+    auth_subtitle->setStyleSheet("color: #A1A1AA; font-size: 14px; margin-bottom: 20px;");
+    auth_subtitle->setAlignment(Qt::AlignCenter);
+    
+    auto* btn_browser_login = new QPushButton("Sign In with Browser");
+    btn_browser_login->setObjectName("PrimaryButton");
+    btn_browser_login->setFixedSize(250, 45);
+    btn_browser_login->setCursor(Qt::PointingHandCursor);
+    
+    connect(btn_browser_login, &QPushButton::clicked, this, []() {
+        AuthManager::get_instance().start_browser_login();
+    });
+    
+    auth_layout->addWidget(auth_title, 0, Qt::AlignCenter);
+    auth_layout->addWidget(auth_subtitle, 0, Qt::AlignCenter);
+    auth_layout->addWidget(btn_browser_login, 0, Qt::AlignCenter);
+    
+   
     
     pimpl_->dashboard_page_ = new DashboardPage;
 pimpl_->main_stack_->addWidget(pimpl_->dashboard_page_);
@@ -386,6 +470,7 @@ pimpl_->main_stack_->addWidget(pimpl_->dashboard_page_);
         });
     }
 
+     pimpl_->main_stack_->addWidget(pimpl_->auth_page_);
     pimpl_->main_stack_->setCurrentIndex(1); 
 }
 
@@ -506,5 +591,6 @@ auto MainWindow::refresh_container_grid() -> void {
         pimpl_->container_grid_->addWidget(card);
     }
 }
+   
 
 }
