@@ -546,11 +546,58 @@ CreateDialog::CreateDialog(QWidget* parent)
     j_head->addWidget(imp_btn);
     j_layout->addLayout(j_head);
 
+   
     pimpl_->json_editor_ = new QTextEdit;
     pimpl_->json_editor_->setObjectName("JsonEditor");
-    pimpl_->json_editor_->setText(
-        "{\n    \"name\": \"\",\n    \"image\": \"\",\n"
-        "    \"tag\": \"latest\",\n    \"cpu_limit\": 1,\n    \"mem_limit\": 512\n}");
+    
+    // Using a C++ raw string literal (R"(...)") makes formatting JSON much cleaner
+    pimpl_->json_editor_->setText(R"({
+    "container_id": "",
+    "hostname": "quiver-node",
+    "domain_name": "",
+    "vfs": false,
+    "rootfs": {
+        "path": "/var/lib/quiver/rootfs",
+        "readonly": false
+    },
+    "terminal": true,
+    "detach": false,
+    "console_size": {
+        "height": 0,
+        "width": 0
+    },
+    "user": {
+        "uid": 0,
+        "gid": 0
+    },
+    "uid_mapping": [],
+    "gid_mapping": [],
+    "env": [
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    ],
+    "cwd": "/",
+    "args": [
+        "/bin/sh"
+    ],
+    "oom_score": 0,
+    "no_new_privileges": true,
+    "capabilities": [],
+    "rlimits": [],
+    "cgroups_path": "",
+    "devices": [],
+    "networks": {},
+    "timeoffsets": [],
+    "namespaces": [
+        { "type": "pid" },
+        { "type": "network" },
+        { "type": "ipc" },
+        { "type": "uts" },
+        { "type": "mount" }
+    ],
+    "mounts": [],
+    "masked_paths": [],
+    "read_only_paths": []
+})");
     j_layout->addWidget(pimpl_->json_editor_);
     pimpl_->stack_->addWidget(page_json);
 
