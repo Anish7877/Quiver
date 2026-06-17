@@ -1,4 +1,7 @@
 #include "serialization.hpp"
+#include "layer_cache_generated.h"
+#include "types.hpp"
+#include <flatbuffers/buffer.h>
 
 auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const ContainerConfig& obj) -> flatbuffers::Offset<FB::ContainerConfig> {
         auto id_off            { builder.CreateString(obj.container_id) };
@@ -358,5 +361,19 @@ auto Serialization::deserialize(const FB::ImageMetadata* fb) -> ImageMetadata {
         if (fb->source())       obj.source       = fb->source()->str();
         obj.size_bytes = fb->size_bytes();
         obj.created_at = fb->created_at();
+        return obj;
+}
+
+auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const LayerCache& obj) -> flatbuffers::Offset<FB::LayerCache> {
+        auto hash_off { builder.CreateString(obj.hash) };
+        FB::LayerCacheBuilder fb_builder { builder };
+        fb_builder.add_hash(hash_off);
+        return fb_builder.Finish();
+}
+
+auto Serialization::deserialize(const FB::LayerCache* fb) -> LayerCache {
+        LayerCache obj{};
+        if (!fb) return obj;
+        if (fb->hash()) obj.hash = fb->hash()->str();
         return obj;
 }

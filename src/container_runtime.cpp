@@ -178,20 +178,34 @@ auto ContainerRuntime::execute_container_init() -> void {
                 if (m_seccomp_profile_manager) {
                         m_seccomp_profile_manager->apply();
                 }
+                if (m_container_config.oom_score.value >= -1000 && m_container_config.oom_score.value <= 1000) {
+                }
         }
         catch (const std::exception& e) {
                 log_event(std::format("[{}] [{}] {}", chrono::system_clock::now(), m_container_config.container_id, e.what()));
                 _exit(EXIT_FAILURE);
         }
-        if (setgid(0) == -1) {
-                log_event(std::format("[{}] [{}] Container Runtime Error: final setgid or setuid failed before exec.\n",
+
+        if (setuid(m_container_config.user.uid) == -1) {
+                log_event(std::format("[{}] [{}] Container Runtime Error: final setuid failed before exec.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
+                _exit(EXIT_FAILURE);
         }
-        if (setuid(0) == -1) {
-                log_event(std::format("[{}] [{}] Container Runtime Error: final setuid or setuid failed before exec.\n",
+        if (setgid(m_container_config.user.gid) == -1) {
+                log_event(std::format("[{}] [{}] Container Runtime Error: final setgid failed before exec.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
+                _exit(EXIT_FAILURE);
         }
-        umask(m_container_config.user.umask);
+        if (setgroups(m_container_config.user.additional_gids.size(), m_container_config.user.additional_gids.data()) == -1) {
+                log_event(std::format("[{}] [{}] Container Runtime Error: final setgroups failed before exec.\n",
+                                        chrono::system_clock::now(), m_container_config.container_id));
+                _exit(EXIT_FAILURE);
+        }
+        if (umask(m_container_config.user.umask) == -1) {
+                log_event(std::format("[{}] [{}] Container Runtime Error: umask failed before exec.\n",
+                                        chrono::system_clock::now(), m_container_config.container_id));
+                _exit(EXIT_FAILURE);
+        }
         exec_commands();
         log_event(std::format("[{}] [{}] Container Runtime Error: exec failed.\n",
                                 chrono::system_clock::now(), m_container_config.container_id));
@@ -277,7 +291,6 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                                         }
                                         if (mounted) {
                                                 is_overlay_mounted = true;
-                                                break;
                                         }
                                         std::this_thread::sleep_for(std::chrono::milliseconds(10));
                                 }

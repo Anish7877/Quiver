@@ -14,79 +14,198 @@
 #include <vector>
 
 [[nodiscard]] auto GraphBuilder::build_graph(std::vector<BuildFileParser::BuildInstruction>& instructions,
-                const std::unordered_map<std::string, std::string>& build_context) -> BuildGraph {
-        BuildGraph graph{};
-        graph.stages = split_into_stages(instructions, build_context);
-        graph.ops = create_build_ops(graph.stages);
+                const std::unordered_map<std::string, std::string>& build_context) -> std::vector<std::vector<size_t>> {
+        std::vector<std::vector<size_t>> graph{};
+        m_stages = split_into_stages(instructions, build_context);
+        graph.resize(m_stages.size()+1);
+        for (const auto& stage : m_stages) {
+                for(const auto& dependency : stage.depends_on) {
+                        graph[dependency].emplace_back(stage.node_number);
+                }
+        }
         return graph;
 }
 
-[[nodiscard]] auto GraphBuilder::create_build_ops(const std::vector<Stage>& stages) -> std::vector<BuildOp> {
-        std::vector<BuildOp> ops{};
-        return ops;
+[[nodiscard]] auto GraphBuilder::get_stages() -> std::vector<Stage>& {
+        return m_stages;
+}
+
+[[nodiscard]] auto GraphBuilder::get_parsed_instruction() -> ParsedInstructions& {
+        return m_parsed_instructions;
+}
+
+[[nodiscard]] auto GraphBuilder::get_instruction_maps() -> ParsedInstructionsMaps {
+        ParsedInstructionsMaps maps{};
+        maps.index_to_offset = m_index_to_offset;
+        maps.index_to_type = m_index_to_type;
+        return maps;
 }
 
 [[nodiscard]] auto GraphBuilder::split_into_stages(std::vector<BuildFileParser::BuildInstruction>& instructions, const std::unordered_map<std::string, std::string>& build_context) -> std::vector<Stage> {
         std::unordered_map<std::string, std::string> global_args{};
         std::vector<Stage> stages{};
-        size_t stage_name_count{0};
+        size_t node_number{1};
         Stage* current_stage{nullptr};
 
-        for (size_t i{0}; i < instructions.size(); ++i) {
+        for (size_t i{}; i < instructions.size(); ++i) {
                 auto& instruction{instructions[i]};
-                if (!current_stage && instruction.type == Instruction::InstructionType::ARG) {
-                        auto expanded_form{expand_args(instruction.shell_form, global_args)};
-                        auto parsed_args{parse_arg(expanded_form, instruction.line_number)};
-                        auto it{build_context.find(parsed_args.first)};
-
-                        if (it != build_context.end()) {
-                                parsed_args.second = it->second;
+                if (current_stage) {
+                        switch (instruction.type) {
+                                case Instruction::InstructionType::ADD:
+                                        {
+                                                parse_add_instruction(instruction, global_args, current_stage->local_args, current_stage->local_envs, i);
+                                                current_stage->instruction_indices.emplace_back(i);
+                                                break;
+                                        }
+                                case Instruction::InstructionType::ARG:
+                                        {
+                                                auto parsed_args{parse_arg_instruction(instruction)};
+                                                auto it{build_context.find(parsed_args.first)};
+                                                if (parsed_args.second != std::nullopt) {
+                                                        if (it != build_context.end()) {
+                                                                parsed_args.second = it->second;
+                                                        }
+                                                }
+                                                else {
+                                                        if (it != build_context.end()) {
+                                                                parsed_args.second = it->second;
+                                                        }
+                                                        else {
+                                                                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Build context not provided for key '{}'.",
+                                                                                        instruction.line_number, parsed_args.first));
+                                                        }
+                                                }
+                                                current_stage->local_args[parsed_args.first] = parsed_args.second.value();
+                                                break;
+                                        }
+                                case Instruction::InstructionType::CMD:
+                                        {
+                                                parse_cmd_instruction(current_stage, instruction);
+                                                current_stage->instruction_indices.emplace_back(i);
+                                                break;
+                                        }
+                                case Instruction::InstructionType::COPY:
+                                        {
+                                                parse_copy_instruction(current_stage, instruction, global_args, current_stage->local_args, current_stage->local_envs, i);
+                                                current_stage->instruction_indices.emplace_back(i);
+                                                break;
+                                        }
+                                case Instruction::InstructionType::ENTRYPOINT:
+                                        {
+                                                parse_entrypoint_instruction(current_stage, instruction);
+                                                current_stage->instruction_indices.emplace_back(i);
+                                                break;
+                                        }
+                                case Instruction::InstructionType::ENV:
+                                        {
+                                                parse_env_instruction(current_stage, instruction, global_args);
+                                                break;
+                                        }
+                                case Instruction::InstructionType::EXPOSE:
+                                        {
+                                                parse_expose_instruction(current_stage, instruction, global_args);
+                                                break;
+                                        }
+                                case Instruction::InstructionType::FROM:
+                                        {
+                                                auto stage{parse_from_instruction(instruction, global_args, node_number)};
+                                                stages.emplace_back(std::move(stage));
+                                                ++node_number;
+                                                current_stage = &stages.back();
+                                                break;
+                                        }
+                                case Instruction::InstructionType::HEALTHCHECK:
+                                        {
+                                                // TODO:
+                                                break;
+                                        }
+                                case Instruction::InstructionType::LABEL:
+                                        {
+                                                parse_label_instruction(current_stage, instruction, global_args);
+                                                break;
+                                        }
+                                case Instruction::InstructionType::ONBUILD:
+                                        {
+                                                // TODO:
+                                                break;
+                                        }
+                                case Instruction::InstructionType::RUN:
+                                        {
+                                                parse_run_instruction(instruction, global_args, current_stage->local_args, current_stage->local_envs, i);
+                                                current_stage->instruction_indices.emplace_back(i);
+                                                break;
+                                        }
+                                case Instruction::InstructionType::SHELL:
+                                        {
+                                                parse_shell_instruction(instruction, i);
+                                                current_stage->instruction_indices.emplace_back(i);
+                                                break;
+                                        }
+                                case Instruction::InstructionType::STOPSIGNAL:
+                                        {
+                                                parse_stop_signal_instruction(current_stage, instruction);
+                                                break;
+                                        }
+                                case Instruction::InstructionType::USER:
+                                        {
+                                                parse_user_instruction(current_stage, instruction, global_args, i);
+                                                break;
+                                        }
+                                case Instruction::InstructionType::VOLUME:
+                                        {
+                                                parse_volume_instruction(current_stage, instruction);
+                                                break;
+                                        }
+                                case Instruction::InstructionType::WORKDIR:
+                                        {
+                                                parse_workdir_instruction(instruction, global_args, current_stage->local_args, current_stage->local_envs, i);
+                                                current_stage->instruction_indices.emplace_back(i);
+                                                break;
+                                        }
+                                default:
+                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unknown instruction.",
+                                                                instruction.line_number));
                         }
-                        else if (!parsed_args.second.has_value()) {
-                                parsed_args.second = "";
-                        }
-                        global_args[parsed_args.first] = parsed_args.second.value();
-                        continue;
                 }
-
-                if (!current_stage && instruction.type != Instruction::InstructionType::FROM) {
-                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Instruction before first FROM.",
-                                                instruction.line_number));
-                }
-
-                if (instruction.type == Instruction::InstructionType::FROM) {
-                        Stage stage{};
-                        auto expanded_form{expand_args(instruction.shell_form, global_args)};
-                        auto parsed{parse_from_as(expanded_form, instruction.line_number)};
-                        stage.base_image = parsed.first;
-
-                        if (parsed.second.has_value()) {
-                                stage.name = parsed.second.value();
+                else {
+                        switch (instruction.type) {
+                                case Instruction::InstructionType::ARG:
+                                        {
+                                                auto parsed_args{parse_arg_instruction(instruction)};
+                                                auto it{build_context.find(parsed_args.first)};
+                                                if (parsed_args.second != std::nullopt) {
+                                                        if (it != build_context.end()) {
+                                                                parsed_args.second = it->second;
+                                                        }
+                                                }
+                                                else {
+                                                        if (it != build_context.end()) {
+                                                                parsed_args.second = it->second;
+                                                        }
+                                                        else {
+                                                                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Build context not provided for key '{}'.",
+                                                                                        instruction.line_number, parsed_args.first));
+                                                        }
+                                                }
+                                                global_args[parsed_args.first] = parsed_args.second.value();
+                                                break;
+                                        }
+                                case Instruction::InstructionType::FROM:
+                                        {
+                                                auto stage{parse_from_instruction(instruction, global_args, node_number)};
+                                                stages.emplace_back(std::move(stage));
+                                                ++node_number;
+                                                current_stage = &stages.back();
+                                                break;
+                                        }
+                                default:
+                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Instruction before FROM.",
+                                                                instruction.line_number));
                         }
-                        else {
-                                stage.name = std::format("stage_{}", stage_name_count++);
-                        }
-
-                        stage.local_args = global_args;
-                        stages.emplace_back(std::move(stage));
-                        current_stage =&stages.back();
                 }
-
-                if (current_stage && instruction.type == Instruction::InstructionType::ARG) {
-                        auto expanded_form{expand_args(instruction.shell_form, global_args)};
-                        auto parsed_args{parse_arg(expanded_form, instruction.line_number)};
-                        auto it{build_context.find(parsed_args.first)};
-                        if (it != build_context.end()) {
-                                parsed_args.second = it->second;
-                        }
-                        else if (!parsed_args.second.has_value()) {
-                                parsed_args.second = "";
-                        }
-                        current_stage->local_args[parsed_args.first] = parsed_args.second.value();
-                }
-                if (current_stage && instruction.type == Instruction::InstructionType::ENV) {
-                }
-                current_stage->instruction_indices.emplace_back(i);
+        }
+        if (stages.empty()) {
+                throw std::runtime_error("Graph Builder Error: Minimum one from instruction required.");
         }
         return stages;
 }
@@ -123,35 +242,45 @@
 }
 
 
-[[nodiscard]] auto GraphBuilder::parse_arg(const std::string& line, std::uint32_t line_number) -> std::pair<std::string, std::optional<std::string>> {
-        if (line.empty()) {
-                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: No argument provided in ARG.",
-                                        line_number));
+[[nodiscard]] auto GraphBuilder::parse_arg_instruction(BuildFileParser::BuildInstruction& instruction) -> std::pair<std::string, std::optional<std::string>> {
+        if (!instruction.opts.empty()) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid options provided in arg instruction.",
+                                        instruction.line_number));
         }
-        std::pair<std::string, std::optional<std::string>> key_value;
-        size_t eq_index{line.find('=')};
+        if (instruction.shell_form.empty()) {
+                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty shell arguments in arg instruction.",
+                                                instruction.line_number));
+        }
+        std::stringstream iss{instruction.shell_form};
+        std::string token{};
+        std::string extra{};
+        iss >> token;
+        if (iss >> extra) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Only one argument definition should be provided.",
+                                        instruction.line_number));
+        }
+        size_t eq_index{token.find('=')};
         if (eq_index == std::string::npos) {
-                key_value.first = line;
-                BuildFileParser::trim(key_value.first);
-                if (!is_valid_variable_name(key_value.first)) {
-                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid variable name '{}'.",
-                                                line_number, key_value.first));
+                if (is_valid_variable_name(token)) {
+                        return std::make_pair(token, std::nullopt);
                 }
-                key_value.second = std::nullopt;
-                return key_value;
+                else {
+                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid key name '{}'.",
+                                                instruction.line_number, token));
+                }
         }
-        key_value.first = line.substr(0, eq_index);
-        BuildFileParser::trim(key_value.first);
-        if (!is_valid_variable_name(key_value.first)) {
-                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid variable name '{}'.",
-                                        line_number, key_value.first));
+        std::string key{token.substr(0, eq_index)};
+        std::string value{token.substr(eq_index+1)};
+        if (key.empty()) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty key in token '{}'.",
+                                        instruction.line_number,token));
         }
-        std::string value{line.substr(eq_index+1)};
-        BuildFileParser::trim(value);
-        key_value.second = value;
-        return key_value;
+        if (!is_valid_variable_name(key)) {
+                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid key name '{}'.",
+                                                instruction.line_number, key));
+        }
+        return std::make_pair(key, value);
 }
-
 
 auto GraphBuilder::parse_add_instruction(BuildFileParser::BuildInstruction& instruction,
                 const std::unordered_map<std::string, std::string>& global_args,
@@ -229,7 +358,7 @@ auto GraphBuilder::parse_add_instruction(BuildFileParser::BuildInstruction& inst
         m_parsed_instructions.add_instructions.emplace_back(std::move(add_ins));
 }
 
-auto GraphBuilder::parse_copy_instruction(BuildFileParser::BuildInstruction& instruction,
+auto GraphBuilder::parse_copy_instruction(Stage* stage, BuildFileParser::BuildInstruction& instruction,
                 const std::unordered_map<std::string, std::string>& global_args,
                 const std::unordered_map<std::string, std::string>& local_args,
                 const std::unordered_map<std::string, std::string>& local_envs, size_t instruction_index) -> void {
@@ -252,6 +381,11 @@ auto GraphBuilder::parse_copy_instruction(BuildFileParser::BuildInstruction& ins
                                                                 instruction.line_number));
                                 }
                                 copy_ins.from_stage = opt.value;
+                                auto it{m_stage_alias_to_node_number.find(opt.value)};
+                                if (it != m_stage_alias_to_node_number.end()) {
+                                        copy_ins.is_dependency = true;
+                                        stage->depends_on.emplace_back(it->second);
+                                }
                         }
                         else if (opt.key == "chown") {
                                 if (!inserted) {
@@ -312,7 +446,7 @@ auto GraphBuilder::parse_copy_instruction(BuildFileParser::BuildInstruction& ins
         m_parsed_instructions.copy_instructions.emplace_back(std::move(copy_ins));
 }
 
-auto GraphBuilder::parse_cmd_instruction(BuildFileParser::BuildInstruction& instruction, size_t instruction_index) -> void {
+auto GraphBuilder::parse_cmd_instruction(Stage* stage, BuildFileParser::BuildInstruction& instruction) -> void {
         Instruction::CmdInstruction cmd_ins{};
         if (!instruction.opts.empty()) {
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid options provided in cmd instruction.",
@@ -342,12 +476,10 @@ auto GraphBuilder::parse_cmd_instruction(BuildFileParser::BuildInstruction& inst
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unexpected error.",
                                         instruction.line_number));
         }
-        m_index_to_type[instruction_index] = Instruction::InstructionType::CMD;
-        m_index_to_offset[instruction_index] = m_parsed_instructions.cmd_instructions.size();
-        m_parsed_instructions.cmd_instructions.emplace_back(std::move(cmd_ins));
+        stage->cmd_instructions.emplace_back(cmd_ins);
 }
 
-auto GraphBuilder::parse_entrypoint_instruction(BuildFileParser::BuildInstruction& instruction, size_t instruction_index) -> void {
+auto GraphBuilder::parse_entrypoint_instruction(Stage* stage, BuildFileParser::BuildInstruction& instruction) -> void {
         Instruction::EntrypointInstruction entrypoint_ins{};
         if (!instruction.opts.empty()) {
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid options provided in entrypoint instruction.",
@@ -377,9 +509,7 @@ auto GraphBuilder::parse_entrypoint_instruction(BuildFileParser::BuildInstructio
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unexpected error.",
                                         instruction.line_number));
         }
-        m_index_to_type[instruction_index] = Instruction::InstructionType::ENTRYPOINT;
-        m_index_to_offset[instruction_index] = m_parsed_instructions.entrypoint_instructions.size();
-        m_parsed_instructions.entrypoint_instructions.emplace_back(std::move(entrypoint_ins));
+        stage->entrypoint_instructions.emplace_back(entrypoint_ins);
 }
 
 auto GraphBuilder::parse_env_instruction(Stage* stage, BuildFileParser::BuildInstruction& instruction,
@@ -409,13 +539,15 @@ auto GraphBuilder::parse_env_instruction(Stage* stage, BuildFileParser::BuildIns
                                                 instruction.line_number, token));
                 }
                 std::string key{token.substr(0, eq_index)};
-                BuildFileParser::trim(key);
                 if (key.empty()) {
                         throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty key '{}'.",
                                                 instruction.line_number, token));
                 }
+                if (!is_valid_variable_name(key)) {
+                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid key name '{}'.",
+                                                instruction.line_number, key));
+                }
                 std::string value{token.substr(eq_index+1)};
-                BuildFileParser::trim(value);
                 stage->local_envs[key] = value;
                 extended_args[key] = value;
         }
@@ -443,7 +575,6 @@ auto GraphBuilder::parse_expose_instruction(Stage* stage, BuildFileParser::Build
         while (iss >> token) {
                 Instruction::ExposeInstruction expo_ins{};
                 token = expand_args(token, extended_args);
-                BuildFileParser::trim(token);
                 size_t slash_index{token.find('/')};
                 if (slash_index == std::string::npos) {
                         std::uint16_t port{get_port(token)};
@@ -484,7 +615,7 @@ auto GraphBuilder::parse_expose_instruction(Stage* stage, BuildFileParser::Build
 }
 
 [[nodiscard]] auto GraphBuilder::parse_from_instruction(BuildFileParser::BuildInstruction& instruction,
-                const std::unordered_map<std::string, std::string>& global_args) -> Stage {
+                const std::unordered_map<std::string, std::string>& global_args, size_t node_number) -> Stage {
         if (!instruction.opts.empty()) {
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid options provided in from instruction.",
                                         instruction.line_number));
@@ -494,6 +625,7 @@ auto GraphBuilder::parse_expose_instruction(Stage* stage, BuildFileParser::Build
                                         instruction.line_number));
         }
         Stage stage{};
+        stage.node_number = node_number;
         instruction.shell_form = expand_args(instruction.shell_form, global_args);
         std::stringstream iss{instruction.shell_form};
         std::string base_image{};
@@ -511,11 +643,14 @@ auto GraphBuilder::parse_expose_instruction(Stage* stage, BuildFileParser::Build
                                         instruction.line_number));
         }
         stage.base_image = std::move(base_image);
+        auto it{m_stage_alias_to_node_number.find(base_image)};
+        if (it != m_stage_alias_to_node_number.end()) {
+                stage.depends_on.emplace_back(it->second);
+        }
         std::string maybe_as{};
         if (!(iss >> maybe_as)) {
                 return stage;
         }
-
         std::string transformed_as{maybe_as};
         std::transform(transformed_as.begin(), transformed_as.end(), transformed_as.begin(),
                         [](unsigned char c) -> char {
@@ -525,16 +660,16 @@ auto GraphBuilder::parse_expose_instruction(Stage* stage, BuildFileParser::Build
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Expected 'AS' after base image name.",
                                         instruction.line_number));
         }
-        std::string stage_name{};
-        if (!(iss >> stage_name)) {
+        std::string stage_alias{};
+        if (!(iss >> stage_alias)) {
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Missing stage alias after AS.",
                                         instruction.line_number));
         }
-        stage.name = std::move(stage_name);
-        if (iss >> stage_name) {
-                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: More than one stage name provided.",
+        if (iss >> stage_alias) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: More than one stage alias provided.",
                                         instruction.line_number));
         }
+        m_stage_alias_to_node_number[stage_alias] = node_number;
         return stage;
 }
 
@@ -565,13 +700,11 @@ auto GraphBuilder::parse_label_instruction(Stage* stage, BuildFileParser::BuildI
                                                 instruction.line_number, token));
                 }
                 std::string key{token.substr(0, eq_index)};
-                BuildFileParser::trim(key);
                 if (key.empty()) {
                         throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty key '{}'.",
                                                 instruction.line_number, token));
                 }
                 std::string value{token.substr(eq_index+1)};
-                BuildFileParser::trim(value);
                 stage->local_labels[key] = std::move(value);
         }
 }
@@ -645,6 +778,135 @@ auto GraphBuilder::parse_shell_instruction(BuildFileParser::BuildInstruction& in
         m_parsed_instructions.shell_instructions.emplace_back(std::move(shell_ins));
 }
 
+auto GraphBuilder::parse_stop_signal_instruction(Stage* stage, BuildFileParser::BuildInstruction& instruction) -> void {
+        if (!instruction.opts.empty()) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid options provided in stopsignal instruction.",
+                                        instruction.line_number));
+        }
+        if (instruction.shell_form.empty()) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty shell arguments in stopsignal instruction.",
+                                        instruction.line_number));
+        }
+        std::stringstream iss{instruction.shell_form};
+        std::string signal{};
+        std::string extra{};
+        iss >> signal;
+        if (iss >> extra) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Only one signal should be provided.",
+                                        instruction.line_number));
+        }
+        std::transform(signal.begin(), signal.end(), signal.begin(),
+                        [](unsigned char c) -> char {
+                                return static_cast<char>(std::toupper(c));
+                        });
+        auto it{Instruction::SIGNAL_STR_TO_MASK.find(signal)};
+        if (it != Instruction::SIGNAL_STR_TO_MASK.end()) {
+                stage->stop_signal = std::move(signal);
+        }
+        else {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unknown stopsignal '{}'.",
+                                        instruction.line_number, instruction.shell_form));
+        }
+}
+
+auto GraphBuilder::parse_user_instruction(Stage* stage, BuildFileParser::BuildInstruction& instruction,
+                const std::unordered_map<std::string, std::string>& global_args, size_t instruction_index) -> void {
+        if (!instruction.opts.empty()) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid options provided in user instruction.",
+                                        instruction.line_number));
+        }
+        if (instruction.shell_form.empty()) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty shell arguments in user instruction.",
+                                        instruction.line_number));
+        }
+        std::unordered_map<std::string, std::string> extended_args{global_args};
+        for (const auto& [key, value] : stage->local_args) {
+                extended_args[key] = value;
+        }
+        for (const auto& [key, value] : stage->local_envs) {
+                extended_args[key] = value;
+        }
+        instruction.shell_form = expand_args(instruction.shell_form, extended_args);
+        std::stringstream iss{instruction.shell_form};
+        std::string user{};
+        std::string extra{};
+        iss >> user;
+        if (iss >> extra) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Only one user should be provided.",
+                                        instruction.line_number));
+        }
+        Instruction::UserInstruction user_ins{std::move(user)};
+        m_index_to_type[instruction_index] = Instruction::InstructionType::USER;
+        m_index_to_offset[instruction_index] = m_parsed_instructions.shell_instructions.size();
+        m_parsed_instructions.user_instructions.emplace_back(std::move(user_ins));
+}
+
+auto GraphBuilder::parse_volume_instruction(Stage* stage, BuildFileParser::BuildInstruction& instruction) -> void {
+        if (!instruction.opts.empty()) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid options provided in volume instruction.",
+                                        instruction.line_number));
+        }
+        if (instruction.is_shell_form) {
+                if (instruction.shell_form.empty()) {
+                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty shell arguments in volume instruction.",
+                                                instruction.line_number));
+                }
+                std::stringstream iss{instruction.shell_form};
+                std::string token{};
+                while (iss >> token) {
+                        stage->volumes.emplace_back(std::move(token));
+                }
+        }
+        else if (instruction.is_json_form) {
+                if (instruction.json_args.empty()) {
+                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty json arguments in volume instruction.",
+                                                instruction.line_number));
+                }
+                for (const auto& arg : instruction.json_args) {
+                        stage->volumes.emplace_back(arg);
+                }
+        }
+        else {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unexpected error.",
+                                        instruction.line_number));
+        }
+}
+
+auto GraphBuilder::parse_workdir_instruction(BuildFileParser::BuildInstruction& instruction,
+                const std::unordered_map<std::string, std::string>& global_args,
+                const std::unordered_map<std::string, std::string>& local_args,
+                const std::unordered_map<std::string, std::string>& local_envs, size_t instruction_index) -> void {
+        if (!instruction.opts.empty()) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid options provided in workdir instruction.",
+                                        instruction.line_number));
+        }
+        std::unordered_map<std::string, std::string> extended_args{global_args};
+        for (const auto& [key, value] : local_args) {
+                extended_args[key] = value;
+        }
+        for (const auto& [key, value] : local_envs) {
+                extended_args[key] = value;
+        }
+        instruction.shell_form = expand_args(instruction.shell_form, extended_args);
+        if (instruction.shell_form.empty()) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty shell arguments in workdir instruction.",
+                                        instruction.line_number));
+        }
+        std::stringstream iss{instruction.shell_form};
+        std::string path{};
+        std::string extra{};
+        iss >> path;
+        if (iss >> extra) {
+                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Only one path should be provided.",
+                                        instruction.line_number));
+        }
+        Instruction::WorkdirInstruction workdir_ins{};
+        workdir_ins.workdir = std::move(path);
+        m_index_to_type[instruction_index] = Instruction::InstructionType::WORKDIR;
+        m_index_to_offset[instruction_index] = m_parsed_instructions.workdir_instructions.size();
+        m_parsed_instructions.workdir_instructions.emplace_back(std::move(workdir_ins));
+}
+
 auto GraphBuilder::get_port(const std::string& token) -> std::uint16_t {
         if (token.empty()) return 0;
         for (char c : token) {
@@ -662,7 +924,6 @@ auto GraphBuilder::get_port(const std::string& token) -> std::uint16_t {
         }
         return port;
 }
-
 
 auto GraphBuilder::is_valid_variable_name(const std::string& name) -> bool {
         if (name.empty()) {

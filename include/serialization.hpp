@@ -3,6 +3,7 @@
 #include "container_config_generated.h"
 #include "container_config.hpp"
 #include "image_metadata_generated.h"
+#include "layer_cache_generated.h"
 #include "types.hpp"
 
 #include <concepts>
@@ -17,13 +18,17 @@ namespace Serialization {
 
         auto serialize  (flatbuffers::FlatBufferBuilder&, const ImageMetadata&) -> flatbuffers::Offset<FB::ImageMetadata>;
         auto deserialize(const FB::ImageMetadata*) -> ImageMetadata;
+
+        auto serialize (flatbuffers::FlatBufferBuilder&, const LayerCache&) -> flatbuffers::Offset<FB::LayerCache>;
+        auto deserialize(const FB::LayerCache*) -> LayerCache;
 }
 
 template<typename T>
 struct FlatbufferTraits;
 
 template<> struct FlatbufferTraits<ContainerConfig> { using FbRootType = FB::ContainerConfig; };
-template<> struct FlatbufferTraits<ImageMetadata>        { using FbRootType = FB::ImageMetadata; };
+template<> struct FlatbufferTraits<ImageMetadata>   { using FbRootType = FB::ImageMetadata; };
+template<> struct FlatbufferTraits<LayerCache>     { using FbRootType = FB::LayerCache; };
 
 template<typename T>
 struct is_flatbuffer_offset : std::false_type {};

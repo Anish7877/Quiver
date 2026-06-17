@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstdint>
 #include <unordered_map>
+#include <csignal>
 
 namespace Instruction {
         enum class InstructionType {
@@ -29,10 +30,6 @@ namespace Instruction {
                 std::string key{};
                 std::string value{};
         };
-        struct Heredoc {
-                std::vector<std::string> content{};
-                std::string delimiter{};
-        };
         struct AddInstruction {
                 std::optional<std::string> chown{};
                 std::optional<std::string> chmod{};
@@ -40,6 +37,7 @@ namespace Instruction {
                 std::string dst{};
         };
         struct CopyInstruction {
+                bool is_dependency{false};
                 std::optional<std::string> from_stage{};
                 std::optional<std::string> chown{};
                 std::optional<std::string> chmod{};
@@ -71,6 +69,12 @@ namespace Instruction {
         struct ShellInstruction {
                 std::vector<std::string> shell_args{};
         };
+        struct UserInstruction {
+                std::string user{};
+        };
+        struct WorkdirInstruction {
+                std::string workdir{};
+        };
         const std::unordered_map<std::string, InstructionType> INSTRUCTION_STR_TO_TYPE {
                 {"ADD", InstructionType::ADD},
                 {"ARG", InstructionType::ARG},
@@ -89,5 +93,40 @@ namespace Instruction {
                 {"USER", InstructionType::USER},
                 {"VOLUME", InstructionType::VOLUME},
                 {"WORKDIR", InstructionType::WORKDIR}
+        };
+        const std::unordered_map<std::string, int> SIGNAL_STR_TO_MASK {
+                {"SIGHUP", SIGHUP},
+                {"SIGINT", SIGINT},
+                {"SIGQUIT", SIGQUIT},
+                {"SIGILL", SIGILL},
+                {"SIGTRAP", SIGTRAP},
+                {"SIGABRT", SIGABRT},
+                {"SIGIOT", SIGIOT},
+                {"SIGBUS", SIGBUS},
+                {"SIGFPE", SIGFPE},
+                {"SIGKILL", SIGKILL},
+                {"SIGUSR1", SIGUSR1},
+                {"SIGSEGV", SIGSEGV},
+                {"SIGUSR2", SIGUSR2},
+                {"SIGPIPE", SIGPIPE},
+                {"SIGALRM", SIGALRM},
+                {"SIGTERM", SIGTERM},
+                {"SIGSTKFLT", SIGSTKFLT},
+                {"SIGCHLD", SIGCHLD},
+                {"SIGCONT", SIGCONT},
+                {"SIGSTOP", SIGSTOP},
+                {"SIGTSTP", SIGTSTP},
+                {"SIGTTIN", SIGTTIN},
+                {"SIGTTOU", SIGTTOU},
+                {"SIGURG", SIGURG},
+                {"SIGXCPU", SIGXCPU},
+                {"SIGXFSZ", SIGXFSZ},
+                {"SIGVTALRM", SIGVTALRM},
+                {"SIGPROF", SIGPROF},
+                {"SIGWINCH", SIGWINCH},
+                {"SIGIO", SIGIO},
+                {"SIGPOLL", SIGPOLL},
+                {"SIGPWR", SIGPWR},
+                {"SIGSYS", SIGSYS}
         };
 }

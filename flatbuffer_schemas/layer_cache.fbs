@@ -1,0 +1,7 @@
+namespace FB;
+
+table LayerCache {
+        hash : string;
+}
+
+root_type LayerCache;

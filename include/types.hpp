@@ -3,16 +3,14 @@
 #include <atomic>
 #include <string>
 #include <new>
-#include <utility>
 #include <vector>
-#include <filesystem>
-namespace fs = std::filesystem;
 
 enum class JobType : std::uint8_t {
         GET = 0,
         PUT = 1,
         UPDATE = 2,
-        DELETE = 3
+        DELETE = 3,
+        GETALL = 4
 };
 
 enum class SlotState : std::uint32_t {
@@ -23,10 +21,8 @@ enum class SlotState : std::uint32_t {
 
 enum class TargetDB : std::uint8_t {
         CONTAINER = 0,
-        VOLUME = 1,
-        DEVICE = 2,
-        NETWORK = 3,
-        IMAGE = 4
+        IMAGE = 2,
+        LAYERCACHE = 3
 };
 
 enum class TargetLog : std::uint8_t {
@@ -76,7 +72,12 @@ struct ValueHeapHeader {
         alignas(std::hardware_destructive_interference_size) std::atomic<std::uint64_t> data_tail{0};
 };
 
-struct Status {
+struct DbResult {
+        std::string key{};
+        std::string value{};
+};
+
+struct DbStatus {
         public:
                 auto ok() const -> bool {
                         return m_ok;
@@ -84,16 +85,14 @@ struct Status {
                 auto get_error() const -> std::string {
                         return m_error;
                 }
-                auto get_result() const -> std::string {
-                        return m_result;
+                auto get_result() const -> std::vector<DbResult> {
+                        return m_results;
                 }
         private:
                 friend class ContainerDbManager;
-                friend class VolumeDbManager;
-                friend class DeviceDbManager;
-                friend class NetworkDbManager;
                 friend class ImageDbManager;
-                std::string m_result{};
+                friend class LayerCacheDbManager;
+                std::vector<DbResult> m_results{};
                 std::string m_error{};
                 bool m_ok{false};
 };
@@ -103,41 +102,8 @@ struct SubIDRange {
     uint32_t count{};
 };
 
-struct ContainerType {
-        std::vector<std::pair<std::string, std::string>> volumes{};
-        std::vector<std::string> devices{};
-        std::vector<std::pair<int, int>> ports{};
-        std::string id{};
-        std::string name{};
-        std::string image{};
-        std::string status{};
-        std::string created_at{};
-        std::string hostname{};
-        std::string filesystem_path{};
-        std::string pty_shell{};
-        std::string vfs_path{};
-        std::uint32_t pid{};
-        std::uint32_t net_pid{};
-        bool vfs{};
-        bool no_remove{};
-};
-
-struct VolumeType {
-        std::vector<std::pair<std::string, std::string>> volumes{};
-        std::string container_id{};
-        std::string created_at{};
-};
-
-struct DeviceType {
-        std::vector<std::string> devices{};
-        std::string container_id{};
-        std::string created_at{};
-};
-
-struct NetworkType{
-        std::vector<std::pair<std::string, std::string>> ports{};
-        std::string container_id{};
-        std::string created_at{};
+struct LayerCache {
+        std::string hash{};
 };
 
 struct ImageMetadata {

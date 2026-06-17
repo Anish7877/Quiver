@@ -13,7 +13,7 @@ class ContainerDbManager : public DatabaseManager<ContainerConfig>, public Singl
         friend class Singleton<ContainerDbManager>;
         private:
                 ContainerDbManager() = default;
-                ~ContainerDbManager();
+                ~ContainerDbManager() = default;
         public:
                 ContainerDbManager(const ContainerDbManager&) = delete;
                 ContainerDbManager(ContainerDbManager&&) = delete;
