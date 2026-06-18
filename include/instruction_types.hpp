@@ -1,10 +1,10 @@
 #pragma once
+#include <csignal>
+#include <cstdint>
 #include <optional>
 #include <string>
-#include <vector>
-#include <cstdint>
 #include <unordered_map>
-#include <csignal>
+#include <vector>
 
 namespace Instruction {
         enum class InstructionType {
@@ -29,6 +29,11 @@ namespace Instruction {
         struct InstructionOption {
                 std::string key{};
                 std::string value{};
+        };
+        struct InstructionHash {
+                std::string parent_digest{};
+                std::string expanded_raw_ins{};
+                std::string file_checksum{};
         };
         struct AddInstruction {
                 std::optional<std::string> chown{};
@@ -75,7 +80,7 @@ namespace Instruction {
         struct WorkdirInstruction {
                 std::string workdir{};
         };
-        const std::unordered_map<std::string, InstructionType> INSTRUCTION_STR_TO_TYPE {
+        const std::unordered_map<std::string, InstructionType> INSTRUCTION_STR_TO_TYPE{
                 {"ADD", InstructionType::ADD},
                 {"ARG", InstructionType::ARG},
                 {"CMD", InstructionType::CMD},
@@ -94,39 +99,17 @@ namespace Instruction {
                 {"VOLUME", InstructionType::VOLUME},
                 {"WORKDIR", InstructionType::WORKDIR}
         };
-        const std::unordered_map<std::string, int> SIGNAL_STR_TO_MASK {
-                {"SIGHUP", SIGHUP},
-                {"SIGINT", SIGINT},
-                {"SIGQUIT", SIGQUIT},
-                {"SIGILL", SIGILL},
-                {"SIGTRAP", SIGTRAP},
-                {"SIGABRT", SIGABRT},
-                {"SIGIOT", SIGIOT},
-                {"SIGBUS", SIGBUS},
-                {"SIGFPE", SIGFPE},
-                {"SIGKILL", SIGKILL},
-                {"SIGUSR1", SIGUSR1},
-                {"SIGSEGV", SIGSEGV},
-                {"SIGUSR2", SIGUSR2},
-                {"SIGPIPE", SIGPIPE},
-                {"SIGALRM", SIGALRM},
-                {"SIGTERM", SIGTERM},
-                {"SIGSTKFLT", SIGSTKFLT},
-                {"SIGCHLD", SIGCHLD},
-                {"SIGCONT", SIGCONT},
-                {"SIGSTOP", SIGSTOP},
-                {"SIGTSTP", SIGTSTP},
-                {"SIGTTIN", SIGTTIN},
-                {"SIGTTOU", SIGTTOU},
-                {"SIGURG", SIGURG},
-                {"SIGXCPU", SIGXCPU},
-                {"SIGXFSZ", SIGXFSZ},
-                {"SIGVTALRM", SIGVTALRM},
-                {"SIGPROF", SIGPROF},
-                {"SIGWINCH", SIGWINCH},
-                {"SIGIO", SIGIO},
-                {"SIGPOLL", SIGPOLL},
-                {"SIGPWR", SIGPWR},
-                {"SIGSYS", SIGSYS}
+        const std::unordered_map<std::string, int> SIGNAL_STR_TO_MASK{
+                {"SIGHUP", SIGHUP},   {"SIGINT", SIGINT},       {"SIGQUIT", SIGQUIT},
+                {"SIGILL", SIGILL},   {"SIGTRAP", SIGTRAP},     {"SIGABRT", SIGABRT},
+                {"SIGIOT", SIGIOT},   {"SIGBUS", SIGBUS},       {"SIGFPE", SIGFPE},
+                {"SIGKILL", SIGKILL}, {"SIGUSR1", SIGUSR1},     {"SIGSEGV", SIGSEGV},
+                {"SIGUSR2", SIGUSR2}, {"SIGPIPE", SIGPIPE},     {"SIGALRM", SIGALRM},
+                {"SIGTERM", SIGTERM}, {"SIGSTKFLT", SIGSTKFLT}, {"SIGCHLD", SIGCHLD},
+                {"SIGCONT", SIGCONT}, {"SIGSTOP", SIGSTOP},     {"SIGTSTP", SIGTSTP},
+                {"SIGTTIN", SIGTTIN}, {"SIGTTOU", SIGTTOU},     {"SIGURG", SIGURG},
+                {"SIGXCPU", SIGXCPU}, {"SIGXFSZ", SIGXFSZ},     {"SIGVTALRM", SIGVTALRM},
+                {"SIGPROF", SIGPROF}, {"SIGWINCH", SIGWINCH},   {"SIGIO", SIGIO},
+                {"SIGPOLL", SIGPOLL}, {"SIGPWR", SIGPWR},       {"SIGSYS", SIGSYS}
         };
 }

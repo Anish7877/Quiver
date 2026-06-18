@@ -19,5 +19,4 @@ class DatabaseJobProcessor : public JobProcessor<DatabaseJobData>, public Single
                 auto process_job() -> void override;
         private:
                 auto route_job(const DatabaseJobData&) -> void override;
-                auto process_log(const rocksdb::DB* const, const DatabaseJobData&) -> void;
 };

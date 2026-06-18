@@ -38,6 +38,7 @@ class GraphBuilder{
                 struct ParsedInstructionsMaps {
                         std::unordered_map<size_t, Instruction::InstructionType> index_to_type{};
                         std::unordered_map<size_t, size_t> index_to_offset{};
+                        std::unordered_map<std::string, size_t> stage_alias_to_node_number{};
                 };
                 GraphBuilder() = default;
                 GraphBuilder(GraphBuilder&&) = delete;
@@ -47,8 +48,8 @@ class GraphBuilder{
                 ~GraphBuilder() = default;
 
                 [[nodiscard]] auto build_graph(std::vector<BuildFileParser::BuildInstruction>&, const std::unordered_map<std::string, std::string>&) -> std::vector<std::vector<size_t>>;
-                [[nodiscard]] auto get_stages() -> std::vector<Stage>&;
-                [[nodiscard]] auto get_parsed_instruction() -> ParsedInstructions&;
+                [[nodiscard]] auto get_stages() -> const std::vector<Stage>&;
+                [[nodiscard]] auto get_parsed_instruction() -> const ParsedInstructions&;
                 [[nodiscard]] auto get_instruction_maps() -> ParsedInstructionsMaps;
         private:
                 [[nodiscard]] auto split_into_stages(std::vector<BuildFileParser::BuildInstruction>&, const std::unordered_map<std::string, std::string>&) -> std::vector<Stage>;

@@ -26,18 +26,19 @@
         return graph;
 }
 
-[[nodiscard]] auto GraphBuilder::get_stages() -> std::vector<Stage>& {
+[[nodiscard]] auto GraphBuilder::get_stages() -> const std::vector<Stage>& {
         return m_stages;
 }
 
-[[nodiscard]] auto GraphBuilder::get_parsed_instruction() -> ParsedInstructions& {
+[[nodiscard]] auto GraphBuilder::get_parsed_instruction() -> const ParsedInstructions& {
         return m_parsed_instructions;
 }
 
 [[nodiscard]] auto GraphBuilder::get_instruction_maps() -> ParsedInstructionsMaps {
         ParsedInstructionsMaps maps{};
-        maps.index_to_offset = m_index_to_offset;
-        maps.index_to_type = m_index_to_type;
+        maps.index_to_offset = std::move(m_index_to_offset);
+        maps.index_to_type = std::move(m_index_to_type);
+        maps.stage_alias_to_node_number = std::move(m_stage_alias_to_node_number);
         return maps;
 }
 

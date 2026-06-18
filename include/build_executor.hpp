@@ -16,7 +16,7 @@ class BuildExecutor {
         private:
                 [[nodiscard]] auto detect_cycles(const std::vector<std::vector<size_t>>&) -> bool;
                 [[nodiscard]] auto get_topological_order(const std::vector<std::vector<size_t>>&) -> std::vector<std::vector<size_t>>;
-                auto exec_stage(const GraphBuilder::Stage&) -> void;
+                auto exec_stage(const GraphBuilder::Stage&, const GraphBuilder::ParsedInstructions&, const GraphBuilder::ParsedInstructionsMaps&, const std::vector<BuildFileParser::BuildInstruction>&) -> void;
                 auto exec_add() -> void;
                 auto exec_copy() -> void;
                 auto exec_run() -> void;

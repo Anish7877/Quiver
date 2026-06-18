@@ -12,7 +12,7 @@ class LayerCacheDbManager : DatabaseManager<LayerCache>, public Singleton<LayerC
         friend class Singleton<LayerCacheDbManager>;
         private:
                 LayerCacheDbManager() = default;
-                ~LayerCacheDbManager();
+                ~LayerCacheDbManager() = default;
         public:
                 LayerCacheDbManager(const LayerCacheDbManager&) = delete;
                 LayerCacheDbManager(LayerCacheDbManager&&) = delete;
@@ -20,14 +20,14 @@ class LayerCacheDbManager : DatabaseManager<LayerCache>, public Singleton<LayerC
                 auto operator=(const LayerCacheDbManager&) -> LayerCache& = delete;
 
                 auto init() -> void override;
-                auto process_job(const DatabaseJobData&, const LayerCache&, DbStatus&) -> void override;
-                auto extract_obj(const std::string&) -> std::optional<LayerCache> override;
+                auto process_job(const DatabaseJobData&, const LayerCache&) -> void override;
+                static auto extract_obj(const std::string&) -> std::optional<LayerCache>;
         private:
-                auto process_get_job(const DatabaseJobData&, DbStatus&) -> void override;
-                auto process_put_job(const DatabaseJobData&, const LayerCache&, DbStatus&) -> void override;
-                auto process_update_job(const DatabaseJobData&, const LayerCache&, DbStatus&) -> void override;
-                auto process_delete_job(const DatabaseJobData&, DbStatus&) -> void override;
-                auto process_get_all_job(const DatabaseJobData&, DbStatus&) -> void override;
+                auto process_get_job(const DatabaseJobData&) -> void override;
+                auto process_put_job(const DatabaseJobData&, const LayerCache&) -> void override;
+                auto process_update_job(const DatabaseJobData&, const LayerCache&) -> void override;
+                auto process_delete_job(const DatabaseJobData&) -> void override;
+                auto process_get_all_job(const DatabaseJobData&) -> void override;
                 std::filesystem::path m_db_path{Utils::get_db_path("layer_cache_db")};
                 std::unique_ptr<rocksdb::DB> m_db{nullptr};
 };

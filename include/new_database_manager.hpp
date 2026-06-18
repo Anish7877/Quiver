@@ -15,12 +15,11 @@ class DatabaseManager {
                 auto operator=(DatabaseManager&&) = delete;
 
                 virtual auto init() -> void = 0;
-                virtual auto process_job(const DatabaseJobData&, const T&, DbStatus&) -> void = 0;
-                virtual auto extract_obj(const std::string&) -> std::optional<T> = 0;
+                virtual auto process_job(const DatabaseJobData&, const T&) -> void = 0;
         private:
-                virtual auto process_get_job(const DatabaseJobData&, DbStatus&) -> void = 0;
-                virtual auto process_get_all_job(const DatabaseJobData&, DbStatus&) -> void = 0;
-                virtual auto process_put_job(const DatabaseJobData&, const T&, DbStatus&) -> void = 0;
-                virtual auto process_update_job(const DatabaseJobData&, const T&, DbStatus&) -> void = 0;
-                virtual auto process_delete_job(const DatabaseJobData&, DbStatus&) -> void = 0;
+                virtual auto process_get_job(const DatabaseJobData&) -> void = 0;
+                virtual auto process_get_all_job(const DatabaseJobData&) -> void = 0;
+                virtual auto process_put_job(const DatabaseJobData&, const T&) -> void = 0;
+                virtual auto process_update_job(const DatabaseJobData&, const T&) -> void = 0;
+                virtual auto process_delete_job(const DatabaseJobData&) -> void = 0;
 };

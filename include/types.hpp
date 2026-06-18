@@ -5,6 +5,7 @@
 #include <new>
 #include <vector>
 
+struct DbStatus;
 enum class JobType : std::uint8_t {
         GET = 0,
         PUT = 1,
@@ -48,6 +49,7 @@ struct alignas(std::hardware_destructive_interference_size) LogSlot {
 };
 
 struct DatabaseJobData {
+        DbStatus* status{nullptr};
         char key[32]{};
         JobType type{};
         TargetDB target{};
@@ -85,8 +87,11 @@ struct DbStatus {
                 auto get_error() const -> std::string {
                         return m_error;
                 }
-                auto get_result() const -> std::vector<DbResult> {
+                auto get_result() const -> const std::vector<DbResult>& {
                         return m_results;
+                }
+                auto wait() const -> void {
+                        processed.wait(false, std::memory_order_acquire);
                 }
         private:
                 friend class ContainerDbManager;
@@ -95,6 +100,7 @@ struct DbStatus {
                 std::vector<DbResult> m_results{};
                 std::string m_error{};
                 bool m_ok{false};
+                std::atomic<bool> processed{false};
 };
 
 struct SubIDRange {
