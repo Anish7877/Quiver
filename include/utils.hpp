@@ -3,10 +3,10 @@
 #include "types.hpp"
 #include <filesystem>
 #include <string>
-#include <vector>
-#include <atomic>
 namespace fs = std::filesystem;
 
+class LoggerCommandQueue;
+class ValueHeap;
 namespace Utils {
         inline std::atomic<bool> job_processor_running{true};
         auto dir_exists(const fs::path&) -> bool;
