@@ -43,10 +43,10 @@ private:
 
     // Registry & Layer Management
     auto get_auth_token  (const std::string& repo, std::string& out_token, std::string& error) -> bool;
-    
+
     // Updated signature: returns media_type to handle multi-arch lists
     auto fetch_manifest  (const std::string& repo, const std::string& tag,
-                          const std::string& token, json& out_manifest, 
+                          const std::string& token, json& out_manifest,
                           std::string& out_media_type, std::string& error) -> bool;
 
     auto fetch_config_blob(const std::string& repo, const std::string& digest,

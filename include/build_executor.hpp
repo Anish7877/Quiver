@@ -1,8 +1,10 @@
 #pragma once
 #include "build_file_parser.hpp"
 #include "graph_builder.hpp"
+#include <memory>
 #include <vector>
 
+class ImageManager;
 class BuildExecutor {
         public:
                 BuildExecutor() = default;
@@ -23,4 +25,5 @@ class BuildExecutor {
                 auto exec_shell() -> void;
                 auto exec_user() -> void;
                 auto exec_work() -> void;
+                std::unique_ptr<ImageManager> m_image_manager{};
 };

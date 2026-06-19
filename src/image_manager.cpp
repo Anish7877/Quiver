@@ -23,7 +23,7 @@ namespace chrono = std::chrono;
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-static constexpr std::size_t  MAX_TOKEN_RESPONSE_SIZE {   64 * 1024}; 
+static constexpr std::size_t  MAX_TOKEN_RESPONSE_SIZE {   64 * 1024};
 static constexpr std::size_t  MAX_MANIFEST_SIZE       {    1 * 1024 * 1024};
 static constexpr std::size_t  MAX_CONFIG_SIZE         {    1 * 1024 * 1024};
 
@@ -186,7 +186,7 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
     std::string safeImageName = image_name;
     std::replace(safeImageName.begin(), safeImageName.end(), ':', '_');
     std::replace(safeImageName.begin(), safeImageName.end(), '/', '_');
-    
+
     // This will correctly resolve to: /home/kartik-goel/.quiver/alpine_latest
     fs::path img_dest{m_images_root / "images" / safeImageName};
     Utils::ensure_dir(img_dest);
@@ -199,7 +199,7 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
             secure_zero(token);
             return {};
         }
-        download_futures.push_back(std::async(std::launch::async, &ImageManager::download_layer, 
+        download_futures.push_back(std::async(std::launch::async, &ImageManager::download_layer,
                                    this, repo, layer_digest, token, img_dest, layer_size));
     }
 
@@ -237,9 +237,9 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
 
 auto ImageManager::get_auth_token(const std::string& repo, std::string& out_token, std::string& error) -> bool {
     auto url{std::format("https://auth.docker.io/token?service=registry.docker.io&scope=repository:{}:pull", repo)};
-    
+
     cpr::Response r{cpr::Get(cpr::Url{url}, cpr::Timeout{TIMEOUT_AUTH_MS})};
-    
+
     if (r.status_code != 200) [[unlikely]] {
         error = std::format("Auth Error: HTTP {} - Registry responded: {}", r.status_code,r.error.message, r.text);
         return false;
@@ -256,10 +256,10 @@ auto ImageManager::get_auth_token(const std::string& repo, std::string& out_toke
     // --- FIX: Check for both 'token' and 'access_token' ---
     if (j.contains("token") && j["token"].is_string()) {
         out_token = j["token"].get<std::string>();
-    } 
+    }
     else if (j.contains("access_token") && j["access_token"].is_string()) {
         out_token = j["access_token"].get<std::string>();
-    } 
+    }
     else [[unlikely]] {
         error = std::format("Auth Error: No valid token found in response. Raw body: {}", r.text);
         return false;
@@ -272,8 +272,8 @@ auto ImageManager::get_auth_token(const std::string& repo, std::string& out_toke
 
     return true;
 }
-auto ImageManager::fetch_manifest(const std::string& repo, const std::string& tag, 
-                                  const std::string& token, json& out_manifest, 
+auto ImageManager::fetch_manifest(const std::string& repo, const std::string& tag,
+                                  const std::string& token, json& out_manifest,
                                   std::string& out_media_type, std::string& error) -> bool {
     auto url{std::format("https://registry-1.docker.io/v2/{}/manifests/{}", repo, tag)};
     cpr::Response r{cpr::Get(
@@ -325,8 +325,8 @@ auto ImageManager::download_layer(const std::string& repo, const std::string& di
     if (!ofs.is_open()) [[unlikely]] return "";
 
     cpr::Response r{cpr::Get(
-        cpr::Url{url}, 
-        cpr::Header{{"Authorization", "Bearer " + token}}, 
+        cpr::Url{url},
+        cpr::Header{{"Authorization", "Bearer " + token}},
         cpr::Redirect{true},
         cpr::Timeout{TIMEOUT_LAYER_MS},
         cpr::WriteCallback([&ofs](std::string_view data, intptr_t) -> bool {
@@ -346,7 +346,7 @@ auto ImageManager::download_layer(const std::string& repo, const std::string& di
 
     const auto actual_size{fs::file_size(file_path)};
     if (actual_size != expected_size) [[unlikely]] {
-        std::cerr << std::format("Size Mismatch: {} (expected {} bytes, got {} bytes)\n", 
+        std::cerr << std::format("Size Mismatch: {} (expected {} bytes, got {} bytes)\n",
                                 digest, expected_size, actual_size);
         fs::remove(file_path);
         return "";

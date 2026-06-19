@@ -1,11 +1,33 @@
 #pragma once
-#include "instruction_types.hpp"
+#include "singleton.hpp"
 #include "types.hpp"
+#include <libcuckoo/cuckoohash_map.hh>
 #include <optional>
 #include <memory>
+#include <future>
 
 class DatabaseCommandQueue;
 class ValueHeap;
+
+class InFlightCacheManager : public Singleton<InFlightCacheManager>{
+        friend class Singleton<InFlightCacheManager>;
+        private:
+                InFlightCacheManager() = default;
+                ~InFlightCacheManager() = default;
+        public:
+                struct InFlightBuild {
+                        InFlightBuild() : future{promise.get_future().share()} {}
+                        std::promise<LayerCache> promise{};
+                        std::shared_future<LayerCache> future{};
+                };
+                InFlightCacheManager(InFlightCacheManager&&) = delete;
+                InFlightCacheManager(const InFlightCacheManager&) = delete;
+                auto operator=(InFlightCacheManager&&) -> InFlightCacheManager& = delete;
+                auto operator=(const InFlightCacheManager&) -> InFlightCacheManager& = delete;
+        private:
+                libcuckoo::cuckoohash_map<std::string, std::shared_ptr<InFlightBuild>> m_inflight{};
+};
+
 class LayerCacheManager {
         public:
                 LayerCacheManager() = default;
@@ -17,7 +39,6 @@ class LayerCacheManager {
 
                 auto init() -> void;
                 [[nodiscard]] auto lookup(const std::string&) -> std::optional<LayerCache>;
-                [[nodiscard]] auto generate_instruction_hash(const Instruction::InstructionHash&) -> std::string;
                 auto store(const std::string&, const std::string&) -> void;
         private:
                 std::unique_ptr<DatabaseCommandQueue> m_db_command_queue{};
