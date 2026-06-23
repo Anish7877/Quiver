@@ -36,7 +36,6 @@ class GraphBuilder{
                         std::vector<Instruction::WorkdirInstruction> workdir_instructions{};
                 };
                 struct ParsedInstructionsMaps {
-                        std::unordered_map<size_t, Instruction::InstructionType> index_to_type{};
                         std::unordered_map<size_t, size_t> index_to_offset{};
                         std::unordered_map<std::string, size_t> stage_alias_to_node_number{};
                 };
@@ -70,11 +69,11 @@ class GraphBuilder{
                 auto parse_user_instruction(Stage*, BuildFileParser::BuildInstruction&, const std::unordered_map<std::string, std::string>&, size_t) -> void;
                 auto parse_volume_instruction(Stage*, BuildFileParser::BuildInstruction&) -> void;
                 auto parse_workdir_instruction(BuildFileParser::BuildInstruction&, const std::unordered_map<std::string, std::string>&, const std::unordered_map<std::string, std::string>&, const std::unordered_map<std::string, std::string>&, size_t) -> void;
-                auto get_port(const std::string&) -> std::uint16_t;
-                auto is_valid_variable_name(const std::string&) -> bool;
+                [[nodiscard]] auto get_port(const std::string&) -> std::uint16_t;
+                [[nodiscard]] auto is_valid_variable_name(const std::string&) -> bool;
+                [[nodiscard]] auto is_url(const std::string&) -> bool;
                 ParsedInstructions m_parsed_instructions{};
                 std::vector<Stage> m_stages{};
-                std::unordered_map<size_t, Instruction::InstructionType> m_index_to_type{};
                 std::unordered_map<size_t, size_t> m_index_to_offset{};
                 std::unordered_map<std::string, size_t> m_stage_alias_to_node_number{};
 };

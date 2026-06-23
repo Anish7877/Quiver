@@ -3,8 +3,10 @@
 #include "instruction_types.hpp"
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <format>
 #include <optional>
+#include <pwd.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -37,7 +39,6 @@
 [[nodiscard]] auto GraphBuilder::get_instruction_maps() -> ParsedInstructionsMaps {
         ParsedInstructionsMaps maps{};
         maps.index_to_offset = std::move(m_index_to_offset);
-        maps.index_to_type = std::move(m_index_to_type);
         maps.stage_alias_to_node_number = std::move(m_stage_alias_to_node_number);
         return maps;
 }
@@ -296,6 +297,13 @@ auto GraphBuilder::parse_add_instruction(BuildFileParser::BuildInstruction& inst
         for (const auto& [key, value] : local_envs) {
                 extended_args[key] = value;
         }
+        auto is_number{[](std::string_view s) -> bool {
+                return std::all_of(s.begin(), s.end(),
+                                [](unsigned char c) -> bool{
+                                return std::isdigit(c);
+                                });
+        }};
+        instruction.raw_instruction = expand_args(instruction.raw_instruction, extended_args);
         if (!instruction.opts.empty()) {
                 for (auto& opt : instruction.opts) {
                         opt.value = expand_args(opt.value, extended_args);
@@ -305,14 +313,74 @@ auto GraphBuilder::parse_add_instruction(BuildFileParser::BuildInstruction& inst
                                         throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Multiple chown detected in add instruction.",
                                                                 instruction.line_number));
                                 }
-                                add_ins.chown = opt.value;
+                                if (opt.value.empty()) [[unlikely]] {
+                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty option value for chown.",
+                                                                instruction.line_number));
+                                }
+                                size_t colon_index{opt.value.find(':')};
+                                std::pair<uid_t, gid_t> uid_gid_pair{};
+                                if (colon_index == std::string::npos) {
+                                        if (is_number(opt.value)) {
+                                                uid_gid_pair.first = static_cast<uid_t>(std::stoul(opt.value));
+                                                uid_gid_pair.second = static_cast<gid_t>(uid_gid_pair.first);
+                                        }
+                                        else {
+                                                passwd* pw{getpwnam(opt.value.c_str())};
+                                                if (!pw) [[unlikely]] {
+                                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unknown user '{}'.",
+                                                                                instruction.line_number, opt.value));
+                                                }
+                                                uid_gid_pair.first = pw->pw_uid;
+                                                uid_gid_pair.second = pw->pw_gid;
+                                        }
+                                }
+                                else {
+                                        std::string user{opt.value.substr(0, colon_index)};
+                                        std::string group{opt.value.substr(colon_index+1)};
+                                        if (user.empty() || group.empty()) [[unlikely]] {
+                                                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Either user or group empty in chown in add instruction.",
+                                                                        instruction.line_number));
+                                        }
+                                        if (is_number(user)) {
+                                                uid_gid_pair.first = static_cast<uid_t>(std::stoul(user));
+                                        }
+                                        else {
+                                                passwd* pw{getpwnam(user.c_str())};
+                                                if (!pw) [[unlikely]] {
+                                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unknown user '{}'.",
+                                                                                instruction.line_number, user));
+                                                }
+                                                uid_gid_pair.first = pw->pw_uid;
+                                        }
+                                        if (is_number(group)) {
+                                                uid_gid_pair.second = static_cast<gid_t>(std::stoul(group));
+                                        }
+                                        else {
+                                                passwd* pw{getpwnam(group.c_str())};
+                                                if (!pw) [[unlikely]] {
+                                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}] : Unknown group '{}'.",
+                                                                                instruction.line_number, group));
+                                                }
+                                                uid_gid_pair.first = pw->pw_gid;
+                                        }
+                                }
+                                add_ins.chown = std::move(uid_gid_pair);
                         }
                         else if (opt.key == "chmod") {
                                 if (!inserted) {
                                         throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Multiple chmod detected in add instruction.",
                                                                 instruction.line_number));
                                 }
-                                add_ins.chmod = opt.value;
+                                if (opt.value.empty()) [[unlikely]] {
+                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty option value for chmod.",
+                                                                instruction.line_number));
+                                }
+                                if (!is_number(opt.value)) [[unlikely]] {
+                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid value for chmod '{}'.",
+                                                                instruction.line_number, opt.value));
+                                }
+                                mode_t mode{static_cast<mode_t>(std::stoul(opt.value, nullptr, 8))};
+                                add_ins.chmod = std::move(mode);
                         }
                         else {
                                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unknown option '{}'.",
@@ -338,7 +406,14 @@ auto GraphBuilder::parse_add_instruction(BuildFileParser::BuildInstruction& inst
                 }
                 add_ins.dst = std::move(tokens.back());
                 tokens.pop_back();
-                add_ins.srcs = std::move(tokens);
+                for (const auto& token : tokens) {
+                        if (is_url(token)) {
+                                add_ins.urls.emplace_back(token);
+                        }
+                        else {
+                                add_ins.srcs.emplace_back(token);
+                        }
+                }
         }
         else if (instruction.is_json_form) {
                 if (instruction.json_args.empty()) {
@@ -352,9 +427,15 @@ auto GraphBuilder::parse_add_instruction(BuildFileParser::BuildInstruction& inst
                 }
                 add_ins.dst = std::move(instruction.json_args.back());
                 instruction.json_args.pop_back();
-                add_ins.srcs = std::move(instruction.json_args);
+                for (const auto& arg : instruction.json_args) {
+                        if (is_url(arg)) {
+                                add_ins.urls.emplace_back(arg);
+                        }
+                        else {
+                                add_ins.srcs.emplace_back(arg);
+                        }
+                }
         }
-        m_index_to_type[instruction_index] = Instruction::InstructionType::ADD;
         m_index_to_offset[instruction_index] = m_parsed_instructions.add_instructions.size();
         m_parsed_instructions.add_instructions.emplace_back(std::move(add_ins));
 }
@@ -372,6 +453,13 @@ auto GraphBuilder::parse_copy_instruction(Stage* stage, BuildFileParser::BuildIn
         for (const auto& [key, value] : local_envs) {
                 extended_args[key] = value;
         }
+        auto is_number{[](std::string_view s) -> bool {
+                return std::all_of(s.begin(), s.end(),
+                                [](unsigned char c) -> bool{
+                                return std::isdigit(c);
+                                });
+        }};
+        instruction.raw_instruction = expand_args(instruction.raw_instruction, extended_args);
         if (!instruction.opts.empty()) {
                 for (auto& opt : instruction.opts) {
                         opt.value = expand_args(opt.value, extended_args);
@@ -379,6 +467,10 @@ auto GraphBuilder::parse_copy_instruction(Stage* stage, BuildFileParser::BuildIn
                         if (opt.key == "from") {
                                 if (!inserted) {
                                         throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Multiple from detected in copy instruction.",
+                                                                instruction.line_number));
+                                }
+                                if (opt.value.empty()) [[unlikely]] {
+                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty option value for from.",
                                                                 instruction.line_number));
                                 }
                                 copy_ins.from_stage = opt.value;
@@ -393,14 +485,74 @@ auto GraphBuilder::parse_copy_instruction(Stage* stage, BuildFileParser::BuildIn
                                         throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Multiple chown detected in copy instruction.",
                                                                 instruction.line_number));
                                 }
-                                copy_ins.chown = opt.value;
+                                if (opt.value.empty()) [[unlikely]] {
+                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty option value for chown.",
+                                                                instruction.line_number));
+                                }
+                                size_t colon_index{opt.value.find(':')};
+                                std::pair<uid_t, gid_t> uid_gid_pair{};
+                                if (colon_index == std::string::npos) {
+                                        if (is_number(opt.value)) {
+                                                uid_gid_pair.first = static_cast<uid_t>(std::stoul(opt.value));
+                                                uid_gid_pair.second = static_cast<gid_t>(uid_gid_pair.first);
+                                        }
+                                        else {
+                                                passwd* pw{getpwnam(opt.value.c_str())};
+                                                if (!pw) [[unlikely]] {
+                                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unknown user '{}'.",
+                                                                                instruction.line_number, opt.value));
+                                                }
+                                                uid_gid_pair.first = pw->pw_uid;
+                                                uid_gid_pair.second = pw->pw_gid;
+                                        }
+                                }
+                                else {
+                                        std::string user{opt.value.substr(0, colon_index)};
+                                        std::string group{opt.value.substr(colon_index+1)};
+                                        if (user.empty() || group.empty()) [[unlikely]] {
+                                                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Either user or group empty in chown.",
+                                                                        instruction.line_number));
+                                        }
+                                        if (is_number(user)) {
+                                                uid_gid_pair.first = static_cast<uid_t>(std::stoul(user));
+                                        }
+                                        else {
+                                                passwd* pw{getpwnam(user.c_str())};
+                                                if (!pw) [[unlikely]] {
+                                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unknown user '{}'.",
+                                                                                instruction.line_number, user));
+                                                }
+                                                uid_gid_pair.first = pw->pw_uid;
+                                        }
+                                        if (is_number(group)) {
+                                                uid_gid_pair.second = static_cast<gid_t>(std::stoul(group));
+                                        }
+                                        else {
+                                                passwd* pw{getpwnam(group.c_str())};
+                                                if (!pw) [[unlikely]] {
+                                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}] : Unknown group '{}'.",
+                                                                                instruction.line_number, group));
+                                                }
+                                                uid_gid_pair.first = pw->pw_gid;
+                                        }
+                                }
+                                copy_ins.chown = std::move(uid_gid_pair);
                         }
                         else if (opt.key == "chmod") {
                                 if (!inserted) {
                                         throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Multiple chmod detected in copy instruction.",
                                                                 instruction.line_number));
                                 }
-                                copy_ins.chmod = opt.value;
+                                if (opt.value.empty()) [[unlikely]] {
+                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty option value for chmod.",
+                                                                instruction.line_number));
+                                }
+                                if (!is_number(opt.value)) [[unlikely]] {
+                                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid value for chmod '{}'.",
+                                                                instruction.line_number, opt.value));
+                                }
+                                mode_t mode{static_cast<mode_t>(std::stoul(opt.value, nullptr, 8))};
+                                copy_ins.chmod = std::move(mode);
                         }
                         else {
                                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unknown option '{}'.",
@@ -426,7 +578,9 @@ auto GraphBuilder::parse_copy_instruction(Stage* stage, BuildFileParser::BuildIn
                 }
                 copy_ins.dst = std::move(tokens.back());
                 tokens.pop_back();
-                copy_ins.srcs = std::move(tokens);
+                for (const auto& token : tokens) {
+                        copy_ins.srcs.emplace_back(token);
+                }
         }
         else if (instruction.is_json_form) {
                 if (instruction.json_args.empty()) {
@@ -440,9 +594,10 @@ auto GraphBuilder::parse_copy_instruction(Stage* stage, BuildFileParser::BuildIn
                 }
                 copy_ins.dst = std::move(instruction.json_args.back());
                 instruction.json_args.pop_back();
-                copy_ins.srcs = std::move(instruction.json_args);
+                for (const auto& arg : instruction.json_args) {
+                        copy_ins.srcs.emplace_back(arg);
+                }
         }
-        m_index_to_type[instruction_index] = Instruction::InstructionType::COPY;
         m_index_to_offset[instruction_index] = m_parsed_instructions.copy_instructions.size();
         m_parsed_instructions.copy_instructions.emplace_back(std::move(copy_ins));
 }
@@ -726,6 +881,7 @@ auto GraphBuilder::parse_run_instruction(BuildFileParser::BuildInstruction& inst
         for (const auto& [key, value] : local_envs) {
                 extended_args[key] = value;
         }
+        instruction.raw_instruction = expand_args(instruction.raw_instruction, extended_args);
         if (instruction.is_shell_form) {
                 if (instruction.shell_form.empty()) {
                         throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Empty shell arguments in run instruction.",
@@ -752,7 +908,6 @@ auto GraphBuilder::parse_run_instruction(BuildFileParser::BuildInstruction& inst
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unexpected error.",
                                         instruction.line_number));
         }
-        m_index_to_type[instruction_index] = Instruction::InstructionType::RUN;
         m_index_to_offset[instruction_index] = m_parsed_instructions.run_instructions.size();
         m_parsed_instructions.run_instructions.emplace_back(std::move(run_ins));
 }
@@ -774,7 +929,6 @@ auto GraphBuilder::parse_shell_instruction(BuildFileParser::BuildInstruction& in
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid args format. Expected json form.",
                                         instruction.line_number));
         }
-        m_index_to_type[instruction_index] = Instruction::InstructionType::SHELL;
         m_index_to_offset[instruction_index] = m_parsed_instructions.shell_instructions.size();
         m_parsed_instructions.shell_instructions.emplace_back(std::move(shell_ins));
 }
@@ -829,15 +983,69 @@ auto GraphBuilder::parse_user_instruction(Stage* stage, BuildFileParser::BuildIn
         }
         instruction.shell_form = expand_args(instruction.shell_form, extended_args);
         std::stringstream iss{instruction.shell_form};
-        std::string user{};
+        std::string user_group{};
         std::string extra{};
-        iss >> user;
+        iss >> user_group;
         if (iss >> extra) {
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Only one user should be provided.",
                                         instruction.line_number));
         }
-        Instruction::UserInstruction user_ins{std::move(user)};
-        m_index_to_type[instruction_index] = Instruction::InstructionType::USER;
+
+        size_t colon_index{user_group.find(':')};
+        std::pair<uid_t, gid_t> uid_gid_pair{};
+        auto is_number{[](std::string_view s) -> bool {
+                return std::all_of(s.begin(), s.end(),
+                                [](unsigned char c) -> bool{
+                                return std::isdigit(c);
+                                });
+        }};
+        if (colon_index == std::string::npos) {
+                if (is_number(user_group)) {
+                        uid_gid_pair.first = static_cast<uid_t>(std::stoul(user_group));
+                        uid_gid_pair.second = static_cast<gid_t>(uid_gid_pair.first);
+                }
+                else {
+                        passwd* pw{getpwnam(user_group.c_str())};
+                        if (!pw) [[unlikely]] {
+                                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unknown user '{}'.",
+                                                        instruction.line_number, user_group));
+                        }
+                        uid_gid_pair.first = pw->pw_uid;
+                        uid_gid_pair.second = pw->pw_gid;
+                }
+        }
+        else {
+
+                std::string user{user_group.substr(0, colon_index)};
+                std::string group{user_group.substr(colon_index+1)};
+                if (user.empty() || group.empty()) [[unlikely]] {
+                        throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Either user or group empty in user instruction.",
+                                                instruction.line_number));
+                }
+                if (is_number(user)) {
+                        uid_gid_pair.first = static_cast<uid_t>(std::stoul(user));
+                }
+                else {
+                        passwd* pw{getpwnam(user.c_str())};
+                        if (!pw) [[unlikely]] {
+                                throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unknown user '{}'.",
+                                                        instruction.line_number, user));
+                        }
+                        uid_gid_pair.first = pw->pw_uid;
+                }
+                if (is_number(group)) {
+                        uid_gid_pair.second = static_cast<gid_t>(std::stoul(group));
+                }
+                else {
+                        passwd* pw{getpwnam(group.c_str())};
+                        if (!pw) [[unlikely]] {
+                                throw std::runtime_error(std::format("Graph Builder Error [Line {}] : Unknown group '{}'.",
+                                                        instruction.line_number, group));
+                        }
+                        uid_gid_pair.first = pw->pw_gid;
+                }
+        }
+        Instruction::UserInstruction user_ins{std::move(uid_gid_pair.first), std::move(uid_gid_pair.second)};
         m_index_to_offset[instruction_index] = m_parsed_instructions.shell_instructions.size();
         m_parsed_instructions.user_instructions.emplace_back(std::move(user_ins));
 }
@@ -903,12 +1111,11 @@ auto GraphBuilder::parse_workdir_instruction(BuildFileParser::BuildInstruction& 
         }
         Instruction::WorkdirInstruction workdir_ins{};
         workdir_ins.workdir = std::move(path);
-        m_index_to_type[instruction_index] = Instruction::InstructionType::WORKDIR;
         m_index_to_offset[instruction_index] = m_parsed_instructions.workdir_instructions.size();
         m_parsed_instructions.workdir_instructions.emplace_back(std::move(workdir_ins));
 }
 
-auto GraphBuilder::get_port(const std::string& token) -> std::uint16_t {
+[[nodiscard]] auto GraphBuilder::get_port(const std::string& token) -> std::uint16_t {
         if (token.empty()) return 0;
         for (char c : token) {
                 if (!std::isdigit(static_cast<unsigned char>(c))) return 0;
@@ -926,7 +1133,7 @@ auto GraphBuilder::get_port(const std::string& token) -> std::uint16_t {
         return port;
 }
 
-auto GraphBuilder::is_valid_variable_name(const std::string& name) -> bool {
+[[nodiscard]] auto GraphBuilder::is_valid_variable_name(const std::string& name) -> bool {
         if (name.empty()) {
                 return false;
         }
@@ -937,4 +1144,21 @@ auto GraphBuilder::is_valid_variable_name(const std::string& name) -> bool {
                 if (!(std::isalnum(static_cast<unsigned char>(name[i])) || name[i] == '_')) return false;
         }
         return true;
+}
+
+[[nodiscard]] auto GraphBuilder::is_url(const std::string& str) -> bool {
+        auto starts_with_icase{[&](std::string_view prefix) {
+                if (str.size() < prefix.size()) {
+                        return false;
+                }
+
+                return std::equal(prefix.begin(), prefix.end(), str.begin(),
+                                [](char a, char b) {
+                                        return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+                                });
+        }};
+
+    return starts_with_icase("http://") ||
+           starts_with_icase("https://") ||
+           starts_with_icase("ftp://");
 }

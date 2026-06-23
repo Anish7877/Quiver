@@ -18,7 +18,7 @@ auto LayerCacheDbManager::init() -> void {
         }
 }
 
-auto LayerCacheDbManager::process_job(const DatabaseJobData& job_data, const LayerCache& obj) -> void {
+auto LayerCacheDbManager::process_job(const DatabaseJobData& job_data, const std::string& value) -> void {
         job_data.status->m_ok = false;
         switch (job_data.type) {
                 case JobType::GET:
@@ -74,18 +74,14 @@ auto LayerCacheDbManager::process_get_job(const DatabaseJobData& job_data) -> vo
         job_data.status->processed.notify_all();
 }
 
-auto LayerCacheDbManager::process_put_job(const DatabaseJobData& job_data, const LayerCache& obj) -> void {
+auto LayerCacheDbManager::process_put_job(const DatabaseJobData& job_data, const std::string& value) -> void {
         if (m_db == nullptr) [[unlikely]] {
                job_data.status->m_error = std::move(std::format("[{}] Layer Cache DB Manager Error: manager not initialized.",
                                         chrono::system_clock::now()));
                 return;
         }
         rocksdb::Slice key{job_data.key};
-        flatbuffers::FlatBufferBuilder builder{};
-        flatbuffers::Offset<FB::LayerCache> fb_offset{Serialization::serialize(builder, obj)};
-        builder.Finish(fb_offset);
-        std::string raw_bytes{reinterpret_cast<const char*>(builder.GetBufferPointer(), builder.GetSize())};
-        rocksdb::Status stat{m_db->Put(rocksdb::WriteOptions(), key, raw_bytes)};
+        rocksdb::Status stat{m_db->Put(rocksdb::WriteOptions(), key, )};
         if (!stat.ok()) [[unlikely]] {
                job_data.status->m_error = std::move(std::format("[{}] Layer Cache DB Manager Error: Write error -> '{}'.",
                                         chrono::system_clock::now(), stat.ToString()));

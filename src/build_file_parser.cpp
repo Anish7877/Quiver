@@ -249,7 +249,7 @@ auto BuildFileParser::parse_parser_directives(std::ifstream& file) -> void {
         return result;
 }
 
-[[nodiscard]] auto BuildFileParser::parse_instruction_options(const std::string& opts_line) -> std::vector<InstructionOption> {
+[[nodiscard]] auto BuildFileParser::parse_instruction_options(const std::string& opts_line) -> std::vector<Instruction::InstructionOption> {
         std::vector<Instruction::InstructionOption> opts{};
         std::stringstream              iss{opts_line};
         std::string                    token{};

@@ -5,6 +5,8 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 namespace Instruction {
         enum class InstructionType {
@@ -33,21 +35,23 @@ namespace Instruction {
         struct InstructionHash {
                 std::string parent_digest{};
                 std::string expanded_raw_ins{};
+                std::string source_stage{};
                 std::string file_checksum{};
         };
         struct AddInstruction {
-                std::optional<std::string> chown{};
-                std::optional<std::string> chmod{};
-                std::vector<std::string> srcs{};
-                std::string dst{};
+                std::optional<std::pair<uid_t, gid_t>> chown{std::nullopt};
+                std::optional<mode_t> chmod{std::nullopt};
+                std::vector<std::string> urls{};
+                std::vector<fs::path> srcs{};
+                fs::path dst{};
         };
         struct CopyInstruction {
                 bool is_dependency{false};
                 std::optional<std::string> from_stage{};
-                std::optional<std::string> chown{};
-                std::optional<std::string> chmod{};
-                std::vector<std::string> srcs{};
-                std::string dst{};
+                std::optional<std::pair<uid_t, gid_t>> chown{std::nullopt};
+                std::optional<mode_t> chmod{std::nullopt};
+                std::vector<fs::path> srcs{};
+                fs::path dst{};
         };
         struct CmdInstruction {
                 bool is_json_form{};
@@ -75,10 +79,11 @@ namespace Instruction {
                 std::vector<std::string> shell_args{};
         };
         struct UserInstruction {
-                std::string user{};
+                std::optional<uid_t> uid{};
+                std::optional<gid_t> gid{};
         };
         struct WorkdirInstruction {
-                std::string workdir{};
+                fs::path workdir{};
         };
         const std::unordered_map<std::string, InstructionType> INSTRUCTION_STR_TO_TYPE{
                 {"ADD", InstructionType::ADD},

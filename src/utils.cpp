@@ -1,64 +1,39 @@
-#include <atomic>
-#include <chrono>
-#include <csignal>
-#include <cstdlib>
-#include <fcntl.h>
-#include <filesystem>
-#include <iostream>
-#include <fstream>
-#include <format>
-#include <random>
-#include <blake3.h>
-#include <stdexcept>
-#include <string>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <sys/file.h>
-#include <cstring>
-#include <system_error>
-#include <thread>
-#include <unistd.h>
-#include <pwd.h>
-#include <archive.h>
+#include "log_job_processor.hpp"
+#include "oci_runtime.hpp"
+#include "types.hpp"
 #include "utils.hpp"
 #include <archive.h>
 #include <archive_entry.h>
-#include <openssl/evp.h>
-#include <openssl/err.h>
 #include <array>
-#include <memory>
-#include <sstream>
-#include <iomanip>
-#include <string_view>
-
 #include <atomic>
+#include <blake3.h>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
 #include <filesystem>
-#include <iostream>
-#include <fstream>
 #include <format>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <memory>
+#include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/sha.h>
+#include <pwd.h>
 #include <random>
-#include <blake3.h>
+#include <set>
+#include <sstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <sys/file.h>
-#include <cstring>
 #include <system_error>
 #include <thread>
 #include <unistd.h>
-#include <pwd.h>
-#include <archive.h>
-#include <set>
-#include <unistd.h>
-#include "utils.hpp"
-#include "oci_runtime.hpp"
-#include "log_job_processor.hpp"
-#include "types.hpp"
-
 
 auto Utils::dir_exists(const fs::path& path) -> bool {
         return fs::is_directory(path);
@@ -131,6 +106,49 @@ auto Utils::remove_directory(const fs::path& path) -> void {
         }
 }
 
+auto Utils::rename_file_or_directory(const fs::path& src, const fs::path& dst) -> void {
+        std::error_code error_code{};
+        fs::rename(src, dst, error_code);
+        if (error_code) [[unlikely]] {
+                throw std::runtime_error(std::format("Directory Error: couldn't rename '{}' to '{}' - {}\n", src.string(),
+                                        dst.string(), error_code.message()));
+        }
+}
+
+auto Utils::change_permissions(const fs::path& path, mode_t mode) -> void {
+        std::error_code error_code{};
+        fs::permissions(path, static_cast<fs::perms>(mode), fs::perm_options::replace, error_code);
+        if (error_code) [[unlikely]] {
+                throw std::runtime_error(std::format("Directory Error: couldn't change permissions for '{}' - '{}'\n",
+                                        path.string(),error_code.message()));
+        }
+        if (fs::is_directory(path)) {
+                for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)) {
+                        if (entry.is_symlink()) continue;
+                        fs::permissions(entry.path(), static_cast<fs::perms>(mode), fs::perm_options::replace, error_code);
+                        if (error_code) [[unlikely]] {
+                                throw std::runtime_error(std::format("Directory Error: couldn't change permissions for '{}' - '{}'\n",
+                                                        entry.path().string(),error_code.message()));
+                        }
+                }
+        }
+}
+
+auto Utils::change_owners(const fs::path& path, uid_t uid, gid_t gid) -> void {
+        if (chown(path.c_str(), uid, gid) == -1) [[unlikely]] {
+                throw std::runtime_error(std::format("Directory Error: couldn't change owner for '{}' - '{}'\n",
+                                        path.string(), std::strerror(errno)));
+        }
+        if (fs::is_directory(path)) {
+                for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)) {
+                        if (chown(entry.path().c_str(), uid, gid) == -1) [[unlikely]] {
+                                throw std::runtime_error(std::format("Directory Error: couldn't change owner for '{}' - '{}'\n",
+                                                        entry.path().string(), std::strerror(errno)));
+                        }
+                }
+        }
+}
+
 auto Utils::get_base_dir() -> fs::path {
         const char* home{getenv("HOME")};
         std::string base{home ? std::string(home) : "/tmp"};
@@ -149,6 +167,11 @@ auto Utils::get_filesystem_path(std::string_view container_id) -> fs::path {
 
 auto Utils::get_vfs_path(std::string_view container_id) -> fs::path {
         std::string path{std::format("{}/vfs/{}",get_base_dir().string(), container_id)};
+        return path;
+}
+
+auto Utils::get_layers_path(std::string_view layer_name) -> fs::path {
+        std::string path{std::format("{}/layers/{}", get_base_dir().string(), layer_name)};
         return path;
 }
 
@@ -405,45 +428,51 @@ auto Utils::write_all(int fd, const char* buf, ssize_t len) -> bool {
         return true;
 }
 
-auto Utils::print_usage() -> void {
-        std::cout << "Usage: quiver <command> [options] [arguments]\n\n"
-                << "Commands:\n"
-                << "  run [options] -i <image> [cmd]   Create and start a new container\n"
-                << "      -i, --image <name>           Image to use (required)\n"
-                << "      -n, --name <name>            Assign a name to the container\n"
-                << "      -p, --port <host:cont>       Publish a container's port(s) to the host\n"
-                << "      -v, --volume <host:cont>     Bind mount a volume\n"
-                << "      --vfs                        Use VFS (copy) instead of OverlayFS for package manager related\n"
-                << "      --no-remove                  Do not remove the filesystem after exit\n\n"
 
-                << "  start <container_id> ...         Start one or more stopped containers\n"
-                << "  stop <container_id> ...          Stop one or more running containers\n"
-                << "  rm <container_id> ...            Remove one or more containers\n"
-                << "  attach <container_id>            Attach local standard input, output, and error to a running container\n\n"
+auto Utils::create_tar_gz(const fs::path& path, const fs::path& output_file) -> void {
+        struct archive* archive{archive_write_new()};
+        archive_write_add_filter_gzip(archive);
+        archive_write_set_format_pax_restricted(archive);
+        if (archive_write_open_filename(archive, output_file.c_str()) != ARCHIVE_OK) {
+                throw std::runtime_error(archive_error_string(archive));
+        }
 
-                << "  ps [-a]                          List containers\n"
-                << "      -a                           Show all containers (default shows just running)\n\n"
-
-                << "  pull <image_name>                Pull an image from a registry\n\n"
-                << "  image <subcommand>               Manage images\n"
-                << "      ls                           List available images\n"
-                << "      rm <image:tag>               Remove an image\n"
-                << "      cls <image_name>             List containers using a specific image\n\n"
-
-                << "  volume <subcommand>              Manage volumes\n"
-                << "      ls                           List all volumes\n"
-                << "      rm <volume_id> ...           remove one or more volume links\n\n"
-
-                << "  network <subcommand>             Manage networks\n"
-                << "      ls                           List all network port mappings\n"
-                << "      rm <network_id> ...          remove one or more network links\n"
-                << "      add <container_id> [args]                                    \n"
-                << "              <host:cont> ...      add a new network link\n\n"
-                << "  create <subcommand>              Create resources\n"
-                << "      volume <container_id> [args]                 \n"
-                << "                  <host:cont> ...  Create a volume link for container\n\n"
-                << "  vfs rm <container_id>            remove vfs for a container\n\n"
-                << "  help                             Show this help message\n";
+        std::array<char, 8192> buffer{};
+        for (const auto& entry : fs::recursive_directory_iterator(path)) {
+                fs::path relative{fs::relative(entry.path(), path)};
+                archive_entry* ae{archive_entry_new()};
+                archive_entry_set_pathname(ae, relative.generic_string().c_str());
+                if (entry.is_directory()) {
+                        archive_entry_set_filetype(ae, AE_IFDIR);
+                        archive_entry_set_perm(ae, 0755);
+                        archive_entry_set_size(ae, 0);
+                        archive_write_header(archive, ae);
+                }
+                else if (entry.is_regular_file()) {
+                        archive_entry_set_filetype(ae, AE_IFREG);
+                        archive_entry_set_perm(ae, static_cast<mode_t>(fs::status(entry.path()).permissions()));
+                        archive_entry_set_size(ae, fs::file_size(entry.path()));
+                        archive_write_header(archive, ae);
+                        std::ifstream in(entry.path(), std::ios::binary);
+                        while (in) {
+                                in.read(buffer.data(), buffer.size());
+                                auto n{in.gcount()};
+                                if (n > 0) {
+                                        archive_write_data(archive, buffer.data(), static_cast<size_t>(n));
+                                }
+                        }
+                }
+                else if (entry.is_symlink()) {
+                        archive_entry_set_filetype(ae, AE_IFLNK);
+                        auto target{fs::read_symlink(entry.path())};
+                        archive_entry_set_symlink(ae, target.generic_string().c_str());
+                        archive_entry_set_size(ae, 0);
+                        archive_write_header(archive, ae);
+                }
+                archive_entry_free(ae);
+        }
+        archive_write_close(archive);
+        archive_write_free(archive);
 }
 
 auto Utils::extract_tarball(const std::string& tarball_path, const std::string& destination_path) -> void {
@@ -551,6 +580,25 @@ auto Utils::extract_tarball(const std::string& tarball_path, const std::string& 
         archive_write_free(ext);
 }
 
+auto Utils::is_archive(const fs::path& path) -> bool {
+        archive* a{archive_read_new()};
+        if (a == nullptr) {
+                throw std::runtime_error("Tar Error: Failed to create archive reader.");
+        }
+        archive_read_support_filter_all(a);
+        archive_read_support_format_all(a);
+
+        if (archive_read_open_filename(a, path.c_str(), 10240) != ARCHIVE_OK) {
+                archive_read_free(a);
+                return false;
+        }
+        archive_entry* entry{};
+        bool is_arc{archive_read_next_header(a, &entry) ==  ARCHIVE_OK};
+        archive_read_close(a);
+        archive_read_free(a);
+        return is_arc;
+}
+
 struct EvpCtxDeleter {
         void operator()(EVP_MD_CTX* ctx) const noexcept { EVP_MD_CTX_free(ctx); }
 };
@@ -583,4 +631,71 @@ auto Utils::sha256(std::string_view data) -> std::string {
                 oss << std::setw(2) << static_cast<unsigned>(hash[i]);
         }
         return oss.str();
+}
+
+auto Utils::sha256_file(const fs::path& file) -> std::string {
+        EVP_MD_CTX* ctx{EVP_MD_CTX_new()};
+        if (!ctx)
+                throw std::runtime_error("Failed to create EVP context");
+        if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1)
+                throw std::runtime_error("EVP_DigestInit_ex failed");
+        std::ifstream in(file, std::ios::binary);
+        std::array<char, 8192> buffer{};
+        while (in) {
+                in.read(buffer.data(), buffer.size());
+                auto n = in.gcount();
+                if (n > 0) {
+                        if (EVP_DigestUpdate(ctx, buffer.data(), static_cast<size_t>(n)) != 1)
+                                throw std::runtime_error("EVP_DigestUpdate failed");
+                }
+        }
+        std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
+        unsigned int digest_len{};
+        if (EVP_DigestFinal_ex(ctx, digest.data(), &digest_len) != 1)
+                throw std::runtime_error("EVP_DigestFinal_ex failed");
+        EVP_MD_CTX_free(ctx);
+        std::stringstream ss{};
+        ss << std::hex << std::setfill('0');
+        for (size_t i{0}; i < digest_len; ++i)
+                ss << std::setw(2) << static_cast<unsigned>(digest[i]);
+        return "sha256:" + ss.str();
+}
+
+auto Utils::print_usage() -> void { std::cout << "Usage: quiver <command> [options] [arguments]\n\n" << "Commands:\n"
+                << "  run [options] -i <image> [cmd]   Create and start a new container\n"
+                << "      -i, --image <name>           Image to use (required)\n"
+                << "      -n, --name <name>            Assign a name to the container\n"
+                << "      -p, --port <host:cont>       Publish a container's port(s) to the host\n"
+                << "      -v, --volume <host:cont>     Bind mount a volume\n"
+                << "      --vfs                        Use VFS (copy) instead of OverlayFS for package manager related\n"
+                << "      --no-remove                  Do not remove the filesystem after exit\n\n"
+
+                << "  start <container_id> ...         Start one or more stopped containers\n"
+                << "  stop <container_id> ...          Stop one or more running containers\n"
+                << "  rm <container_id> ...            Remove one or more containers\n"
+                << "  attach <container_id>            Attach local standard input, output, and error to a running container\n\n"
+
+                << "  ps [-a]                          List containers\n"
+                << "      -a                           Show all containers (default shows just running)\n\n"
+
+                << "  pull <image_name>                Pull an image from a registry\n\n"
+                << "  image <subcommand>               Manage images\n"
+                << "      ls                           List available images\n"
+                << "      rm <image:tag>               Remove an image\n"
+                << "      cls <image_name>             List containers using a specific image\n\n"
+
+                << "  volume <subcommand>              Manage volumes\n"
+                << "      ls                           List all volumes\n"
+                << "      rm <volume_id> ...           remove one or more volume links\n\n"
+
+                << "  network <subcommand>             Manage networks\n"
+                << "      ls                           List all network port mappings\n"
+                << "      rm <network_id> ...          remove one or more network links\n"
+                << "      add <container_id> [args]                                    \n"
+                << "              <host:cont> ...      add a new network link\n\n"
+                << "  create <subcommand>              Create resources\n"
+                << "      volume <container_id> [args]                 \n"
+                << "                  <host:cont> ...  Create a volume link for container\n\n"
+                << "  vfs rm <container_id>            remove vfs for a container\n\n"
+                << "  help                             Show this help message\n";
 }

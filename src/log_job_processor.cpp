@@ -41,30 +41,24 @@ auto LogJobProcessor::process_job() -> void {
         m_worker = std::thread([this]() {
                                 while (this->m_running.load(std::memory_order_acquire)) {
                                         auto log_data{m_log_command_queue->atomic_pop()};
-                                        if (log_data == std::nullopt) {
+                                        if (!log_data.has_value()) {
                                                 std::this_thread::yield();
                                                 continue;
                                         }
                                         this->route_job(log_data.value());
                                 }
-                      int retries_left = 50;
-
-                while(retries_left > 0) {
-                        auto log_data{m_log_command_queue->atomic_pop()};
-
-                        if (log_data != std::nullopt) {
-                                this->route_job(log_data.value());
-                                // We caught a late log! Reset the counter to
-                                // catch any immediate followers.
-                                retries_left = 50;
-                        } else {
-                                // The queue appears empty. Sleep for 2 milliseconds
-                                // and check again before we give up.
-                                std::this_thread::sleep_for(std::chrono::milliseconds(2));
-                                retries_left--;
-                        }
-                }
-        });
+                                int retries_left{50};
+                                while(retries_left > 0) {
+                                        auto log_data{m_log_command_queue->atomic_pop()};
+                                        if (log_data.has_value()) {
+                                                this->route_job(log_data.value());
+                                                retries_left = 50;
+                                        } else {
+                                                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                                                retries_left--;
+                                        }
+                                }
+                        });
 }
 
 auto LogJobProcessor::stop() -> void {
@@ -96,8 +90,7 @@ auto LogJobProcessor::process_log(const fs::path& path, const LogJobData& job_da
         const char* data_ptr{m_value_heap->get_job_data_pointer(job_data.value_offset)};
         if (data_ptr == nullptr) {
                 m_log_file << std::format("[{}] Log Job Processor Error: null pointer exception for {} type job.\n",
-                                chrono::system_clock::now(), static_cast<std::uint8_t>(job_data.target_log))
-                           << std::flush;
+                                chrono::system_clock::now(), static_cast<std::uint8_t>(job_data.target_log)) << std::flush;
                 return;
         }
         std::string value(data_ptr, job_data.value_length);
@@ -107,7 +100,6 @@ auto LogJobProcessor::process_log(const fs::path& path, const LogJobData& job_da
         }
         catch (const std::exception& e) {
                 m_log_file << std::format("[{}] Log Job Processor Error: got error -> '{}'.\n",
-                                chrono::system_clock::now(), e.what())
-                           << std::flush;
+                                chrono::system_clock::now(), e.what()) << std::flush;
         }
 }

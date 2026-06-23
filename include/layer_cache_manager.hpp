@@ -8,8 +8,7 @@
 
 class DatabaseCommandQueue;
 class ValueHeap;
-
-class InFlightCacheManager : public Singleton<InFlightCacheManager>{
+class InFlightCacheManager : public Singleton<InFlightCacheManager> {
         friend class Singleton<InFlightCacheManager>;
         private:
                 InFlightCacheManager() = default;
@@ -20,18 +19,28 @@ class InFlightCacheManager : public Singleton<InFlightCacheManager>{
                         std::promise<LayerCache> promise{};
                         std::shared_future<LayerCache> future{};
                 };
+                struct AcquireResult {
+                        bool is_owner{};
+                        std::shared_ptr<InFlightBuild> build{};
+                };
                 InFlightCacheManager(InFlightCacheManager&&) = delete;
                 InFlightCacheManager(const InFlightCacheManager&) = delete;
                 auto operator=(InFlightCacheManager&&) -> InFlightCacheManager& = delete;
                 auto operator=(const InFlightCacheManager&) -> InFlightCacheManager& = delete;
+
+                [[nodiscard]] auto acquire(const std::string&) -> AcquireResult;
+                auto finish_success(const std::string&, LayerCache&&) -> void;
+                auto finish_failure(const std::string&, std::exception_ptr) -> void;
         private:
                 libcuckoo::cuckoohash_map<std::string, std::shared_ptr<InFlightBuild>> m_inflight{};
 };
 
-class LayerCacheManager {
-        public:
+class LayerCacheManager : public Singleton<LayerCacheManager>{
+        friend class Singleton<LayerCacheManager>;
+        private:
                 LayerCacheManager() = default;
                 ~LayerCacheManager() = default;
+        public:
                 LayerCacheManager(LayerCacheManager&&) = delete;
                 LayerCacheManager(const LayerCacheManager&) = delete;
                 auto operator=(LayerCacheManager&&) -> LayerCacheManager& = delete;
@@ -41,6 +50,6 @@ class LayerCacheManager {
                 [[nodiscard]] auto lookup(const std::string&) -> std::optional<LayerCache>;
                 auto store(const std::string&, const std::string&) -> void;
         private:
-                std::unique_ptr<DatabaseCommandQueue> m_db_command_queue{};
-                std::unique_ptr<ValueHeap> m_value_heap{};
+                DatabaseCommandQueue* m_db_command_queue{};
+                ValueHeap* m_value_heap{};
 };

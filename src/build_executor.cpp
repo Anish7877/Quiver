@@ -1,22 +1,43 @@
 #include "build_executor.hpp"
+#include "graph_builder.hpp"
 #include "image_manager.hpp"
+#include "instruction_types.hpp"
+#include "layer_cache_manager.hpp"
+#include "utils.hpp"
+#include <cpr/api.h>
+#include <cpr/cprtypes.h>
+#include <cpr/error.h>
+#include <cpr/ssl_options.h>
+#include <cpr/verbose.h>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <optional>
 #include <queue>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <unordered_set>
+#include <blake3.h>
+#include <format>
+#include <random>
+#include <sys/stat.h>
 
 auto BuildExecutor::execute_instructions(const std::vector<std::vector<size_t>>& graph,
                 const std::vector<GraphBuilder::Stage>& stages,
                 const GraphBuilder::ParsedInstructions& parsed_instructions,
                 const GraphBuilder::ParsedInstructionsMaps& parsed_instruction_maps,
                 const std::vector<BuildFileParser::BuildInstruction>& instructions) -> void {
-        m_image_manager.reset(&ImageManager::get_instance());
+        m_image_manager = &ImageManager::get_instance();
+        m_in_flight_cache_manager = &InFlightCacheManager::get_instance();
+        m_layer_cache_manager = &LayerCacheManager::get_instance();
+        m_layer_cache_manager->init();
         if (detect_cycles(graph)) {
                 throw std::runtime_error("Build Executor Error: Cycle detected in dependency graph.");
         }
         std::unordered_set<std::string> images{};
+        std::unordered_set<std::string> urls{};
         for (const auto& stage : stages) {
                 auto it{parsed_instruction_maps.stage_alias_to_node_number.find(stage.base_image)};
                 if (it == parsed_instruction_maps.stage_alias_to_node_number.end()) {
@@ -28,19 +49,26 @@ auto BuildExecutor::execute_instructions(const std::vector<std::vector<size_t>>&
                         images.insert(copy_instruction.from_stage.value());
                 }
         }
+        for (const auto& add_instruction : parsed_instructions.add_instructions) {
+                for (const auto& url : add_instruction.urls) {
+                        urls.insert(url);
+                }
+        }
         std::vector<std::thread> image_pull_workgroup(images.size());
+        std::vector<std::thread> urls_downloads_workgroup(urls.size());
         std::vector<std::exception_ptr> image_pulling_errors(images.size());
-
-        auto it{images.begin()};
+        std::vector<std::exception_ptr> url_download_errors(urls.size());
+        auto images_it{images.begin()};
+        auto urls_it{urls.begin()};
         for (size_t i{}; i < images.size(); ++i) {
-                std::string image{*it};
+                std::string image{*images_it};
                 image_pull_workgroup[i] = std::thread([&, i, image] {
                                 try {
-                                        std::string error;
-                                        std::string out_path;
-
-                                        m_image_manager->pull(image, out_path, error);
-
+                                        std::string error{};
+                                        std::string out_path{};
+                                        json manifest{m_image_manager->pull(image, out_path, error)};
+                                        std::string top_layer_digest{manifest["layers"].back()["digest"].get<std::string>().substr()};
+                                        m_image_top_layer_digest.insert(image, top_layer_digest);
                                         if (!error.empty()) {
                                                 throw std::runtime_error(error);
                                         }
@@ -48,13 +76,34 @@ auto BuildExecutor::execute_instructions(const std::vector<std::vector<size_t>>&
                                 catch (...) {
                                         image_pulling_errors[i] = std::current_exception();
                                 }});
-                ++it;
+                ++images_it;
         }
         for (auto& worker : image_pull_workgroup) {
                 if (worker.joinable())
                         worker.join();
         }
         for (const auto& error : image_pulling_errors) {
+                if (error) {
+                        std::rethrow_exception(error);
+                }
+        }
+        for (size_t i{}; i < urls.size(); ++i) {
+                std::string url{*urls_it};
+                urls_downloads_workgroup[i] = std::thread([&, i, url] {
+                                        try {
+                                                fs::path file_path{download_file(url, "/tmp/quiver_downloads")};
+                                                m_url_downloaded_file.insert(url, file_path);
+                                        }
+                                        catch (...) {
+                                                url_download_errors[i] = std::current_exception();
+                                        }
+                                });
+                ++urls_it;
+        }
+        for (auto& worker : urls_downloads_workgroup) {
+                if (worker.joinable()) worker.join();
+        }
+        for (const auto& error : url_download_errors) {
                 if (error) {
                         std::rethrow_exception(error);
                 }
@@ -145,4 +194,438 @@ auto BuildExecutor::exec_stage(const GraphBuilder::Stage& stage,
                 const GraphBuilder::ParsedInstructions& parsed_instructions,
                 const GraphBuilder::ParsedInstructionsMaps& parsed_instruction_maps,
                 const std::vector<BuildFileParser::BuildInstruction>& instructions) -> void {
+        std::string current_digest{};
+        auto it{parsed_instruction_maps.stage_alias_to_node_number.find(stage.base_image)};
+        if (it == parsed_instruction_maps.stage_alias_to_node_number.end()) {
+                if (!m_image_top_layer_digest.find(stage.base_image, current_digest)) {
+                        throw std::runtime_error("Build Executor Error: ");
+                }
+        }
+        else {
+                if (!m_stage_final_digest.find(it->second, current_digest)) {
+                        throw std::runtime_error("Build Executor Error: ");
+                }
+        }
+        m_stage_layers.insert(stage.node_number, std::vector{current_digest});
+        for (const auto& instruction_index : stage.instruction_indices) {
+                switch (instructions[instruction_index].type) {
+                        case Instruction::InstructionType::ADD:
+                                {
+                                        auto it{parsed_instruction_maps.index_to_offset.find(instruction_index)};
+                                        exec_add(stage, parsed_instructions.add_instructions[it->second],
+                                                        instructions[instruction_index].raw_instruction, current_digest);
+                                        break;
+                                }
+                        case Instruction::InstructionType::COPY:
+                                {
+                                        auto it{parsed_instruction_maps.index_to_offset.find(instruction_index)};
+                                        exec_copy(stage, parsed_instructions.copy_instructions[it->second],
+                                                        instructions[instruction_index].raw_instruction, current_digest);
+                                        break;
+                                }
+                        case Instruction::InstructionType::RUN:
+                                {
+                                        auto it{parsed_instruction_maps.index_to_offset.find(instruction_index)};
+                                        exec_run(stage, parsed_instructions.run_instructions[it->second],
+                                                        instructions[instruction_index].raw_instruction, current_digest);
+                                        break;
+                                }
+                        case Instruction::InstructionType::SHELL:
+                                exec_shell(); break;
+                        case Instruction::InstructionType::USER:
+                                exec_user(); break;
+                        case Instruction::InstructionType::WORKDIR:
+                                exec_workdir(); break;
+                        default:
+                                break;
+                }
+        }
+}
+
+auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction::AddInstruction& instruction,
+                const std::string& raw_instruction, std::string& current_digest) -> void {
+        std::vector<fs::path> srcs{instruction.srcs};
+        for (const auto& url : instruction.urls) {
+                fs::path file_path{};
+                m_url_downloaded_file.find(url, file_path);
+                srcs.emplace_back(file_path);
+        }
+        Instruction::InstructionHash instruction_hash{};
+        instruction_hash.expanded_raw_ins = raw_instruction;
+        instruction_hash.parent_digest = current_digest;
+        instruction_hash.file_checksum = compute_files_checksum(srcs);
+        std::string hash{get_instruction_hash(instruction_hash)};
+        std::string digest{};
+        if (m_hash_digest.find(hash, digest)) {
+                m_stage_layers.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& layers) {
+                                        layers.emplace_back(digest);
+                                });
+                current_digest = std::move(digest);
+                return;
+        }
+        auto obj{m_layer_cache_manager->lookup(hash)};
+        if (obj.has_value()) {
+                m_stage_layers.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& layers) {
+                                        layers.emplace_back(obj->hash);
+                                });
+                m_hash_digest.insert(hash, obj->hash);
+                current_digest = std::move(obj->hash);
+                return;
+        }
+        auto status{m_in_flight_cache_manager->acquire(hash)};
+        if (status.is_owner) {
+                fs::path dummy_path{std::format("/tmp/quiver_layer_{}", hash)};
+                fs::path final_dst{dummy_path / instruction.dst};
+                try {
+                        if (srcs.size() == 1) {
+                                fs::path path{srcs.front().is_absolute() ? srcs.front() : m_build_dir / srcs.front()};
+                                if (fs::exists(path)) {
+                                        bool is_archive{Utils::is_archive(path)};
+                                        if (is_archive) {
+                                                Utils::ensure_dir(final_dst);
+                                                Utils::extract_tarball(path, final_dst.string());
+                                                change_permission_and_owners(final_dst, instruction.chmod, instruction.chown);
+                                        }
+                                        else if (fs::is_directory(path) || instruction.dst.string().ends_with('/')) {
+                                                Utils::ensure_dir(final_dst);
+                                                Utils::copy_directory(path, final_dst);
+                                                change_permission_and_owners(final_dst, instruction.chmod, instruction.chown);
+                                        }
+                                        else {
+                                                const auto parent{final_dst.parent_path()};
+                                                Utils::ensure_dir(parent);
+                                                Utils::copy_directory(path, parent);
+                                                Utils::rename_file_or_directory(parent / srcs.front().filename(), parent / instruction.dst);
+                                                change_permission_and_owners(parent / instruction.dst, instruction.chmod, instruction.chown);
+                                        }
+                                }
+                                else {
+                                        throw std::runtime_error(std::format("ADD failed: source '{}' does not exist.", srcs.front().string()));
+                                }
+                        }
+                        else {
+                                Utils::ensure_dir(final_dst);
+                                for (const auto& src : srcs) {
+                                        fs::path path{src.is_absolute() ? src : m_build_dir / src};
+                                        if (fs::exists(path)) {
+                                                bool is_archive{Utils::is_archive(path)};
+                                                if (is_archive) {
+                                                        Utils::extract_tarball(path, final_dst.string());
+                                                }
+                                                else {
+                                                        Utils::copy_directory(path, final_dst);
+                                                }
+                                        }
+                                        else {
+                                                throw std::runtime_error(std::format("ADD failed: source '{}' does not exist.", src.string()));
+                                        }
+                                }
+                                change_permission_and_owners(final_dst, instruction.chmod, instruction.chown);
+                        }
+                        Utils::create_tar_gz(dummy_path, dummy_path / "layer.tar.gz");
+                        std::string sha256_hash{Utils::sha256_file(dummy_path / "layer.tar.gz")};
+                        std::string sha256_tar{sha256_hash + ".tar.gz"};
+                        Utils::rename_file_or_directory(dummy_path / "layer.tar.gz", Utils::get_layers_path(sha256_hash.substr(7) + ".tar.gz"));
+                        Utils::remove_directory(dummy_path);
+                        m_stage_layers.update_fn(stage.node_number,
+                                        [&](std::vector<std::string>& layers) {
+                                                layers.emplace_back(sha256_hash);
+                                        });
+                        current_digest = sha256_hash;
+                        m_hash_digest.insert(hash, sha256_hash);
+                        m_layer_cache_manager->store(hash, sha256_hash);
+                        m_in_flight_cache_manager->finish_success(hash, {sha256_hash});
+                }
+                catch (...) {
+                        Utils::remove_directory(dummy_path);
+                        m_in_flight_cache_manager->finish_failure(hash, std::current_exception());
+                        throw;
+                }
+        }
+        else {
+                const auto& layer_cache{status.build->future.get()};
+                m_stage_layers.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& layers) {
+                                        layers.emplace_back(layer_cache.hash);
+                                });
+                current_digest = layer_cache.hash;
+        }
+}
+
+auto BuildExecutor::change_permission_and_owners(const fs::path& path,
+                const std::optional<mode_t>& mode, const std::optional<std::pair<uid_t, gid_t>>& uid_gid) -> void {
+        if (mode.has_value() && uid_gid.has_value()) {
+                if (fs::is_directory(path)) {
+                        for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)) {
+                                Utils::change_permissions(path, mode.value());
+                                Utils::change_owners(path, uid_gid->first, uid_gid->second);
+                        }
+                }
+                else {
+                        Utils::change_permissions(path, mode.value());
+                        Utils::change_owners(path, uid_gid->first, uid_gid->second);
+                }
+        }
+        else if (mode.has_value()) {
+                if (fs::is_directory(path)) {
+                        for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)) {
+                                Utils::change_permissions(path, mode.value());
+                        }
+                }
+                else {
+                        Utils::change_permissions(path, mode.value());
+                }
+        }
+        else if (uid_gid.has_value()) {
+                if (fs::is_directory(path)) {
+                        for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)) {
+                                Utils::change_owners(path, uid_gid->first, uid_gid->second);
+                        }
+                }
+                else {
+                        Utils::change_owners(path, uid_gid->first, uid_gid->second);
+                }
+        }
+}
+
+[[nodiscard]] auto BuildExecutor::compute_files_checksum(const std::vector<fs::path>& srcs) -> std::string {
+        struct Entry {
+                std::string relative_path;
+                fs::path absolute_path;
+                bool is_directory;
+                bool is_symlink;
+        };
+        std::vector<Entry> entries{};
+        std::unordered_set<std::string> seen{};
+        for (const auto& src : srcs) {
+                fs::path abs_path{m_build_dir / src};
+
+                if (!fs::exists(abs_path) && !fs::is_symlink(abs_path)) {
+                        throw std::runtime_error(std::format("Build Executor Error: Source '{}' does not exist.", src.string()));
+                }
+
+                auto add_entry{[&](const fs::path& path) {
+                        std::string relative_path{fs::relative(path, m_build_dir).generic_string()};
+                        if (!seen.insert(relative_path).second) {
+                                return;
+                        }
+                        entries.emplace_back(Entry{std::move(relative_path), path, fs::is_directory(path), fs::is_symlink(path)});
+                }};
+                if (fs::is_regular_file(abs_path) || fs::is_symlink(abs_path)) {
+                        add_entry(abs_path);
+                }
+                else if (fs::is_directory(abs_path)) {
+                        add_entry(abs_path);
+                        for (const auto& dir_entry : fs::recursive_directory_iterator(abs_path, fs::directory_options::skip_permission_denied)) {
+                                add_entry(dir_entry.path());
+                        }
+                }
+                else {
+                        throw std::runtime_error(std::format("Build Executor Error: Unsupported source '{}'.", src.string()));
+                }
+        }
+        std::sort(entries.begin(), entries.end(),
+                        [](const Entry& lhs, const Entry& rhs) {
+                                return lhs.relative_path < rhs.relative_path;
+                        });
+
+        blake3_hasher hasher{};
+        blake3_hasher_init(&hasher);
+        constexpr uint8_t separator{0};
+        std::array<char, 8192> buffer{};
+        for (const auto& entry : entries) {
+                blake3_hasher_update(&hasher, reinterpret_cast<const uint8_t*>(entry.relative_path.data()), entry.relative_path.size());
+                blake3_hasher_update(&hasher, &separator, 1);
+                const auto perms{static_cast<std::uint32_t>(fs::status(entry.absolute_path).permissions())};
+                blake3_hasher_update(&hasher, reinterpret_cast<const uint8_t*>(&perms), sizeof(perms));
+                blake3_hasher_update(&hasher, &separator, 1);
+                if (entry.is_symlink) {
+                        auto target{fs::read_symlink(entry.absolute_path).generic_string()};
+                        blake3_hasher_update(&hasher, reinterpret_cast<const uint8_t*>(target.data()), target.size());
+                        blake3_hasher_update(&hasher, &separator, 1);
+                        continue;
+                }
+                if (entry.is_directory) {
+                        continue;
+                }
+                std::ifstream in(entry.absolute_path, std::ios::binary);
+                if (!in) {
+                        throw std::runtime_error(std::format("Build Executor Error: Failed to open '{}'.", entry.absolute_path.string()));
+                }
+                while (in) {
+                        in.read(buffer.data(), buffer.size());
+                        const auto bytes{in.gcount()};
+                        if (bytes > 0) {
+                                blake3_hasher_update(&hasher, reinterpret_cast<const uint8_t*>(buffer.data()), static_cast<size_t>(bytes));
+                        }
+                }
+                blake3_hasher_update(&hasher, &separator, 1);
+        }
+        std::array<uint8_t, BLAKE3_OUT_LEN> digest{};
+        blake3_hasher_finalize(&hasher, digest.data(), digest.size());
+        std::stringstream hex_stream{};
+        hex_stream << std::hex << std::setfill('0');
+        for (std::size_t i{0}; i < BLAKE3_OUT_LEN; ++i) {
+                hex_stream << std::setw(2) << static_cast<unsigned int>(digest[i]);
+        }
+        return hex_stream.str();
+}
+
+[[nodiscard]] auto BuildExecutor::get_instruction_hash(const Instruction::InstructionHash& instruction_hash) -> std::string {
+        std::string input {
+                instruction_hash.parent_digest + '\0' +
+                instruction_hash.expanded_raw_ins + '\0' +
+                (!instruction_hash.source_stage.empty() ? (instruction_hash.source_stage + '\0') : "") +
+                instruction_hash.file_checksum + '\0'
+        };
+        blake3_hasher hasher{};
+        blake3_hasher_init(&hasher);
+        blake3_hasher_update(&hasher, input.c_str(), input.length());
+
+        std::array<uint8_t, BLAKE3_OUT_LEN> output{};
+        blake3_hasher_finalize(&hasher, output.data(), output.size());
+        std::stringstream hex_stream{};
+        hex_stream << std::hex << std::setfill('0');
+        for (std::size_t i{0}; i < BLAKE3_OUT_LEN; ++i) {
+                hex_stream << std::setw(2) << static_cast<int>(output[i]);
+        }
+        return hex_stream.str();
+}
+
+[[nodiscard]] auto BuildExecutor::download_file(const std::string& url, const fs::path& dst) -> fs::path {
+        auto get_response{cpr::Get(cpr::Url{url})};
+        auto it{get_response.header.find("content-disposition")};
+        std::optional<std::string> filename{};
+        if (it != get_response.header.end()) {
+                filename = get_filename_from_content_disposition(it->second);
+                if (!filename.has_value()) {
+                        filename = get_temp_filename();
+                }
+                else {
+                        filename = sanitize_filename(filename.value());
+                }
+        }
+        else {
+                filename = get_temp_filename();
+        }
+        std::ofstream out(dst / filename.value(), std::ios::binary);
+        if (!out) {
+                throw std::runtime_error(std::format("File Error: Could not open '{}'.", fs::path{dst / filename.value()}.string()));
+        }
+        auto download_response{cpr::Download(out, cpr::Url{url}, cpr::Redirect{true}, cpr::VerifySsl{true})};
+        out.close();
+        if (download_response.error.code != cpr::ErrorCode::OK) {
+                try {
+                        Utils::remove_directory(fs::path{dst / filename.value()});
+                }
+                catch (const std::exception& e) {
+                        throw std::runtime_error(e.what());
+                }
+                throw std::runtime_error(std::format("Download Error: '{}'", download_response.error.message));
+        }
+        if (download_response.status_code >= 400) {
+                try {
+                        Utils::remove_directory(fs::path{dst / filename.value()});
+                }
+                catch (const std::exception& e) {
+                        throw std::runtime_error(e.what());
+                }
+                throw std::runtime_error(std::format("Download Error: '{}'", download_response.error.message));
+        }
+        return dst / filename.value();
+}
+
+[[nodiscard]] auto BuildExecutor::get_filename_from_content_disposition(const std::string& header) -> std::optional<std::string> {
+        auto trim_str{[](std::string& s) {
+                auto start = s.find_first_not_of(" \t\r\n");
+                auto end   = s.find_last_not_of(" \t\r\n");
+                s = (start == std::string::npos) ? "" : s.substr(start, end - start + 1);
+        }};
+
+        // According to RFC 5987
+        if (auto pos = header.find("filename*=");
+            pos != std::string::npos) {
+                pos += 10;
+                auto end{header.find(';', pos)};
+                size_t len{(end == std::string::npos) ? std::string::npos : end - pos};
+                std::string value{header.substr(pos, len)};
+                trim_str(value);
+
+                auto first_quote{value.find('\'')};
+                if (first_quote == std::string::npos) return std::nullopt;
+                auto second_quote{value.find('\'', first_quote + 1)};
+                if (second_quote == std::string::npos) return std::nullopt;
+
+                return percent_decode(value.substr(second_quote + 1));
+        }
+        auto pos{header.find("filename=")};
+        while (pos != std::string::npos) {
+                if (pos == 0 || header[pos - 1] != '*') break;
+                pos = header.find("filename=", pos + 1);
+        }
+        if (pos != std::string::npos) {
+                pos += 9;
+                auto end{header.find(';', pos)};
+                size_t len{(end == std::string::npos) ? std::string::npos : end - pos};
+                std::string filename{header.substr(pos, len)};
+                trim_str(filename);
+                if (filename.size() >= 2 &&
+                    filename.front() == '"' &&
+                    filename.back()  == '"') {
+                        filename = filename.substr(1, filename.size() - 2);
+                }
+                return filename;
+        }
+        return std::nullopt;
+}
+
+[[nodiscard]] auto BuildExecutor::percent_decode(const std::string& encoded) -> std::string {
+        std::string decoded{};
+        decoded.reserve(encoded.size());
+        for (size_t i{}; i < encoded.size(); ++i) {
+                if (encoded[i] == '%' && i + 2 < encoded.size() &&
+                    std::isxdigit(static_cast<unsigned char>(encoded[i + 1])) &&
+                    std::isxdigit(static_cast<unsigned char>(encoded[i + 2]))) {
+                        const auto hex{encoded.substr(i + 1, 2)};
+                        decoded.push_back(static_cast<char>(std::stoi(hex, nullptr, 16)));
+                        i += 2;
+                }
+                else {
+                        decoded.push_back(encoded[i]);
+                }
+        }
+        return decoded;
+}
+
+[[nodiscard]] auto BuildExecutor::sanitize_filename(const std::string& name) -> std::string {
+        std::string result{};
+        for (char c : name) {
+                if (c == '/' || c == '\\' || c == '\0') continue;
+                result += c;
+        }
+        size_t start{result.find_first_not_of(". ")};
+        return (start == std::string::npos) ? get_temp_filename() : result.substr(start);
+}
+
+[[nodiscard]] auto BuildExecutor::get_temp_filename() -> std::string {
+        std::array<uint8_t, 32> random{};
+        std::random_device rd{};
+
+        for (auto& b : random)
+                b = static_cast<uint8_t>(rd());
+
+        blake3_hasher hasher;
+        blake3_hasher_init(&hasher);
+        blake3_hasher_update(&hasher, random.data(), random.size());
+
+        std::array<uint8_t, BLAKE3_OUT_LEN> output{};
+        blake3_hasher_finalize(&hasher, output.data(), output.size());
+        std::stringstream hex_stream{};
+        hex_stream << std::hex << std::setfill('0');
+        for (std::size_t i{0}; i < BLAKE3_OUT_LEN; ++i) {
+                hex_stream << std::setw(2) << static_cast<int>(output[i]);
+        }
+        return hex_stream.str();
 }

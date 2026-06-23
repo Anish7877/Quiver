@@ -94,9 +94,7 @@ struct DbStatus {
                         processed.wait(false, std::memory_order_acquire);
                 }
         private:
-                friend class ContainerDbManager;
-                friend class ImageDbManager;
-                friend class LayerCacheDbManager;
+                friend class DatabaseJobProcessor;
                 std::vector<DbResult> m_results{};
                 std::string m_error{};
                 bool m_ok{false};
