@@ -3,6 +3,7 @@
 #include "image_manager.hpp"
 #include "instruction_types.hpp"
 #include "layer_cache_manager.hpp"
+#include "thread_pool.hpp"
 #include "utils.hpp"
 #include <cpr/api.h>
 #include <cpr/cprtypes.h>
@@ -13,20 +14,21 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <libcuckoo/cuckoohash_map.hh>
 #include <optional>
 #include <queue>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <unordered_set>
 #include <blake3.h>
 #include <format>
 #include <random>
 #include <sys/stat.h>
+#include <future>
 
 auto BuildExecutor::execute_instructions(const std::vector<std::vector<size_t>>& graph,
                 const std::vector<GraphBuilder::Stage>& stages,
-                const GraphBuilder::ParsedInstructions& parsed_instructions,
+                GraphBuilder::ParsedInstructions& parsed_instructions,
                 const GraphBuilder::ParsedInstructionsMaps& parsed_instruction_maps,
                 const std::vector<BuildFileParser::BuildInstruction>& instructions) -> void {
         m_image_manager = &ImageManager::get_instance();
@@ -36,103 +38,19 @@ auto BuildExecutor::execute_instructions(const std::vector<std::vector<size_t>>&
         if (detect_cycles(graph)) {
                 throw std::runtime_error("Build Executor Error: Cycle detected in dependency graph.");
         }
-        std::unordered_set<std::string> images{};
-        std::unordered_set<std::string> urls{};
-        for (const auto& stage : stages) {
-                auto it{parsed_instruction_maps.stage_alias_to_node_number.find(stage.base_image)};
-                if (it == parsed_instruction_maps.stage_alias_to_node_number.end()) {
-                        images.insert(stage.base_image);
-                }
-        }
-        for (const auto& copy_instruction : parsed_instructions.copy_instructions) {
-                if (!copy_instruction.is_dependency) {
-                        images.insert(copy_instruction.from_stage.value());
-                }
-        }
-        for (const auto& add_instruction : parsed_instructions.add_instructions) {
-                for (const auto& url : add_instruction.urls) {
-                        urls.insert(url);
-                }
-        }
-        std::vector<std::thread> image_pull_workgroup(images.size());
-        std::vector<std::thread> urls_downloads_workgroup(urls.size());
-        std::vector<std::exception_ptr> image_pulling_errors(images.size());
-        std::vector<std::exception_ptr> url_download_errors(urls.size());
-        auto images_it{images.begin()};
-        auto urls_it{urls.begin()};
-        for (size_t i{}; i < images.size(); ++i) {
-                std::string image{*images_it};
-                image_pull_workgroup[i] = std::thread([&, i, image] {
-                                try {
-                                        std::string error{};
-                                        std::string out_path{};
-                                        json manifest{m_image_manager->pull(image, out_path, error)};
-                                        std::string top_layer_digest{manifest["layers"].back()["digest"].get<std::string>().substr()};
-                                        m_image_top_layer_digest.insert(image, top_layer_digest);
-                                        if (!error.empty()) {
-                                                throw std::runtime_error(error);
-                                        }
-                                }
-                                catch (...) {
-                                        image_pulling_errors[i] = std::current_exception();
-                                }});
-                ++images_it;
-        }
-        for (auto& worker : image_pull_workgroup) {
-                if (worker.joinable())
-                        worker.join();
-        }
-        for (const auto& error : image_pulling_errors) {
-                if (error) {
-                        std::rethrow_exception(error);
-                }
-        }
-        for (size_t i{}; i < urls.size(); ++i) {
-                std::string url{*urls_it};
-                urls_downloads_workgroup[i] = std::thread([&, i, url] {
-                                        try {
-                                                fs::path file_path{download_file(url, "/tmp/quiver_downloads")};
-                                                m_url_downloaded_file.insert(url, file_path);
-                                        }
-                                        catch (...) {
-                                                url_download_errors[i] = std::current_exception();
-                                        }
-                                });
-                ++urls_it;
-        }
-        for (auto& worker : urls_downloads_workgroup) {
-                if (worker.joinable()) worker.join();
-        }
-        for (const auto& error : url_download_errors) {
-                if (error) {
-                        std::rethrow_exception(error);
-                }
-        }
+        prepare(stages, parsed_instructions, parsed_instruction_maps);
         auto layers{get_topological_order(graph)};
-        std::vector<std::exception_ptr> stage_errors(stages.size());
         for(const auto& layer : layers) {
-                std::vector<std::thread> workers(layer.size());
+                std::vector<std::future<void>> workgroup{};
                 for (size_t i{}; i < layer.size(); ++i) {
                         size_t stage_index{layer[i] - 1};
-                        workers[i] = std::thread([&, stage_index](){
-                                        try {
+                        workgroup.emplace_back(m_thread_pool.submit([&, stage_index](){
                                                 exec_stage(stages[stage_index], parsed_instructions,
                                                                 parsed_instruction_maps, instructions);
-                                        }
-                                        catch (...) {
-                                                stage_errors[stage_index] = std::current_exception();
-                                        }
-                                        });
+                                        }));
                 }
-                for (size_t i{}; i < layer.size(); ++i) {
-                        if (workers[i].joinable()) {
-                                workers[i].join();
-                        }
-                }
-                for (const auto& stage : layer) {
-                        if (stage_errors[stage-1]) {
-                                std::rethrow_exception(stage_errors[stage-1]);
-                        }
+                for (auto& worker : workgroup) {
+                        worker.get();
                 }
         }
 }
@@ -354,6 +272,23 @@ auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction
         }
 }
 
+auto BuildExecutor::exec_copy(const GraphBuilder::Stage& stage, const Instruction::CopyInstruction& instruction,
+                const std::string& raw_instruction, std::string& current_digest) -> void {
+}
+
+auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction::RunInstruction& instruction,
+                const std::string& raw_instruction, std::string& current_digest) -> void {
+}
+
+auto BuildExecutor::exec_shell() -> void {
+}
+
+auto BuildExecutor::exec_user() -> void {
+}
+
+auto BuildExecutor::exec_workdir() -> void {
+}
+
 auto BuildExecutor::change_permission_and_owners(const fs::path& path,
                 const std::optional<mode_t>& mode, const std::optional<std::pair<uid_t, gid_t>>& uid_gid) -> void {
         if (mode.has_value() && uid_gid.has_value()) {
@@ -390,17 +325,114 @@ auto BuildExecutor::change_permission_and_owners(const fs::path& path,
         }
 }
 
+auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, GraphBuilder::ParsedInstructions& parsed_instructions,
+                const GraphBuilder::ParsedInstructionsMaps& parsed_instruction_maps) -> void {
+        std::unordered_set<std::string> images{};
+        std::unordered_set<std::string> urls{};
+        for (const auto& stage : stages) {
+                auto it{parsed_instruction_maps.stage_alias_to_node_number.find(stage.base_image)};
+                if (it == parsed_instruction_maps.stage_alias_to_node_number.end()) {
+                        images.emplace(stage.base_image);
+                }
+        }
+        for (const auto& copy_instruction : parsed_instructions.copy_instructions) {
+                if (!copy_instruction.is_dependency) {
+                        images.emplace(copy_instruction.from_stage.value());
+                }
+        }
+        for (const auto& add_instruction : parsed_instructions.add_instructions) {
+                for (const auto& url : add_instruction.urls) {
+                        urls.emplace(url);
+                }
+        }
+        std::vector<std::future<void>> workgroup{};
+        for (const auto& image : images) {
+                workgroup.emplace_back(m_thread_pool.submit([&, image]() -> void {
+                                                std::string error{};
+                                                std::string out_path{};
+                                                json manifest{m_image_manager->pull(image, out_path, error)};
+                                                std::string top_layer_digest{manifest["layers"].back()["digest"].get<std::string>().substr()};
+                                                m_image_top_layer_digest.insert(image, top_layer_digest);
+                                                if (!error.empty()) {
+                                                        throw std::runtime_error(error);
+                                                }
+                                        }));
+        }
+        for (auto& worker : workgroup) {
+                worker.get();
+        }
+        workgroup.clear();
+        for (const auto& url : urls) {
+                workgroup.emplace_back(m_thread_pool.submit([&, url]() -> void {
+                                        fs::path file_path{download_file(url, "/tmp/quiver_downloads")};
+                                        m_url_downloaded_file.insert(url, file_path);
+                                        }));
+        }
+        for (auto& worker : workgroup) {
+                worker.get();
+        }
+        for (auto& add_instruction : parsed_instructions.add_instructions) {
+                for (const auto& url : add_instruction.urls) {
+                        fs::path path{};
+                        if (!m_url_downloaded_file.find(url, path)) {
+                                throw std::runtime_error(std::format("Build Executor Error: Unable to find '{}' file path",
+                                                        url));
+                        }
+                        add_instruction.srcs.emplace_back(path);
+                }
+        }
+        std::unordered_set<std::string> archive_hashes{};
+        std::unordered_set<fs::path> archive_paths{};
+        libcuckoo::cuckoohash_map<fs::path, std::string> archive_path_to_hash{};
+        for (auto& add_instruction : parsed_instructions.add_instructions) {
+                std::unordered_set<fs::path> seen_paths{};
+                std::vector<fs::path> final_srcs{};
+                for (const auto& src : add_instruction.srcs) {
+                        auto path{src.is_absolute() ? src : m_build_dir / src};
+                        if (Utils::is_archive(path)) {
+                                std::string hash{Utils::sha256_file(path)};
+                                auto [_, inserted]{archive_hashes.insert(hash)};
+                                fs::path final_path{std::format("/tmp/quiver_archive_{}", hash)};
+                                if (!seen_paths.count(final_path)) {
+                                        final_srcs.emplace_back(final_path);
+                                        seen_paths.emplace(final_path);
+                                }
+                                if (inserted) {
+                                        archive_paths.emplace(path);
+                                        archive_path_to_hash.insert(path, hash);
+                                }
+                        }
+                        else {
+                                final_srcs.emplace_back(path);
+                        }
+                }
+                add_instruction.srcs = std::move(final_srcs);
+        }
+        workgroup.clear();
+        for (const auto& archive_path : archive_paths) {
+                workgroup.emplace_back(m_thread_pool.submit([&, archive_path]() -> void {
+                                                std::string hash{};
+                                                archive_path_to_hash.find(archive_path, hash);
+                                                fs::path dst{std::format("/tmp/quiver_archive_{}", hash)};
+                                                Utils::ensure_dir(dst);
+                                                Utils::extract_tarball(archive_path, dst);
+                                }));
+        }
+        for (auto& worker : workgroup) {
+                worker.get();
+        }
+}
+
 [[nodiscard]] auto BuildExecutor::compute_files_checksum(const std::vector<fs::path>& srcs) -> std::string {
         struct Entry {
                 std::string relative_path;
                 fs::path absolute_path;
                 bool is_directory;
-                bool is_symlink;
-        };
+                bool is_symlink; };
         std::vector<Entry> entries{};
         std::unordered_set<std::string> seen{};
         for (const auto& src : srcs) {
-                fs::path abs_path{m_build_dir / src};
+                fs::path abs_path{src.is_absolute() ? src : m_build_dir / src};
 
                 if (!fs::exists(abs_path) && !fs::is_symlink(abs_path)) {
                         throw std::runtime_error(std::format("Build Executor Error: Source '{}' does not exist.", src.string()));
