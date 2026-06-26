@@ -41,5 +41,5 @@ class DatabaseJobProcessor : public JobProcessor<DatabaseJobData>, public Single
                 LoggerCommandQueue* m_log_command_queue{};
                 LogJobData m_log_data{};
                 std::atomic<bool> m_running{};
-                std::thread m_worker{};
+                std::jthread m_worker{};
 };

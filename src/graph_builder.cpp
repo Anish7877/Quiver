@@ -436,7 +436,7 @@ auto GraphBuilder::parse_add_instruction(BuildFileParser::BuildInstruction& inst
                         }
                 }
         }
-        m_index_to_offset[instruction_index] = m_parsed_instructions.add_instructions.size();
+        m_index_to_offset.insert(instruction_index, m_parsed_instructions.add_instructions.size());
         m_parsed_instructions.add_instructions.emplace_back(std::move(add_ins));
 }
 
@@ -474,10 +474,10 @@ auto GraphBuilder::parse_copy_instruction(Stage* stage, BuildFileParser::BuildIn
                                                                 instruction.line_number));
                                 }
                                 copy_ins.from_stage = opt.value;
-                                auto it{m_stage_alias_to_node_number.find(opt.value)};
-                                if (it != m_stage_alias_to_node_number.end()) {
+                                size_t node{};
+                                if (m_stage_alias_to_node_number.find(opt.value, node)) {
                                         copy_ins.is_dependency = true;
-                                        stage->depends_on.emplace_back(it->second);
+                                        stage->depends_on.emplace_back(node);
                                 }
                         }
                         else if (opt.key == "chown") {
@@ -598,7 +598,7 @@ auto GraphBuilder::parse_copy_instruction(Stage* stage, BuildFileParser::BuildIn
                         copy_ins.srcs.emplace_back(arg);
                 }
         }
-        m_index_to_offset[instruction_index] = m_parsed_instructions.copy_instructions.size();
+        m_index_to_offset.insert(instruction_index, m_parsed_instructions.copy_instructions.size());
         m_parsed_instructions.copy_instructions.emplace_back(std::move(copy_ins));
 }
 
@@ -799,9 +799,9 @@ auto GraphBuilder::parse_expose_instruction(Stage* stage, BuildFileParser::Build
                                         instruction.line_number));
         }
         stage.base_image = std::move(base_image);
-        auto it{m_stage_alias_to_node_number.find(base_image)};
-        if (it != m_stage_alias_to_node_number.end()) {
-                stage.depends_on.emplace_back(it->second);
+        size_t node{};
+        if (m_stage_alias_to_node_number.find(base_image, node)) {
+                stage.depends_on.emplace_back(node);
         }
         std::string maybe_as{};
         if (!(iss >> maybe_as)) {
@@ -825,7 +825,7 @@ auto GraphBuilder::parse_expose_instruction(Stage* stage, BuildFileParser::Build
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: More than one stage alias provided.",
                                         instruction.line_number));
         }
-        m_stage_alias_to_node_number[stage_alias] = node_number;
+        m_stage_alias_to_node_number.insert(stage_alias, node_number);
         return stage;
 }
 
@@ -908,7 +908,7 @@ auto GraphBuilder::parse_run_instruction(BuildFileParser::BuildInstruction& inst
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Unexpected error.",
                                         instruction.line_number));
         }
-        m_index_to_offset[instruction_index] = m_parsed_instructions.run_instructions.size();
+        m_index_to_offset.insert(instruction_index, m_parsed_instructions.run_instructions.size());
         m_parsed_instructions.run_instructions.emplace_back(std::move(run_ins));
 }
 
@@ -929,7 +929,7 @@ auto GraphBuilder::parse_shell_instruction(BuildFileParser::BuildInstruction& in
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Invalid args format. Expected json form.",
                                         instruction.line_number));
         }
-        m_index_to_offset[instruction_index] = m_parsed_instructions.shell_instructions.size();
+        m_index_to_offset.insert(instruction_index, m_parsed_instructions.shell_instructions.size());
         m_parsed_instructions.shell_instructions.emplace_back(std::move(shell_ins));
 }
 
@@ -1046,7 +1046,7 @@ auto GraphBuilder::parse_user_instruction(Stage* stage, BuildFileParser::BuildIn
                 }
         }
         Instruction::UserInstruction user_ins{std::move(uid_gid_pair.first), std::move(uid_gid_pair.second)};
-        m_index_to_offset[instruction_index] = m_parsed_instructions.shell_instructions.size();
+        m_index_to_offset.insert(instruction_index, m_parsed_instructions.shell_instructions.size());
         m_parsed_instructions.user_instructions.emplace_back(std::move(user_ins));
 }
 
@@ -1111,7 +1111,7 @@ auto GraphBuilder::parse_workdir_instruction(BuildFileParser::BuildInstruction& 
         }
         Instruction::WorkdirInstruction workdir_ins{};
         workdir_ins.workdir = std::move(path);
-        m_index_to_offset[instruction_index] = m_parsed_instructions.workdir_instructions.size();
+        m_index_to_offset.insert(instruction_index, m_parsed_instructions.workdir_instructions.size());
         m_parsed_instructions.workdir_instructions.emplace_back(std::move(workdir_ins));
 }
 

@@ -53,7 +53,7 @@ auto DatabaseJobProcessor::init() -> void {
 
 auto DatabaseJobProcessor::process_job() -> void {
         m_running.store(true, std::memory_order_release);
-        m_worker = std::thread([this]() {
+        m_worker = std::jthread([this]() {
                                 while (this->m_running.load(std::memory_order_acquire)) {
                                         auto job_data{this->m_db_command_queue->atomic_pop()};
                                         if (!job_data.has_value()) {

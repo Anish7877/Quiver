@@ -1,6 +1,7 @@
 #pragma once
 #include "build_file_parser.hpp"
 #include "instruction_types.hpp"
+#include <libcuckoo/cuckoohash_map.hh>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -36,8 +37,8 @@ class GraphBuilder{
                         std::vector<Instruction::WorkdirInstruction> workdir_instructions{};
                 };
                 struct ParsedInstructionsMaps {
-                        std::unordered_map<size_t, size_t> index_to_offset{};
-                        std::unordered_map<std::string, size_t> stage_alias_to_node_number{};
+                        libcuckoo::cuckoohash_map<size_t, size_t> index_to_offset{};
+                        libcuckoo::cuckoohash_map<std::string, size_t> stage_alias_to_node_number{};
                 };
                 GraphBuilder() = default;
                 GraphBuilder(GraphBuilder&&) = delete;
@@ -74,6 +75,6 @@ class GraphBuilder{
                 [[nodiscard]] auto is_url(const std::string&) -> bool;
                 ParsedInstructions m_parsed_instructions{};
                 std::vector<Stage> m_stages{};
-                std::unordered_map<size_t, size_t> m_index_to_offset{};
-                std::unordered_map<std::string, size_t> m_stage_alias_to_node_number{};
+                libcuckoo::cuckoohash_map<size_t, size_t> m_index_to_offset{};
+                libcuckoo::cuckoohash_map<std::string, size_t> m_stage_alias_to_node_number{};
 };

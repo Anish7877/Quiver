@@ -24,12 +24,12 @@
         return {false, std::move(build)};
 }
 
-auto InFlightCacheManager::finish_success(const std::string& hash, LayerCache&& layer) -> void {
+auto InFlightCacheManager::finish_success(const std::string& hash, const std::pair<LayerCache, fs::path>& value) -> void {
         std::shared_ptr<InFlightBuild> build{};
         if (!m_inflight.find(hash, build)) {
                 throw std::runtime_error("In Flight Cache Manager Error: Hash not found.");
         }
-        build->promise.set_value(std::move(layer));
+        build->promise.set_value(value);
         m_inflight.erase(hash);
 }
 

@@ -38,7 +38,7 @@ auto LogJobProcessor::init() -> void {
 
 auto LogJobProcessor::process_job() -> void {
         m_running.store(true, std::memory_order_release);
-        m_worker = std::thread([this]() {
+        m_worker = std::jthread([this]() {
                                 while (this->m_running.load(std::memory_order_acquire)) {
                                         auto log_data{m_log_command_queue->atomic_pop()};
                                         if (!log_data.has_value()) {

@@ -5,6 +5,8 @@
 #include <optional>
 #include <memory>
 #include <future>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 class DatabaseCommandQueue;
 class ValueHeap;
@@ -16,8 +18,8 @@ class InFlightCacheManager : public Singleton<InFlightCacheManager> {
         public:
                 struct InFlightBuild {
                         InFlightBuild() : future{promise.get_future().share()} {}
-                        std::promise<LayerCache> promise{};
-                        std::shared_future<LayerCache> future{};
+                        std::promise<std::pair<LayerCache, fs::path>> promise{};
+                        std::shared_future<std::pair<LayerCache, fs::path>> future{};
                 };
                 struct AcquireResult {
                         bool is_owner{};
@@ -29,7 +31,7 @@ class InFlightCacheManager : public Singleton<InFlightCacheManager> {
                 auto operator=(const InFlightCacheManager&) -> InFlightCacheManager& = delete;
 
                 [[nodiscard]] auto acquire(const std::string&) -> AcquireResult;
-                auto finish_success(const std::string&, LayerCache&&) -> void;
+                auto finish_success(const std::string&, const std::pair<LayerCache, fs::path>&) -> void;
                 auto finish_failure(const std::string&, std::exception_ptr) -> void;
         private:
                 libcuckoo::cuckoohash_map<std::string, std::shared_ptr<InFlightBuild>> m_inflight{};

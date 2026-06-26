@@ -60,7 +60,7 @@ auto ContainerMonitor::setup_usernamespace() -> void {
 
 auto ContainerMonitor::start_logging(int master_fd) -> bool {
         m_logging_active.store(true, std::memory_order_release);
-        m_log_worker = std::thread([&]() {
+        m_log_worker = std::jthread([&]() {
                                 pollfd fds[2];
                                 fds[0].fd = m_std_out_fd[0];
                                 fds[0].events = POLLIN;
@@ -379,7 +379,7 @@ auto ContainerMonitor::run_monitor_parent() -> void {
         if (m_container_config.terminal.value) {
                 setup_socket_connection();
 
-                std::thread([this, master_fd]() {
+                std::jthread([this, master_fd]() {
                         while (true) {
                                 int client_fd{accept(m_socket_fd, nullptr, nullptr)};
                                 if (client_fd == -1) break;
@@ -397,7 +397,7 @@ auto ContainerMonitor::run_monitor_parent() -> void {
 
         std::atomic<bool> container_running{true};
 
-        std::thread watchdog_thread{[&container_running]() {
+        std::jthread watchdog_thread{[&container_running]() {
                 while (container_running.load(std::memory_order_acquire)) {
                         for (size_t i{0}; i < 100 && container_running.load(std::memory_order_acquire); ++i) {
                                 std::this_thread::sleep_for(std::chrono::milliseconds(100));

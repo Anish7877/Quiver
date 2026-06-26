@@ -25,7 +25,7 @@ class BuildExecutor {
                 [[nodiscard]] auto get_topological_order(const std::vector<std::vector<size_t>>&) -> std::vector<std::vector<size_t>>;
                 auto exec_stage(const GraphBuilder::Stage&, const GraphBuilder::ParsedInstructions&, const GraphBuilder::ParsedInstructionsMaps&, const std::vector<BuildFileParser::BuildInstruction>&) -> void;
                 auto exec_add(const GraphBuilder::Stage&, const Instruction::AddInstruction&, const std::string&, std::string&) -> void;
-                auto exec_copy(const GraphBuilder::Stage&, const Instruction::CopyInstruction&, const std::string&, std::string&) -> void;
+                auto exec_copy(const GraphBuilder::Stage&, const Instruction::CopyInstruction&, const GraphBuilder::ParsedInstructionsMaps&, const std::string&, std::string&) -> void;
                 auto exec_run(const GraphBuilder::Stage&, const Instruction::RunInstruction&, const std::string&, std::string&) -> void;
                 auto exec_shell() -> void;
                 auto exec_user() -> void;
@@ -43,7 +43,8 @@ class BuildExecutor {
                 ImageManager* m_image_manager{};
                 InFlightCacheManager* m_in_flight_cache_manager{};
                 LayerCacheManager* m_layer_cache_manager{};
-                ThreadPool m_thread_pool{static_cast<size_t>(std::thread::hardware_concurrency())};
+                ThreadPool m_thread_pool{static_cast<size_t>(std::jthread::hardware_concurrency())};
+                libcuckoo::cuckoohash_map<size_t, std::vector<std::string>> m_stage_lower_dirs{};
                 libcuckoo::cuckoohash_map<size_t, std::vector<std::string>> m_stage_layers{};
                 libcuckoo::cuckoohash_map<std::string, std::string> m_hash_digest{};
                 libcuckoo::cuckoohash_map<std::string, fs::path> m_url_downloaded_file{};

@@ -5,7 +5,7 @@
 ThreadPool::ThreadPool(size_t n_workers) {
         m_workers.resize(n_workers);
         for (auto& worker : m_workers) {
-                worker = std::thread([this]() {
+                worker = std::jthread([this]() {
                                         while (true) {
                                                 std::function<void()> task{};
                                                 {

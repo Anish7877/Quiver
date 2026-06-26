@@ -15,6 +15,6 @@ class ScopeGuard {
 
                 auto dismiss() -> void { m_active = false; }
         private:
-                std::function<void()> m_cleanup;
+                std::function<void()> m_cleanup{};
                 bool m_active{true};
 };

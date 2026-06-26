@@ -32,7 +32,7 @@ class LogJobProcessor : public JobProcessor<LogJobData> , public Singleton<LogJo
                 fs::path m_database_log_path{};
                 fs::path m_log_processor_log_path{};
                 std::atomic<bool> m_running{};
-                std::thread m_worker{};
+                std::jthread m_worker{};
                 std::ofstream m_log_file{};
                 LoggerCommandQueue* m_log_command_queue{nullptr};
                 ValueHeap* m_value_heap{nullptr};

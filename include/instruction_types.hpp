@@ -37,6 +37,9 @@ namespace Instruction {
                 std::string expanded_raw_ins{};
                 std::string source_stage{};
                 std::string file_checksum{};
+                std::string workdir{};
+                std::string user{};
+                std::string env{};
         };
         struct AddInstruction {
                 std::optional<std::pair<uid_t, gid_t>> chown{std::nullopt};

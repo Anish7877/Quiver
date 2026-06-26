@@ -5,11 +5,14 @@
 #include "layer_cache_manager.hpp"
 #include "thread_pool.hpp"
 #include "utils.hpp"
+#include "mount.hpp"
+#include "scoped_guard.hpp"
 #include <cpr/api.h>
 #include <cpr/cprtypes.h>
 #include <cpr/error.h>
 #include <cpr/ssl_options.h>
 #include <cpr/verbose.h>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -19,6 +22,7 @@
 #include <queue>
 #include <stdexcept>
 #include <string>
+#include <sys/mount.h>
 #include <unordered_set>
 #include <blake3.h>
 #include <format>
@@ -113,14 +117,14 @@ auto BuildExecutor::exec_stage(const GraphBuilder::Stage& stage,
                 const GraphBuilder::ParsedInstructionsMaps& parsed_instruction_maps,
                 const std::vector<BuildFileParser::BuildInstruction>& instructions) -> void {
         std::string current_digest{};
-        auto it{parsed_instruction_maps.stage_alias_to_node_number.find(stage.base_image)};
-        if (it == parsed_instruction_maps.stage_alias_to_node_number.end()) {
+        size_t node{};
+        if (parsed_instruction_maps.stage_alias_to_node_number.find(stage.base_image, node)) {
                 if (!m_image_top_layer_digest.find(stage.base_image, current_digest)) {
                         throw std::runtime_error("Build Executor Error: ");
                 }
         }
         else {
-                if (!m_stage_final_digest.find(it->second, current_digest)) {
+                if (!m_stage_final_digest.find(node, current_digest)) {
                         throw std::runtime_error("Build Executor Error: ");
                 }
         }
@@ -129,22 +133,25 @@ auto BuildExecutor::exec_stage(const GraphBuilder::Stage& stage,
                 switch (instructions[instruction_index].type) {
                         case Instruction::InstructionType::ADD:
                                 {
-                                        auto it{parsed_instruction_maps.index_to_offset.find(instruction_index)};
-                                        exec_add(stage, parsed_instructions.add_instructions[it->second],
+                                        size_t index{};
+                                        parsed_instruction_maps.index_to_offset.find(instruction_index, index);
+                                        exec_add(stage, parsed_instructions.add_instructions[index],
                                                         instructions[instruction_index].raw_instruction, current_digest);
                                         break;
                                 }
                         case Instruction::InstructionType::COPY:
                                 {
-                                        auto it{parsed_instruction_maps.index_to_offset.find(instruction_index)};
-                                        exec_copy(stage, parsed_instructions.copy_instructions[it->second],
+                                        size_t index{};
+                                        parsed_instruction_maps.index_to_offset.find(instruction_index, index);
+                                        exec_copy(stage, parsed_instructions.copy_instructions[index], parsed_instruction_maps,
                                                         instructions[instruction_index].raw_instruction, current_digest);
                                         break;
                                 }
                         case Instruction::InstructionType::RUN:
                                 {
-                                        auto it{parsed_instruction_maps.index_to_offset.find(instruction_index)};
-                                        exec_run(stage, parsed_instructions.run_instructions[it->second],
+                                        size_t index{};
+                                        parsed_instruction_maps.index_to_offset.find(instruction_index, index);
+                                        exec_run(stage, parsed_instructions.run_instructions[index],
                                                         instructions[instruction_index].raw_instruction, current_digest);
                                         break;
                                 }
@@ -200,13 +207,7 @@ auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction
                         if (srcs.size() == 1) {
                                 fs::path path{srcs.front().is_absolute() ? srcs.front() : m_build_dir / srcs.front()};
                                 if (fs::exists(path)) {
-                                        bool is_archive{Utils::is_archive(path)};
-                                        if (is_archive) {
-                                                Utils::ensure_dir(final_dst);
-                                                Utils::extract_tarball(path, final_dst.string());
-                                                change_permission_and_owners(final_dst, instruction.chmod, instruction.chown);
-                                        }
-                                        else if (fs::is_directory(path) || instruction.dst.string().ends_with('/')) {
+                                        if (fs::is_directory(path) || instruction.dst.string().ends_with('/')) {
                                                 Utils::ensure_dir(final_dst);
                                                 Utils::copy_directory(path, final_dst);
                                                 change_permission_and_owners(final_dst, instruction.chmod, instruction.chown);
@@ -228,13 +229,7 @@ auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction
                                 for (const auto& src : srcs) {
                                         fs::path path{src.is_absolute() ? src : m_build_dir / src};
                                         if (fs::exists(path)) {
-                                                bool is_archive{Utils::is_archive(path)};
-                                                if (is_archive) {
-                                                        Utils::extract_tarball(path, final_dst.string());
-                                                }
-                                                else {
-                                                        Utils::copy_directory(path, final_dst);
-                                                }
+                                                Utils::copy_directory(path, final_dst);
                                         }
                                         else {
                                                 throw std::runtime_error(std::format("ADD failed: source '{}' does not exist.", src.string()));
@@ -246,15 +241,18 @@ auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction
                         std::string sha256_hash{Utils::sha256_file(dummy_path / "layer.tar.gz")};
                         std::string sha256_tar{sha256_hash + ".tar.gz"};
                         Utils::rename_file_or_directory(dummy_path / "layer.tar.gz", Utils::get_layers_path(sha256_hash.substr(7) + ".tar.gz"));
-                        Utils::remove_directory(dummy_path);
                         m_stage_layers.update_fn(stage.node_number,
                                         [&](std::vector<std::string>& layers) {
                                                 layers.emplace_back(sha256_hash);
                                         });
+                        m_stage_lower_dirs.update_fn(stage.node_number,
+                                        [&](std::vector<std::string>& lower_dir) {
+                                                lower_dir.emplace_back(dummy_path.string());
+                                        });
                         current_digest = sha256_hash;
                         m_hash_digest.insert(hash, sha256_hash);
                         m_layer_cache_manager->store(hash, sha256_hash);
-                        m_in_flight_cache_manager->finish_success(hash, {sha256_hash});
+                        m_in_flight_cache_manager->finish_success(hash, std::make_pair(LayerCache(sha256_hash), dummy_path));
                 }
                 catch (...) {
                         Utils::remove_directory(dummy_path);
@@ -266,14 +264,143 @@ auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction
                 const auto& layer_cache{status.build->future.get()};
                 m_stage_layers.update_fn(stage.node_number,
                                 [&](std::vector<std::string>& layers) {
-                                        layers.emplace_back(layer_cache.hash);
+                                        layers.emplace_back(layer_cache.first.hash);
                                 });
-                current_digest = layer_cache.hash;
+                m_stage_lower_dirs.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& lower_dir) {
+                                        lower_dir.emplace_back(layer_cache.second.string());
+                                });
+                current_digest = layer_cache.first.hash;
         }
 }
 
 auto BuildExecutor::exec_copy(const GraphBuilder::Stage& stage, const Instruction::CopyInstruction& instruction,
-                const std::string& raw_instruction, std::string& current_digest) -> void {
+                const GraphBuilder::ParsedInstructionsMaps& maps, const std::string& raw_instruction, std::string& current_digest) -> void {
+        fs::path final_dir{};
+        std::vector<fs::path> final_srcs{};
+        bool is_overlay{false};
+        ScopeGuard guard{[&]() -> void{
+                        if (is_overlay) {
+                                umount2(final_dir.c_str(), MNT_DETACH);
+                                Utils::remove_directory(final_dir);
+                        }
+                }};
+        if (instruction.from_stage.has_value()) {
+                if (instruction.is_dependency) {
+                        size_t node{};
+                        std::vector<std::string> lower_dirs{};
+                        if (!maps.stage_alias_to_node_number.find(instruction.from_stage.value(), node)) [[unlikely]] {
+                                throw std::runtime_error(std::format("COPY Failed: Unknown stage alias '{}'",
+                                                        instruction.from_stage.value()));
+                        }
+                        if (!m_stage_lower_dirs.find(node, lower_dirs)) [[unlikely]] {
+                                throw std::runtime_error(std::format("COPY Failed: Unknown stage node '{}'",
+                                                        node));
+                        }
+                        std::string lower_dirs_str{};
+                        for (auto it{lower_dirs.rbegin()}; it != lower_dirs.rend(); ++it) {
+                                lower_dirs_str += *it + ':';
+                        }
+                        lower_dirs_str.pop_back();
+                        fs::path merged{std::format("/tmp/quiver_merged_{}", get_temp_filename())};
+                        Utils::ensure_dir(merged);
+                        std::string opts{std::format("lowerdir={}", lower_dirs_str)};
+                        if (!Mount::_overlay_fs(merged, opts)) {
+                                throw std::runtime_error("COPY Failed: Overlay mount failed");
+                        }
+                        is_overlay = true;
+                        final_dir = merged;
+                }
+                else {
+                        final_dir = Utils::get_image_path(instruction.from_stage.value());
+                }
+                for (const auto& src : instruction.srcs) {
+                        auto path{final_dir / src};
+                        final_srcs.emplace_back(path);
+                }
+        }
+        else {
+                for (const auto& src : instruction.srcs) {
+                        auto path{src.is_absolute() ? src : m_build_dir / src};
+                        final_srcs.emplace_back(path);
+                }
+        }
+        Instruction::InstructionHash instruction_hash{};
+        instruction_hash.parent_digest = current_digest;
+        instruction_hash.expanded_raw_ins = raw_instruction;
+        instruction_hash.source_stage = instruction.from_stage.has_value() ? instruction.from_stage.value() : "";
+        instruction_hash.file_checksum = compute_files_checksum(final_srcs);
+        std::string hash{get_instruction_hash(instruction_hash)};
+        std::string digest{};
+        if (m_hash_digest.find(hash, digest)) {
+                m_stage_layers.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& layers) {
+                                        layers.emplace_back(digest);
+                                });
+                current_digest = std::move(digest);
+                return;
+        }
+        auto obj{m_layer_cache_manager->lookup(hash)};
+        if (obj.has_value()) {
+                m_stage_layers.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& layers) {
+                                        layers.emplace_back(obj->hash);
+                                });
+                m_hash_digest.insert(hash, obj->hash);
+                current_digest = std::move(obj->hash);
+                return;
+        }
+        auto status{m_in_flight_cache_manager->acquire(hash)};
+        if (status.is_owner) {
+                fs::path dummy_path{std::format("/tmp/quiver_layer_{}", hash)};
+                fs::path final_dst{dummy_path / instruction.dst};
+                try {
+                        Utils::ensure_dir(final_dst);
+                        for (const auto& src : final_srcs) {
+                                fs::path path{src.is_absolute() ? src : m_build_dir / src};
+                                if (fs::exists(path)) {
+                                        Utils::copy_directory(path, final_dst);
+                                }
+                                else {
+                                        throw std::runtime_error(std::format("COPY failed: source '{}' does not exist.", src.string()));
+                                }
+                        }
+                        change_permission_and_owners(final_dst, instruction.chmod, instruction.chown);
+                        Utils::create_tar_gz(dummy_path, dummy_path / "layer.tar.gz");
+                        std::string sha256_hash{Utils::sha256_file(dummy_path / "layer.tar.gz")};
+                        std::string sha256_tar{sha256_hash + ".tar.gz"};
+                        Utils::rename_file_or_directory(dummy_path / "layer.tar.gz", Utils::get_layers_path(sha256_hash.substr(7) + ".tar.gz"));
+                        m_stage_layers.update_fn(stage.node_number,
+                                        [&](std::vector<std::string>& layers) {
+                                        layers.emplace_back(sha256_hash);
+                                        });
+                        m_stage_lower_dirs.update_fn(stage.node_number,
+                                        [&](std::vector<std::string>& lower_dir) {
+                                        lower_dir.emplace_back(dummy_path.string());
+                                        });
+                        current_digest = sha256_hash;
+                        m_hash_digest.insert(hash, sha256_hash);
+                        m_layer_cache_manager->store(hash, sha256_hash);
+                        m_in_flight_cache_manager->finish_success(hash, std::make_pair(LayerCache(sha256_hash), dummy_path));
+                }
+                catch (...) {
+                        Utils::remove_directory(dummy_path);
+                        m_in_flight_cache_manager->finish_failure(hash, std::current_exception());
+                        throw;
+                }
+        }
+        else {
+                const auto& layer_cache{status.build->future.get()};
+                m_stage_layers.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& layers) {
+                                        layers.emplace_back(layer_cache.first.hash);
+                                });
+                m_stage_lower_dirs.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& lower_dir) {
+                                lower_dir.emplace_back(layer_cache.second.string());
+                                });
+                current_digest = layer_cache.first.hash;
+        }
 }
 
 auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction::RunInstruction& instruction,
@@ -330,8 +457,8 @@ auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, Grap
         std::unordered_set<std::string> images{};
         std::unordered_set<std::string> urls{};
         for (const auto& stage : stages) {
-                auto it{parsed_instruction_maps.stage_alias_to_node_number.find(stage.base_image)};
-                if (it == parsed_instruction_maps.stage_alias_to_node_number.end()) {
+                size_t node{};
+                if (!parsed_instruction_maps.stage_alias_to_node_number.find(stage.base_image, node)) {
                         images.emplace(stage.base_image);
                 }
         }
@@ -507,10 +634,13 @@ auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, Grap
 
 [[nodiscard]] auto BuildExecutor::get_instruction_hash(const Instruction::InstructionHash& instruction_hash) -> std::string {
         std::string input {
-                instruction_hash.parent_digest + '\0' +
-                instruction_hash.expanded_raw_ins + '\0' +
+                (!instruction_hash.parent_digest.empty() ? (instruction_hash.parent_digest + '\0') : "") +
+                (!instruction_hash.expanded_raw_ins.empty() ? (instruction_hash.expanded_raw_ins + '\0') : "") + '\0' +
                 (!instruction_hash.source_stage.empty() ? (instruction_hash.source_stage + '\0') : "") +
-                instruction_hash.file_checksum + '\0'
+                (!instruction_hash.file_checksum.empty() ? (instruction_hash.file_checksum + '\0') : "") +
+                (!instruction_hash.workdir.empty() ? (instruction_hash.workdir + '\0') : "") +
+                (!instruction_hash.user.empty() ? (instruction_hash.user + '\0') : "") +
+                (!instruction_hash.env.empty() ? (instruction_hash.env + '\0') : "")
         };
         blake3_hasher hasher{};
         blake3_hasher_init(&hasher);

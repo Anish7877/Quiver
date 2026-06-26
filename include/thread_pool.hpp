@@ -41,6 +41,6 @@ class ThreadPool {
                 std::queue<std::function<void()>> m_tasks{};
                 std::mutex m_mutex{};
                 std::condition_variable m_cv{};
-                std::vector<std::thread> m_workers{};
+                std::vector<std::jthread> m_workers{};
                 bool m_stop{false};
 };
