@@ -186,22 +186,27 @@ auto ContainerRuntime::execute_container_init() -> void {
                 _exit(EXIT_FAILURE);
         }
 
-        if (setuid(m_container_config.user.uid) == -1) {
+        if (setuid(m_container_config.user.uid) == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: final setuid failed before exec.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
-        if (setgid(m_container_config.user.gid) == -1) {
+        if (setgid(m_container_config.user.gid) == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: final setgid failed before exec.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
-        if (setgroups(m_container_config.user.additional_gids.size(), m_container_config.user.additional_gids.data()) == -1) {
+        if (setgroups(m_container_config.user.additional_gids.size(), m_container_config.user.additional_gids.data()) == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: final setgroups failed before exec.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
-        if (umask(m_container_config.user.umask) == -1) {
+        if (chdir(m_container_config.cwd.value.c_str()) == -1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: chdir to workdir failed before exec.\n",
+                                        chrono::system_clock::now(), m_container_config.container_id));
+                _exit(EXIT_FAILURE);
+        }
+        if (umask(m_container_config.user.umask) == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: umask failed before exec.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
@@ -367,6 +372,7 @@ auto ContainerRuntime::jail_process() -> void {
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
+
         if (chdir(m_container_config.cwd.value.c_str()) == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: chdir to cwd failed.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));

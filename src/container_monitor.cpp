@@ -605,8 +605,13 @@ auto ContainerMonitor::attach_to_container(const std::string& container_id) -> v
         m_pty_session_manager->enable_raw_mode();
 
         struct winsize ws{};
-        if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 && ws.ws_col > 0) {
+        if (m_container_config.console_size.width > 0 && m_container_config.console_size.height > 0) {
                 ioctl(master_fd, TIOCSWINSZ, &ws);
+        }
+        else {
+                if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 && ws.ws_col > 0) {
+                        ioctl(master_fd, TIOCSWINSZ, &ws);
+                }
         }
 
         int sigwinch_pipe[2];
@@ -651,9 +656,13 @@ auto ContainerMonitor::attach_to_container(const std::string& container_id) -> v
                         char drain[64];
                         while (read(sigwinch_pipe[0], drain, sizeof(drain)) > 0) {}
                         struct winsize new_ws{};
-                        if (ioctl(STDIN_FILENO, TIOCGWINSZ, &new_ws) == 0 &&
-                            new_ws.ws_row > 0 && new_ws.ws_col > 0) {
-                                ioctl(master_fd, TIOCSWINSZ, &new_ws);
+                        if (m_container_config.console_size.width > 0 && m_container_config.console_size.height > 0) {
+                                ioctl(master_fd, TIOCSWINSZ, &ws);
+                        }
+                        else {
+                                if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 && ws.ws_col > 0) {
+                                        ioctl(master_fd, TIOCSWINSZ, &ws);
+                                }
                         }
                 }
 

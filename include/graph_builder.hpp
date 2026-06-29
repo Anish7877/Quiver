@@ -15,8 +15,9 @@ class GraphBuilder{
                         size_t node_number{0};
                         std::vector<size_t> depends_on{0};
                         std::string base_image{};
+                        std::optional<std::string> stage_alias{std::nullopt};
                         std::optional<std::string> stop_signal{std::nullopt};
-                        std::optional<std::string> current_user{std::nullopt};
+                        std::optional<std::pair<uid_t, gid_t>> current_user{std::nullopt};
                         std::optional<Instruction::ShellInstruction> current_shell{std::nullopt};
                         std::optional<Instruction::WorkdirInstruction> current_workdir{std::nullopt};
                         std::vector<size_t> instruction_indices{};
@@ -48,7 +49,7 @@ class GraphBuilder{
                 ~GraphBuilder() = default;
 
                 [[nodiscard]] auto build_graph(std::vector<BuildFileParser::BuildInstruction>&, const std::unordered_map<std::string, std::string>&) -> std::vector<std::vector<size_t>>;
-                [[nodiscard]] auto get_stages() -> const std::vector<Stage>&;
+                [[nodiscard]] auto get_stages() -> std::vector<Stage>&;
                 [[nodiscard]] auto get_parsed_instruction() -> const ParsedInstructions&;
                 [[nodiscard]] auto get_instruction_maps() -> ParsedInstructionsMaps;
         private:

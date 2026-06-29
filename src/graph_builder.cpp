@@ -28,7 +28,7 @@
         return graph;
 }
 
-[[nodiscard]] auto GraphBuilder::get_stages() -> const std::vector<Stage>& {
+[[nodiscard]] auto GraphBuilder::get_stages() -> std::vector<Stage>& {
         return m_stages;
 }
 
