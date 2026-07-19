@@ -2,6 +2,8 @@ namespace FB;
 
 table LayerCache {
         hash : string;
+        diff_id : string;
+        lower_dir : string;
 }
 
 root_type LayerCache;

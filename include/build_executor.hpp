@@ -3,8 +3,10 @@
 #include "graph_builder.hpp"
 #include "instruction_types.hpp"
 #include "thread_pool.hpp"
+#include "types.hpp"
 #include <filesystem>
 #include <libcuckoo/cuckoohash_map.hh>
+#include <mutex>
 #include <vector>
 
 class ImageManager;
@@ -33,7 +35,7 @@ class BuildExecutor {
                 auto exec_workdir(GraphBuilder::Stage&, const Instruction::WorkdirInstruction&) -> void;
                 auto change_permission_and_owners(const fs::path&, const std::optional<mode_t>&, const std::optional<std::pair<uid_t, gid_t>>&) -> void;
                 auto prepare(const std::vector<GraphBuilder::Stage>&, GraphBuilder::ParsedInstructions&, const GraphBuilder::ParsedInstructionsMaps&) -> void;
-                [[nodiscard]] auto compute_files_checksum(const std::vector<fs::path>&) -> std::string;
+                [[nodiscard]] auto compute_files_checksum(const std::vector<fs::path>&, const fs::path&) -> std::string;
                 [[nodiscard]] auto get_instruction_hash(const Instruction::InstructionHash&) -> std::string;
                 [[nodiscard]] auto download_file(const std::string&, const fs::path&) -> fs::path;
                 [[nodiscard]] auto get_filename_from_content_disposition(const std::string&) -> std::optional<std::string>;
@@ -41,6 +43,7 @@ class BuildExecutor {
                 [[nodiscard]] auto sanitize_filename(const std::string&) -> std::string;
                 [[nodiscard]] auto get_temp_filename() -> std::string;
                 fs::path m_build_dir{"/"};
+                std::mutex m_run_mutex{};
                 size_t m_target_node{};
                 ImageManager* m_image_manager{};
                 InFlightCacheManager* m_in_flight_cache_manager{};
@@ -49,7 +52,8 @@ class BuildExecutor {
                 ThreadPool m_thread_pool{static_cast<size_t>(std::jthread::hardware_concurrency())};
                 libcuckoo::cuckoohash_map<size_t, std::vector<std::string>> m_stage_lower_dirs{};
                 libcuckoo::cuckoohash_map<size_t, std::vector<std::string>> m_stage_layers{};
-                libcuckoo::cuckoohash_map<std::string, std::string> m_hash_digest{};
+                libcuckoo::cuckoohash_map<size_t, std::vector<std::string>> m_stage_diff_ids{};
+                libcuckoo::cuckoohash_map<std::string, LayerCache> m_hash_digest{};
                 libcuckoo::cuckoohash_map<std::string, fs::path> m_url_downloaded_file{};
                 libcuckoo::cuckoohash_map<std::string, std::string> m_image_top_layer_digest{};
                 libcuckoo::cuckoohash_map<size_t, std::string> m_stage_final_digest{};

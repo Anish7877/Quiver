@@ -16,8 +16,8 @@ class LayerCacheDbManager : DatabaseManager<LayerCache>, public Singleton<LayerC
         public:
                 LayerCacheDbManager(const LayerCacheDbManager&) = delete;
                 LayerCacheDbManager(LayerCacheDbManager&&) = delete;
-                auto operator=(LayerCacheDbManager&&) -> LayerCache& = delete;
-                auto operator=(const LayerCacheDbManager&) -> LayerCache& = delete;
+                auto operator=(LayerCacheDbManager&&) -> LayerCacheDbManager& = delete;
+                auto operator=(const LayerCacheDbManager&) -> LayerCacheDbManager& = delete;
 
                 auto init() -> void override;
                 auto process_job(const DatabaseJobData&, const std::string&) -> void override;

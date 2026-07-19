@@ -424,7 +424,6 @@ static constexpr std::size_t HOSTNAME_MAX_LEN{12};
                 "setgroups",
                 "setgroups32",
                 "setitimer",
-                "setns",                // note: also denied below via targeted rule
                 "setpgid",
                 "setpriority",
                 "setregid",
@@ -609,10 +608,10 @@ static constexpr std::size_t HOSTNAME_MAX_LEN{12};
         //   index 0 = domain (address family)
         //   index 2 = protocol
         //
-        // AF_BLUETOOTH (40) — deny entirely: Bluetooth sockets bypass network ns
+        // AF_BLUETOOTH (31) — deny entirely: Bluetooth sockets bypass network ns
         rules.emplace_back(make_conditional_deny(
                 "socket",
-                {arg("SCMP_CMP_EQ", 40, 0)},   // domain == AF_BLUETOOTH
+                {arg("SCMP_CMP_EQ", 31, 0)},   // domain == AF_BLUETOOTH
                 1));
 
         // AF_NETLINK (16) + NETLINK_ROUTE (9) — deny: raw netlink routing socket
@@ -775,12 +774,12 @@ static constexpr std::size_t HOSTNAME_MAX_LEN{12};
         spec.uid_mapping = OCIRuntime::UidMapping{
                 0,                                             // container_id
                 static_cast<std::uint32_t>(getuid()),          // host_id
-                1                                              // size
+                65536                                          // size
         };
         spec.gid_mapping = OCIRuntime::GidMapping{
                 0,
                 static_cast<std::uint32_t>(getgid()),
-                1
+                65536
         };
 
         // ── Linux namespaces ─────────────────────────────────────────────────

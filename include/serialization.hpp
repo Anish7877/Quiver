@@ -1,6 +1,6 @@
 #pragma once
 
-#include "container_config_generated.h"
+#include "container_metadata_generated.h"
 #include "container_config.hpp"
 #include "image_metadata_generated.h"
 #include "layer_cache_generated.h"
@@ -13,8 +13,8 @@
 
 namespace Serialization {
 
-        auto serialize  (flatbuffers::FlatBufferBuilder&, const ContainerConfig&) -> flatbuffers::Offset<FB::ContainerConfig>;
-        auto deserialize(const FB::ContainerConfig*) -> ContainerConfig;
+        auto serialize  (flatbuffers::FlatBufferBuilder&, const ContainerDbObject&) -> flatbuffers::Offset<FB::ContainerMetadata>;
+        auto deserialize(const FB::ContainerMetadata*) -> ContainerDbObject;
 
         auto serialize  (flatbuffers::FlatBufferBuilder&, const ImageMetadata&) -> flatbuffers::Offset<FB::ImageMetadata>;
         auto deserialize(const FB::ImageMetadata*) -> ImageMetadata;
@@ -26,7 +26,7 @@ namespace Serialization {
 template<typename T>
 struct FlatbufferTraits;
 
-template<> struct FlatbufferTraits<ContainerConfig> { using FbRootType = FB::ContainerConfig; };
+template<> struct FlatbufferTraits<ContainerConfig> { using FbRootType = FB::ContainerMetadata; };
 template<> struct FlatbufferTraits<ImageMetadata>   { using FbRootType = FB::ImageMetadata; };
 template<> struct FlatbufferTraits<LayerCache>     { using FbRootType = FB::LayerCache; };
 

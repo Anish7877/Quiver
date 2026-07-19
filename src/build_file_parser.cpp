@@ -98,7 +98,7 @@
                         }
                         parse_json_form(instruction, args_line);
                 } else {
-                        if (args_line.starts_with("<<")) {
+                        if (args_line.find("<<") != std::string::npos) {
                                 throw std::runtime_error(std::format(
                                                         "Parser Error [Line {}]: Heredoc syntax is not supported.",
                                                         m_current_line_number));

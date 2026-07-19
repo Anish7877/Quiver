@@ -50,7 +50,7 @@ class LayerCacheManager : public Singleton<LayerCacheManager>{
 
                 auto init() -> void;
                 [[nodiscard]] auto lookup(const std::string&) -> std::optional<LayerCache>;
-                auto store(const std::string&, const std::string&) -> void;
+                auto store(const std::string&, const LayerCache&) -> void;
         private:
                 DatabaseCommandQueue* m_db_command_queue{};
                 ValueHeap* m_value_heap{};

@@ -7,6 +7,7 @@
 #include <format>
 #include <optional>
 #include <pwd.h>
+#include <grp.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -356,12 +357,12 @@ auto GraphBuilder::parse_add_instruction(BuildFileParser::BuildInstruction& inst
                                                 uid_gid_pair.second = static_cast<gid_t>(std::stoul(group));
                                         }
                                         else {
-                                                passwd* pw{getpwnam(group.c_str())};
-                                                if (!pw) [[unlikely]] {
+                                                group* gr{getgrnam(group.c_str())};
+                                                if (!gr) [[unlikely]] {
                                                         throw std::runtime_error(std::format("Graph Builder Error [Line {}] : Unknown group '{}'.",
                                                                                 instruction.line_number, group));
                                                 }
-                                                uid_gid_pair.first = pw->pw_gid;
+                                                uid_gid_pair.second = gr->gr_gid;
                                         }
                                 }
                                 add_ins.chown = std::move(uid_gid_pair);
@@ -528,12 +529,12 @@ auto GraphBuilder::parse_copy_instruction(Stage* stage, BuildFileParser::BuildIn
                                                 uid_gid_pair.second = static_cast<gid_t>(std::stoul(group));
                                         }
                                         else {
-                                                passwd* pw{getpwnam(group.c_str())};
-                                                if (!pw) [[unlikely]] {
+                                                group* gr{getgrnam(group.c_str())};
+                                                if (!gr) [[unlikely]] {
                                                         throw std::runtime_error(std::format("Graph Builder Error [Line {}] : Unknown group '{}'.",
                                                                                 instruction.line_number, group));
                                                 }
-                                                uid_gid_pair.first = pw->pw_gid;
+                                                uid_gid_pair.second = gr->gr_gid;
                                         }
                                 }
                                 copy_ins.chown = std::move(uid_gid_pair);
@@ -798,7 +799,7 @@ auto GraphBuilder::parse_expose_instruction(Stage* stage, BuildFileParser::Build
                 throw std::runtime_error(std::format("Graph Builder Error [Line {}]: Missing base image.",
                                         instruction.line_number));
         }
-        stage.base_image = std::move(base_image);
+        stage.base_image = base_image;
         size_t node{};
         if (m_stage_alias_to_node_number.find(base_image, node)) {
                 stage.depends_on.emplace_back(node);
@@ -1037,16 +1038,16 @@ auto GraphBuilder::parse_user_instruction(Stage* stage, BuildFileParser::BuildIn
                         uid_gid_pair.second = static_cast<gid_t>(std::stoul(group));
                 }
                 else {
-                        passwd* pw{getpwnam(group.c_str())};
-                        if (!pw) [[unlikely]] {
+                        group* gr{getgrnam(group.c_str())};
+                        if (!gr) [[unlikely]] {
                                 throw std::runtime_error(std::format("Graph Builder Error [Line {}] : Unknown group '{}'.",
                                                         instruction.line_number, group));
                         }
-                        uid_gid_pair.first = pw->pw_gid;
+                        uid_gid_pair.second = gr->gr_gid;
                 }
         }
         Instruction::UserInstruction user_ins{std::move(uid_gid_pair.first), std::move(uid_gid_pair.second)};
-        m_index_to_offset.insert(instruction_index, m_parsed_instructions.shell_instructions.size());
+        m_index_to_offset.insert(instruction_index, m_parsed_instructions.user_instructions.size());
         m_parsed_instructions.user_instructions.emplace_back(std::move(user_ins));
 }
 

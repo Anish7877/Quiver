@@ -1,4 +1,5 @@
 #pragma once
+#include "container_config.hpp"
 #include <cstdint>
 #include <atomic>
 #include <string>
@@ -74,6 +75,14 @@ struct ValueHeapHeader {
         alignas(std::hardware_destructive_interference_size) std::atomic<std::uint64_t> data_tail{0};
 };
 
+struct ContainerDbObject {
+        ContainerConfig config{};
+        std::string name{};
+        std::string image{};
+        std::string status{};
+        std::string created_at{};
+};
+
 struct DbResult {
         std::string key{};
         std::string value{};
@@ -108,6 +117,8 @@ struct SubIDRange {
 
 struct LayerCache {
         std::string hash{};
+        std::string diff_id{};
+        std::string lower_dir{};
 };
 
 struct ImageMetadata {

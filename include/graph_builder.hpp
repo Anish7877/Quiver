@@ -4,6 +4,7 @@
 #include <libcuckoo/cuckoohash_map.hh>
 #include <optional>
 #include <string>
+#include <map>
 #include <unordered_map>
 #include <vector>
 #define MIN_PORT_RANGE 1
@@ -13,7 +14,7 @@ class GraphBuilder{
         public:
                 struct Stage {
                         size_t node_number{0};
-                        std::vector<size_t> depends_on{0};
+                        std::vector<size_t> depends_on{};
                         std::string base_image{};
                         std::optional<std::string> stage_alias{std::nullopt};
                         std::optional<std::string> stop_signal{std::nullopt};
@@ -24,7 +25,7 @@ class GraphBuilder{
                         std::vector<std::string> volumes{};
                         std::vector<Instruction::ExposeInstruction> local_exposed_ports{};
                         std::unordered_map<std::string, std::string> local_args{};
-                        std::unordered_map<std::string, std::string> local_envs{};
+                        std::map<std::string, std::string> local_envs{};
                         std::unordered_map<std::string, std::string> local_labels{};
                         std::vector<Instruction::CmdInstruction> cmd_instructions{};
                         std::vector<Instruction::EntrypointInstruction> entrypoint_instructions{};

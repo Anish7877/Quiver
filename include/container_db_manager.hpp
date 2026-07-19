@@ -1,15 +1,10 @@
 #pragma once
-#include "types.hpp"
-#include "container_config.hpp"
-#include "new_database_manager.hpp"
 #include "singleton.hpp"
-#include <filesystem>
-#include <rocksdb/db.h>
-namespace fs = std::filesystem;
+#include "types.hpp"
 
-class LoggerCommandQueue;
+class DatabaseCommandQueue;
 class ValueHeap;
-class ContainerDbManager : public DatabaseManager<ContainerConfig>, public Singleton<ContainerDbManager> {
+class ContainerDbManager : public Singleton<ContainerDbManager> {
         friend class Singleton<ContainerDbManager>;
         private:
                 ContainerDbManager() = default;
@@ -20,18 +15,12 @@ class ContainerDbManager : public DatabaseManager<ContainerConfig>, public Singl
                 auto operator=(const ContainerDbManager&) -> ContainerDbManager& = delete;
                 auto operator=(ContainerDbManager&&) -> ContainerDbManager& = delete;
 
-                auto init() -> void override;
-                auto process_job(const DatabaseJobData&, const ContainerConfig&, Status&) -> void override;
-                auto extract_container(const std::string&, Status&) -> ContainerConfig;
+                auto add_container(const ContainerDbObject&) -> bool;
+                auto update_container() -> bool;
+                auto list_all_container() -> bool;
+                auto list_all_running_container() -> bool;
+                auto remove_container() -> bool;
         private:
-                auto process_get_job(const DatabaseJobData&, Status&) -> void override;
-                auto process_put_job(const DatabaseJobData&, const ContainerConfig&, Status&) -> void override;
-                auto process_update_job(const DatabaseJobData&, const ContainerConfig&, Status&) -> void override;
-                auto process_delete_job(const DatabaseJobData&, Status&) -> void override;
-                auto log_event(const std::string&) -> void;
-                LogJobData m_log_job_data{};
-                fs::path m_db_path{};
-                rocksdb::DB* m_db{nullptr};
-                LoggerCommandQueue* m_log_cmd_queue{nullptr};
+                DatabaseCommandQueue* m_db_command_queue{nullptr};
                 ValueHeap* m_value_heap{nullptr};
 };

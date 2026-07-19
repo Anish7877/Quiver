@@ -1,13 +1,22 @@
 #pragma once
 #include "oci_runtime.hpp"
 #include "types.hpp"
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <openssl/evp.h>
 namespace fs = std::filesystem;
 
 namespace Utils {
         inline std::atomic<bool> job_processor_running{true};
+
+        struct LayerInfo {
+                std::string diff_id;
+                std::string blob_digest;
+                std::uint64_t blob_size{};
+        };
+
         auto dir_exists(const fs::path&) -> bool;
         auto file_exists(const fs::path&) -> bool;
         auto ensure_dir(const fs::path&, mode_t mode = 0755) -> void;
@@ -35,6 +44,7 @@ namespace Utils {
         auto generate_container_id() -> std::string;
         auto spawn_new_consumer() -> pid_t;
         auto parse_subgid(const std::string&) -> std::vector<SubIDRange>;
+        auto parse_subuid(const std::string&) -> std::vector<SubIDRange>;
         auto get_username() -> std::string;
         auto build_gid_map_payload(pid_t) -> std::string;
         auto write_all(int, const char*, ssize_t) -> bool;
@@ -44,4 +54,10 @@ namespace Utils {
         auto sha256(std::string_view) -> std::string;
         auto sha256_file(const fs::path&) -> std::string;
         auto print_usage() -> void;
+
+        // OCI layer export utilities
+        auto sha256_final(EVP_MD_CTX*) -> std::string;
+        auto is_overlay_whiteout(const fs::path&) -> bool;
+        auto is_opaque_directory(const fs::path&) -> bool;
+        auto create_oci_layer(const fs::path& upper_dir, const fs::path& output_path) -> LayerInfo;
 }

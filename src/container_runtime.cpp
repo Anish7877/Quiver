@@ -95,19 +95,19 @@ auto ContainerRuntime::execute_container_init() -> void {
         if (m_container_config.terminal.value) {
                 int slave_fd{m_pty_session_manager->recv_master_fd(m_container_config.control_sock)};
                 if (!m_pty_session_manager->ok() || slave_fd == -1) {
-                        log_event("Container Runtime Error: Failed to receive slave_fd\\n");
+                        log_event("Container Runtime Error: Failed to receive slave_fd\n");
                         _exit(EXIT_FAILURE);
                 }
                 close(m_container_config.control_sock);
 
                 if (setsid() == -1) {
-                        log_event("Container Runtime Error: setsid failed.\\n");
+                        log_event("Container Runtime Error: setsid failed.\n");
                         _exit(EXIT_FAILURE);
                 }
 
                 if (ioctl(slave_fd, TIOCSCTTY, 0) == -1) {
                         log_event(std::format(
-                                                "[{}] [{}] Container Runtime Error: TIOCSCTTY failed -> {}.\\n",
+                                                "[{}] [{}] Container Runtime Error: TIOCSCTTY failed -> {}.\n",
                                                 chrono::system_clock::now(),
                                                 m_container_config.container_id,
                                                 std::strerror(errno)
@@ -179,6 +179,10 @@ auto ContainerRuntime::execute_container_init() -> void {
                         m_seccomp_profile_manager->apply();
                 }
                 if (m_container_config.oom_score.value >= -1000 && m_container_config.oom_score.value <= 1000) {
+                        std::ofstream oom_adj{"/proc/self/oom_score_adj"};
+                        if (oom_adj.is_open()) {
+                                oom_adj << m_container_config.oom_score.value;
+                        }
                 }
         }
         catch (const std::exception& e) {
@@ -260,7 +264,7 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                 }
                 std::string opts{std::format("lowerdir={},upperdir={},workdir={}", lower_dir.string(),
                                               upper_dir.string(), work_dir.string())};
-                if (mount("overlay", merged_dir.c_str(), "overlay", 0,opts.c_str()) == 0) {
+                if (mount("overlay", merged_dir.c_str(), "overlay", MS_NODEV, opts.c_str()) == 0) {
                         is_overlay_mounted = true;
                 }
                 else {
@@ -277,6 +281,7 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                                         log_event(std::format("[{}] [{}] Container Runtime Fatal: FUSE overlayfs fork failed -> {}.\n",
                                                                 chrono::system_clock::now(),m_container_config.container_id,
                                                                 std::strerror(errno)));
+                                        _exit(EXIT_FAILURE);
                                 }
                                 if (fuse_pid == 0) {
                                         execlp("fuse-overlayfs", "fuse-overlayfs", "-o", opts.c_str(), merged_dir.c_str(),nullptr);
@@ -296,6 +301,7 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                                         }
                                         if (mounted) {
                                                 is_overlay_mounted = true;
+                                                break;
                                         }
                                         std::this_thread::sleep_for(std::chrono::milliseconds(10));
                                 }
@@ -422,9 +428,10 @@ auto ContainerRuntime::mount_necessary_dirs() -> void {
                 int fd = open(dev.container_path, O_CREAT | O_RDONLY, 0666);
                 if (fd != -1) close(fd);
                 if (mount(dev.host_path, dev.container_path, NULL, MS_BIND, NULL) == -1) {
-                        log_event(std::format("[{}] [{}] Container Runtime Warning: Failed to bind-mount {} -> {}.\n",
+                        log_event(std::format("[{}] [{}] Container Runtime Fatal: Failed to bind-mount {} -> {}.\n",
                                         chrono::system_clock::now(), m_container_config.container_id,
                                         dev.host_path, std::strerror(errno)));
+                        _exit(EXIT_FAILURE);
                 }
         }
 

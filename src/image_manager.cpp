@@ -61,7 +61,7 @@ static auto secure_zero(std::string& s) -> void {
 }
 
 [[nodiscard]] static auto is_valid_repo(const std::string& repo) -> bool {
-        static const std::regex valid{R"(^[a-z0-9_\-]+(\/[a-z0-9_\-]+)*$)"};
+        static const std::regex valid{R"(^[a-z0-9_\-\.]+(\/[a-z0-9_\-\.]+)*$)"};
         return std::regex_match(repo, valid);
 }
 
@@ -249,7 +249,7 @@ auto ImageManager::get_auth_token(const std::string& repo, std::string& out_toke
         cpr::Response r{cpr::Get(cpr::Url{url}, cpr::Timeout{TIMEOUT_AUTH_MS})};
 
         if (r.status_code != 200) [[unlikely]] {
-                error = std::format("Auth Error: HTTP {} - Registry responded: {}", r.status_code,r.error.message, r.text);
+                error = std::format("Auth Error: HTTP {} - {} - Registry responded: {}", r.status_code, r.error.message, r.text);
                 return false;
         }
 
@@ -296,11 +296,16 @@ auto ImageManager::fetch_manifest(const std::string& repo, const std::string& ta
                         )};
 
         if (r.status_code != 200) {
-                error = std::format("Manifest Error: ({})", r.status_code);
+                error = std::format("Manifest Error: HTTP {} - {}", r.status_code, r.text);
                 return false;
         }
         out_media_type = r.header["Content-Type"];
-        out_manifest = json::parse(r.text);
+        try {
+                out_manifest = json::parse(r.text);
+        } catch (const json::parse_error& e) {
+                error = std::format("Manifest Error: JSON Parse Failed - {}", e.what());
+                return false;
+        }
         return out_manifest.is_object();
 }
 
@@ -313,7 +318,12 @@ auto ImageManager::fetch_config_blob(const std::string& repo, const std::string&
                         )};
 
         if (r.status_code != 200 || !verify_digest(r.text, digest, error)) return false;
-        out_config = json::parse(r.text);
+        try {
+                out_config = json::parse(r.text);
+        } catch (const json::parse_error& e) {
+                error = std::format("Config Blob Error: JSON Parse Failed - {}", e.what());
+                return false;
+        }
         return out_config.is_object();
 }
 
@@ -339,7 +349,7 @@ auto ImageManager::download_layer(const std::string& repo, const std::string& di
                         cpr::Timeout{TIMEOUT_LAYER_MS},
                         cpr::WriteCallback([&ofs](std::string_view data, intptr_t) -> bool {
                                 ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
-                                return true;
+                                return ofs.good();
                                 })
                         )};
 
@@ -360,6 +370,13 @@ auto ImageManager::download_layer(const std::string& repo, const std::string& di
                 return "";
         }
 
+        std::string actual_digest{Utils::sha256_file(file_path)};
+        if (actual_digest.empty() || (std::format("sha256:{}", actual_digest) != digest)) [[unlikely]] {
+                std::cerr << std::format("Digest Mismatch: expected {} got sha256:{}\n", digest, actual_digest);
+                fs::remove(file_path);
+                return "";
+        }
+
         return file_path.string();
 }
 
@@ -373,10 +390,11 @@ auto ImageManager::extract_layer(const fs::path& tarball_path, const fs::path& d
 }
 
 auto ImageManager::remove(const std::string& image_name, [[maybe_unused]] std::string& error) -> bool {
-        std::string repo, tag;
-        extract_image_meta(image_name, repo, tag);
+        std::string safeImageName = image_name;
+        std::replace(safeImageName.begin(), safeImageName.end(), ':', '_');
+        std::replace(safeImageName.begin(), safeImageName.end(), '/', '_');
         try {
-                Utils::remove_directory(m_images_root / repo / tag);
+                Utils::remove_directory(m_images_root / "images" / safeImageName);
         }
         catch (const std::exception& e) {
                 std::cerr << e.what() << '\n';

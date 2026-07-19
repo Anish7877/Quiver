@@ -193,4 +193,12 @@ table ContainerConfig {
 	timeoffsets : [FB.OCIRuntime.TimeOffset];
 }
 
-root_type ContainerConfig;
+table ContainerMetadata {
+        config     : ContainerConfig;
+        name       : string;
+        image      : string;
+        status     : string;
+        created_at : string;
+}
+
+root_type ContainerMetadata;

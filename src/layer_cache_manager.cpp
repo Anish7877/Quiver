@@ -61,7 +61,7 @@ auto LayerCacheManager::init() -> void {
         job_data.target = TargetDB::LAYERCACHE;
         job_data.type = JobType::GET;
         job_data.status = &status;
-        std::memcpy(job_data.key, key.data(), 32);
+        std::memcpy(job_data.key, key.data(), std::min(key.size(), sizeof(job_data.key)));
         while (!m_db_command_queue->atomic_push(job_data)) {
                 std::this_thread::yield();
         }
@@ -73,10 +73,9 @@ auto LayerCacheManager::init() -> void {
         return LayerCacheDbManager::extract_obj(results.front().value);
 }
 
-auto LayerCacheManager::store(const std::string& key, const std::string& value) -> void {
-        LayerCache obj{value};
+auto LayerCacheManager::store(const std::string& key, const LayerCache& cache) -> void {
         flatbuffers::FlatBufferBuilder builder{};
-        flatbuffers::Offset<FB::LayerCache> fb_offset{Serialization::serialize(builder, obj)};
+        flatbuffers::Offset<FB::LayerCache> fb_offset{Serialization::serialize(builder, cache)};
         builder.Finish(fb_offset);
         std::string raw_bytes{reinterpret_cast<const char*>(builder.GetBufferPointer(), builder.GetSize())};
         DatabaseJobData job_data{};
@@ -85,11 +84,12 @@ auto LayerCacheManager::store(const std::string& key, const std::string& value) 
         job_data.type = JobType::PUT;
         job_data.status = &status;
         job_data.value_length = raw_bytes.length();
-        std::memcpy(job_data.key, key.data(), 32);
+        std::memcpy(job_data.key, key.data(), std::min(key.size(), sizeof(job_data.key)));
         while (!m_value_heap->write_job_data(raw_bytes, job_data.value_offset)) {
                 std::this_thread::yield();
         }
         while (!m_db_command_queue->atomic_push(job_data)) {
                 std::this_thread::yield();
         }
+        status.wait();
 }

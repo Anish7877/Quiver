@@ -24,9 +24,9 @@ auto LayerCacheDbManager::process_job(const DatabaseJobData& job_data, const std
                 case JobType::GET:
                         process_get_job(job_data); break;
                 case JobType::PUT:
-                        process_put_job(job_data, obj); break;
+                        process_put_job(job_data, value); break;
                 case JobType::UPDATE:
-                        process_update_job(job_data, obj); break;
+                        process_update_job(job_data, value); break;
                 case JobType::DELETE:
                         process_delete_job(job_data); break;
                 case JobType::GETALL:
@@ -53,9 +53,11 @@ auto LayerCacheDbManager::process_get_job(const DatabaseJobData& job_data) -> vo
         if (m_db == nullptr) [[unlikely]] {
                job_data.status->m_error = std::move(std::format("[{}] Layer Cache DB Manager Error: manager not initialized.",
                                         chrono::system_clock::now()));
+                job_data.status->processed.store(true, std::memory_order_release);
+                job_data.status->processed.notify_all();
                 return;
         }
-        rocksdb::Slice key{job_data.key};
+        rocksdb::Slice key{job_data.key, sizeof(job_data.key)};
         std::string raw_bytes{};
         rocksdb::Status stat{m_db->Get(rocksdb::ReadOptions(), key, &raw_bytes)};
         if (stat.IsNotFound()) [[unlikely]] {
@@ -78,10 +80,12 @@ auto LayerCacheDbManager::process_put_job(const DatabaseJobData& job_data, const
         if (m_db == nullptr) [[unlikely]] {
                job_data.status->m_error = std::move(std::format("[{}] Layer Cache DB Manager Error: manager not initialized.",
                                         chrono::system_clock::now()));
+                job_data.status->processed.store(true, std::memory_order_release);
+                job_data.status->processed.notify_all();
                 return;
         }
-        rocksdb::Slice key{job_data.key};
-        rocksdb::Status stat{m_db->Put(rocksdb::WriteOptions(), key, )};
+        rocksdb::Slice key{job_data.key, sizeof(job_data.key)};
+        rocksdb::Status stat{m_db->Put(rocksdb::WriteOptions(), key, value)};
         if (!stat.ok()) [[unlikely]] {
                job_data.status->m_error = std::move(std::format("[{}] Layer Cache DB Manager Error: Write error -> '{}'.",
                                         chrono::system_clock::now(), stat.ToString()));
@@ -93,17 +97,19 @@ auto LayerCacheDbManager::process_put_job(const DatabaseJobData& job_data, const
         job_data.status->processed.notify_all();
 }
 
-auto LayerCacheDbManager::process_update_job(const DatabaseJobData& job_data, const LayerCache& obj) -> void {
-        process_put_job(job_data, obj);
+auto LayerCacheDbManager::process_update_job(const DatabaseJobData& job_data, const std::string& value) -> void {
+        process_put_job(job_data, value);
 }
 
 auto LayerCacheDbManager::process_delete_job(const DatabaseJobData& job_data) -> void {
         if (m_db == nullptr) [[unlikely]] {
                job_data.status->m_error = std::move(std::format("[{}] Layer Cache DB Manager Error: manager not initialized.",
                                         chrono::system_clock::now()));
+                job_data.status->processed.store(true, std::memory_order_release);
+                job_data.status->processed.notify_all();
                 return;
         }
-        rocksdb::Slice key{job_data.key};
+        rocksdb::Slice key{job_data.key, sizeof(job_data.key)};
         rocksdb::Status stat{m_db->Delete(rocksdb::WriteOptions(), key)};
         if (!stat.ok()) [[unlikely]] {
                job_data.status->m_error = std::move(std::format("[{}] Layer Cache DB Manager Error: Write error -> '{}'.",
@@ -120,6 +126,8 @@ auto LayerCacheDbManager::process_get_all_job(const DatabaseJobData& job_data) -
         if (m_db == nullptr) [[unlikely]] {
                job_data.status->m_error = std::move(std::format("[{}] Layer Cache DB Manager Error: manager not initialized.",
                                         chrono::system_clock::now()));
+                job_data.status->processed.store(true, std::memory_order_release);
+                job_data.status->processed.notify_all();
                 return;
         }
         auto it{m_db->NewIterator(rocksdb::ReadOptions())};
@@ -133,6 +141,7 @@ auto LayerCacheDbManager::process_get_all_job(const DatabaseJobData& job_data) -
         else {
                job_data.status->m_ok = true;
         }
+        delete it;
         job_data.status->processed.store(true, std::memory_order_release);
         job_data.status->processed.notify_all();
 }

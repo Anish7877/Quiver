@@ -9,6 +9,7 @@
 #include "utils.hpp"
 #include "mount.hpp"
 #include "scoped_guard.hpp"
+#include <algorithm>
 #include <cpr/api.h>
 #include <cpr/cprtypes.h>
 #include <cpr/error.h>
@@ -22,6 +23,7 @@
 #include <functional>
 #include <iterator>
 #include <libcuckoo/cuckoohash_map.hh>
+#include <mutex>
 #include <optional>
 #include <queue>
 #include <stdexcept>
@@ -57,7 +59,7 @@ auto BuildExecutor::execute_instructions(const std::vector<std::vector<size_t>>&
                 }
                 m_target_node = node;
         }
-        if (detect_cycles(graph)) {
+        if (detect_cycles(graph)) [[unlikely]] {
                 throw std::runtime_error("Build Executor Error: Cycle detected in dependency graph.");
         }
         prepare(stages, parsed_instructions, parsed_instruction_maps);
@@ -137,8 +139,8 @@ auto BuildExecutor::exec_stage(GraphBuilder::Stage& stage,
         std::string current_digest{};
         size_t node{};
         if (!parsed_instruction_maps.stage_alias_to_node_number.find(stage.base_image, node)) {
-                if (!m_image_top_layer_digest.find(stage.base_image, current_digest)) {
-                        throw std::runtime_error("Build Executor Error: ");
+                if (!m_image_top_layer_digest.find(stage.base_image, current_digest)) [[unlikely]] {
+                        throw std::runtime_error(std::format("Build Executor Error: Image '{}' not found.", stage.base_image));
                 }
                 m_stage_lower_dirs.insert(stage.node_number, std::vector{Utils::get_image_path(stage.base_image).string()});
         }
@@ -153,6 +155,7 @@ auto BuildExecutor::exec_stage(GraphBuilder::Stage& stage,
                 m_stage_lower_dirs.insert(stage.node_number, lower_dirs);
         }
         m_stage_layers.insert(stage.node_number, std::vector{current_digest});
+        m_stage_diff_ids.insert(stage.node_number, std::vector<std::string>{});
         for (const auto& instruction_index : stage.instruction_indices) {
                 switch (instructions[instruction_index].type) {
                         case Instruction::InstructionType::ADD:
@@ -218,18 +221,27 @@ auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction
                 m_url_downloaded_file.find(url, file_path);
                 srcs.emplace_back(file_path);
         }
+        std::sort(srcs.begin(), srcs.end());
         Instruction::InstructionHash instruction_hash{};
         instruction_hash.expanded_raw_ins = raw_instruction;
         instruction_hash.parent_digest = current_digest;
-        instruction_hash.file_checksum = compute_files_checksum(srcs);
+        instruction_hash.file_checksum = compute_files_checksum(srcs, m_build_dir);
         std::string hash{get_instruction_hash(instruction_hash)};
-        std::string digest{};
-        if (m_hash_digest.find(hash, digest)) {
+        LayerCache cache_obj{};
+        if (m_hash_digest.find(hash, cache_obj)) {
                 m_stage_layers.update_fn(stage.node_number,
                                 [&](std::vector<std::string>& layers) {
-                                        layers.emplace_back(digest);
+                                        layers.emplace_back(cache_obj.hash);
                                 });
-                current_digest = std::move(digest);
+                m_stage_diff_ids.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& diff_ids) {
+                                        diff_ids.emplace_back(cache_obj.diff_id);
+                                });
+                m_stage_lower_dirs.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& lower_dirs) {
+                                        lower_dirs.emplace_back(cache_obj.lower_dir);
+                                });
+                current_digest = cache_obj.hash;
                 return;
         }
         auto obj{m_layer_cache_manager->lookup(hash)};
@@ -238,14 +250,23 @@ auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction
                                 [&](std::vector<std::string>& layers) {
                                         layers.emplace_back(obj->hash);
                                 });
-                m_hash_digest.insert(hash, obj->hash);
-                current_digest = std::move(obj->hash);
+                m_stage_diff_ids.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& diff_ids) {
+                                        diff_ids.emplace_back(obj->diff_id);
+                                });
+                m_stage_lower_dirs.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& lower_dirs) {
+                                        lower_dirs.emplace_back(obj->lower_dir);
+                                });
+                m_hash_digest.insert(hash, *obj);
+                current_digest = obj->hash;
                 return;
         }
         auto status{m_in_flight_cache_manager->acquire(hash)};
         if (status.is_owner) {
-                fs::path dummy_path{std::format("/tmp/quiver_layer_{}", hash)};
+                fs::path dummy_path{std::format("{}/layer_snapshots/quiver_layer_{}", Utils::get_base_dir().string(), hash)};
                 fs::path final_dst{dummy_path / instruction.dst};
+                Utils::ensure_dir(dummy_path);
                 try {
                         if (srcs.size() == 1) {
                                 fs::path path{srcs.front().is_absolute() ? srcs.front() : m_build_dir / srcs.front()};
@@ -280,22 +301,25 @@ auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction
                                 }
                                 change_permission_and_owners(final_dst, instruction.chmod, instruction.chown);
                         }
-                        Utils::create_tar_gz(dummy_path, dummy_path / "layer.tar.gz");
-                        std::string sha256_hash{Utils::sha256_file(dummy_path / "layer.tar.gz")};
-                        std::string sha256_tar{sha256_hash + ".tar.gz"};
-                        Utils::rename_file_or_directory(dummy_path / "layer.tar.gz", Utils::get_layers_path(sha256_hash.substr(7) + ".tar.gz"));
+                        auto layer_info{Utils::create_oci_layer(dummy_path, Utils::get_layers_path(hash + ".tar.gz"))};
+                        std::string sha256_hash{layer_info.blob_digest};
                         m_stage_layers.update_fn(stage.node_number,
                                         [&](std::vector<std::string>& layers) {
-                                                layers.emplace_back(sha256_tar);
+                                                layers.emplace_back(sha256_hash);
+                                        });
+                        m_stage_diff_ids.update_fn(stage.node_number,
+                                        [&](std::vector<std::string>& diff_ids) {
+                                                diff_ids.emplace_back(layer_info.diff_id);
                                         });
                         m_stage_lower_dirs.update_fn(stage.node_number,
                                         [&](std::vector<std::string>& lower_dir) {
                                                 lower_dir.emplace_back(dummy_path.string());
                                         });
                         current_digest = sha256_hash;
-                        m_hash_digest.insert(hash, sha256_hash);
-                        m_layer_cache_manager->store(hash, sha256_hash);
-                        m_in_flight_cache_manager->finish_success(hash, std::make_pair(LayerCache(sha256_hash), dummy_path));
+                        LayerCache new_cache{sha256_hash, layer_info.diff_id, dummy_path.string()};
+                        m_hash_digest.insert(hash, new_cache);
+                        m_layer_cache_manager->store(hash, new_cache);
+                        m_in_flight_cache_manager->finish_success(hash, std::make_pair(new_cache, dummy_path));
                 }
                 catch (...) {
                         Utils::remove_directory(dummy_path);
@@ -308,6 +332,10 @@ auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction
                 m_stage_layers.update_fn(stage.node_number,
                                 [&](std::vector<std::string>& layers) {
                                         layers.emplace_back(layer_cache.first.hash);
+                                });
+                m_stage_diff_ids.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& diff_ids) {
+                                        diff_ids.emplace_back(layer_cache.first.diff_id);
                                 });
                 m_stage_lower_dirs.update_fn(stage.node_number,
                                 [&](std::vector<std::string>& lower_dir) {
@@ -368,19 +396,28 @@ auto BuildExecutor::exec_copy(const GraphBuilder::Stage& stage, const Instructio
                         final_srcs.emplace_back(path);
                 }
         }
+        std::sort(final_srcs.begin(), final_srcs.end());
         Instruction::InstructionHash instruction_hash{};
         instruction_hash.parent_digest = current_digest;
         instruction_hash.expanded_raw_ins = raw_instruction;
         instruction_hash.source_stage = instruction.from_stage.has_value() ? instruction.from_stage.value() : "";
-        instruction_hash.file_checksum = compute_files_checksum(final_srcs);
+        instruction_hash.file_checksum = compute_files_checksum(final_srcs, instruction.from_stage.has_value() ? final_dir : m_build_dir);
         std::string hash{get_instruction_hash(instruction_hash)};
-        std::string digest{};
-        if (m_hash_digest.find(hash, digest)) {
+        LayerCache cache_obj{};
+        if (m_hash_digest.find(hash, cache_obj)) {
                 m_stage_layers.update_fn(stage.node_number,
                                 [&](std::vector<std::string>& layers) {
-                                        layers.emplace_back(digest);
+                                        layers.emplace_back(cache_obj.hash);
                                 });
-                current_digest = std::move(digest);
+                m_stage_diff_ids.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& diff_ids) {
+                                        diff_ids.emplace_back(cache_obj.diff_id);
+                                });
+                m_stage_lower_dirs.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& lower_dirs) {
+                                        lower_dirs.emplace_back(cache_obj.lower_dir);
+                                });
+                current_digest = cache_obj.hash;
                 return;
         }
         auto obj{m_layer_cache_manager->lookup(hash)};
@@ -389,13 +426,21 @@ auto BuildExecutor::exec_copy(const GraphBuilder::Stage& stage, const Instructio
                                 [&](std::vector<std::string>& layers) {
                                         layers.emplace_back(obj->hash);
                                 });
-                m_hash_digest.insert(hash, obj->hash);
-                current_digest = std::move(obj->hash);
+                m_stage_diff_ids.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& diff_ids) {
+                                        diff_ids.emplace_back(obj->diff_id);
+                                });
+                m_stage_lower_dirs.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& lower_dirs) {
+                                        lower_dirs.emplace_back(obj->lower_dir);
+                                });
+                m_hash_digest.insert(hash, *obj);
+                current_digest = obj->hash;
                 return;
         }
         auto status{m_in_flight_cache_manager->acquire(hash)};
         if (status.is_owner) {
-                fs::path dummy_path{std::format("/tmp/quiver_layer_{}", hash)};
+                fs::path dummy_path{std::format("{}/layer_snapshots/quiver_layer_{}", Utils::get_base_dir().string(), hash)};
                 fs::path final_dst{dummy_path / instruction.dst};
                 try {
                         Utils::ensure_dir(final_dst);
@@ -409,24 +454,25 @@ auto BuildExecutor::exec_copy(const GraphBuilder::Stage& stage, const Instructio
                                 }
                         }
                         change_permission_and_owners(final_dst, instruction.chmod, instruction.chown);
-                        Utils::create_tar_gz(dummy_path, dummy_path / "layer.tar.gz");
-                        std::string sha256_hash{Utils::sha256_file(dummy_path / "layer.tar.gz")};
-                        std::string sha256_tar{sha256_hash + ".tar.gz"};
-                        Utils::rename_file_or_directory(dummy_path / "layer.tar.gz", Utils::get_layers_path(sha256_hash.substr(7) + ".tar.gz"));
+                        auto layer_info{Utils::create_oci_layer(dummy_path, Utils::get_layers_path(hash + ".tar.gz"))};
+                        std::string sha256_hash{layer_info.blob_digest};
                         m_stage_layers.update_fn(stage.node_number,
                                         [&](std::vector<std::string>& layers) {
-                                                layers.emplace_back(sha256_tar);
+                                                layers.emplace_back(sha256_hash);
                                         });
-                        if (!instruction.from_stage.has_value()) {
-                                m_stage_lower_dirs.update_fn(stage.node_number,
-                                                [&](std::vector<std::string>& lower_dir) {
-                                                        lower_dir.emplace_back(dummy_path.string());
-                                                });
-                        }
+                        m_stage_diff_ids.update_fn(stage.node_number,
+                                        [&](std::vector<std::string>& diff_ids) {
+                                                diff_ids.emplace_back(layer_info.diff_id);
+                                        });
+                        m_stage_lower_dirs.update_fn(stage.node_number,
+                                        [&](std::vector<std::string>& lower_dir) {
+                                                lower_dir.emplace_back(dummy_path.string());
+                                        });
                         current_digest = sha256_hash;
-                        m_hash_digest.insert(hash, sha256_hash);
-                        m_layer_cache_manager->store(hash, sha256_hash);
-                        m_in_flight_cache_manager->finish_success(hash, std::make_pair(LayerCache(sha256_hash), dummy_path));
+                        LayerCache new_cache{sha256_hash, layer_info.diff_id, dummy_path.string()};
+                        m_hash_digest.insert(hash, new_cache);
+                        m_layer_cache_manager->store(hash, new_cache);
+                        m_in_flight_cache_manager->finish_success(hash, std::make_pair(new_cache, dummy_path));
                 }
                 catch (...) {
                         Utils::remove_directory(dummy_path);
@@ -440,39 +486,55 @@ auto BuildExecutor::exec_copy(const GraphBuilder::Stage& stage, const Instructio
                                 [&](std::vector<std::string>& layers) {
                                         layers.emplace_back(layer_cache.first.hash);
                                 });
-                if (!instruction.from_stage.has_value()) {
-                        m_stage_lower_dirs.update_fn(stage.node_number,
-                                        [&](std::vector<std::string>& lower_dir) {
-                                                lower_dir.emplace_back(layer_cache.second.string());
-                                        });
-                }
+                m_stage_diff_ids.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& diff_ids) {
+                                        diff_ids.emplace_back(layer_cache.first.diff_id);
+                                });
+                m_stage_lower_dirs.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& lower_dir) {
+                                        lower_dir.emplace_back(layer_cache.second.string());
+                                });
                 current_digest = layer_cache.first.hash;
         }
 }
 
 auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction::RunInstruction& instruction,
                 const GraphBuilder::ParsedInstructionsMaps& maps, const std::string& raw_instruction, std::string& current_digest) -> void {
-                Instruction::InstructionHash instruction_hash{};
+        Instruction::InstructionHash instruction_hash{};
         std::string env_str{};
-        std::vector<std::string> config_envs{};
+        std::set<std::string> config_envs{};
         for (const auto& [key, value] : stage.local_envs) {
-                env_str += key + '=' + value + ',';
-                config_envs.emplace_back(key + '=' + value);
+                config_envs.emplace(key + '=' + value);
+        }
+        for (const auto& env : config_envs) {
+                env_str += env + ',';
         }
         if (env_str.size() > 0) env_str.pop_back();
         instruction_hash.parent_digest = current_digest;
         instruction_hash.expanded_raw_ins = raw_instruction;
-        instruction_hash.user = std::format("{}:{}", stage.current_user->first, stage.current_user->second);
-        instruction_hash.workdir = stage.current_workdir.value().workdir;
+        if (stage.current_user.has_value()) {
+                instruction_hash.user = std::format("{}:{}", stage.current_user->first, stage.current_user->second);
+        }
+        if (stage.current_workdir.has_value()) {
+                instruction_hash.workdir = stage.current_workdir.value().workdir;
+        }
         instruction_hash.env = env_str;
         std::string hash{get_instruction_hash(instruction_hash)};
-        std::string digest{};
-        if (m_hash_digest.find(hash, digest)) {
+        LayerCache cache_obj{};
+        if (m_hash_digest.find(hash, cache_obj)) {
                 m_stage_layers.update_fn(stage.node_number,
                                 [&](std::vector<std::string>& layers) {
-                                        layers.emplace_back(digest);
+                                        layers.emplace_back(cache_obj.hash);
                                 });
-                current_digest = std::move(digest);
+                m_stage_diff_ids.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& diff_ids) {
+                                        diff_ids.emplace_back(cache_obj.diff_id);
+                                });
+                m_stage_lower_dirs.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& lower_dirs) {
+                                        lower_dirs.emplace_back(cache_obj.lower_dir);
+                                });
+                current_digest = cache_obj.hash;
                 return;
         }
         auto obj{m_layer_cache_manager->lookup(hash)};
@@ -481,42 +543,52 @@ auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction
                                 [&](std::vector<std::string>& layers) {
                                         layers.emplace_back(obj->hash);
                                 });
-                m_hash_digest.insert(hash, obj->hash);
-                current_digest = std::move(obj->hash);
+                m_stage_diff_ids.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& diff_ids) {
+                                        diff_ids.emplace_back(obj->diff_id);
+                                });
+                m_stage_lower_dirs.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& lower_dirs) {
+                                        lower_dirs.emplace_back(obj->lower_dir);
+                                });
+                m_hash_digest.insert(hash, *obj);
+                current_digest = obj->hash;
                 return;
         }
         auto status{m_in_flight_cache_manager->acquire(hash)};
         if (status.is_owner) {
                 try {
                         std::string container_id{Utils::generate_container_id()};
-                        std::string home{getenv("HOME")};
+                        std::string base_dir{Utils::get_base_dir()};
+                        std::string rootfs{};
                         bool is_overlay{false};
                         ScopeGuard guard{[&]() {
                                 if(is_overlay) {
-                                        std::string filesystem_path{std::format("{}/.quiver/filesystems/quiver_{}", home, container_id)};
-                                        umount2(filesystem_path.c_str(), MNT_DETACH);
+                                        umount2(rootfs.c_str(), MNT_DETACH);
                                 }
                         }};
-                        std::string rootfs{};
                         size_t node{};
                         if (maps.stage_alias_to_node_number.find(stage.base_image, node)) {
                                 std::vector<std::string> lower_dirs{};
                                 std::vector<std::string> current_lower_dirs{};
                                 if (!m_stage_lower_dirs.find(node, lower_dirs)) [[unlikely]] {
-                                        throw std::runtime_error("RUN failed: Unable to find lower dirs.");
+                                        throw std::runtime_error("RUN failed: Unable to find base stage lower dirs.");
                                 }
-                                m_stage_lower_dirs.find(stage.node_number, current_lower_dirs);
+                                if (!m_stage_lower_dirs.find(stage.node_number, current_lower_dirs)) [[unlikely]] {
+                                        throw std::runtime_error("RUN failed: Unable to find current stage lower dirs.");
+                                }
                                 std::string lower_dirs_str{};
-                                for (auto it{lower_dirs.rbegin()}; it != lower_dirs.rend(); ++it) {
-                                        lower_dirs_str += *it + ':';
-                                }
                                 if (!current_lower_dirs.empty()) {
                                         for (auto it{current_lower_dirs.rbegin()}; it != current_lower_dirs.rend(); ++it) {
                                                 lower_dirs_str += *it + ':';
                                         }
                                 }
+                                for (auto it{lower_dirs.rbegin()}; it != lower_dirs.rend(); ++it) {
+                                        lower_dirs_str += *it + ':';
+                                }
                                 if (!lower_dirs_str.empty()) lower_dirs_str.pop_back();
                                 rootfs = std::format("/tmp/quiver_merged_{}", get_temp_filename());
+                                Utils::ensure_dir(rootfs);
                                 std::string opts{std::format("lowerdir={}", lower_dirs_str)};
                                 if (!Mount::_overlay_fs(rootfs, opts)) [[unlikely]] {
                                         throw std::runtime_error("RUN failed: overlay mount failed");
@@ -527,13 +599,16 @@ auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction
                                 std::string lower_dirs_str{};
                                 std::string image_path{Utils::get_image_path(stage.base_image)};
                                 std::vector<std::string> current_lower_dirs{};
-                                m_stage_lower_dirs.find(stage.node_number, current_lower_dirs);
+                                if (!m_stage_lower_dirs.find(stage.node_number, current_lower_dirs)) [[unlikely]] {
+                                        throw std::runtime_error("RUN failed: Unable to find current stage lower dirs.");
+                                }
                                 if (!current_lower_dirs.empty()) {
                                         for (auto it{current_lower_dirs.rbegin()}; it != current_lower_dirs.rend(); ++it) {
                                                 lower_dirs_str += *it + ':';
                                         }
                                         lower_dirs_str += image_path;
                                         rootfs = std::format("/tmp/quiver_merged_{}", get_temp_filename());
+                                        Utils::ensure_dir(rootfs);
                                         std::string opts{std::format("lowerdir={}", lower_dirs_str)};
                                         if (!Mount::_overlay_fs(rootfs, opts)) [[unlikely]] {
                                                 throw std::runtime_error("RUN failed: overlay mount failed");
@@ -563,26 +638,36 @@ auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction
                                 config.user.uid = stage.current_user->first;
                                 config.user.gid = stage.current_user->second;
                         }
+                        config.env.value = std::vector(config_envs.begin(), config_envs.end());
                         config.args.value = config_args;
-                        m_container_monitor->init(config);
-                        m_container_monitor->invoke_container();
-                        fs::path upper_path{std::format("{}/.quiver/filesystems/quiver_{}/upper_dir", home, container_id)};
-                        Utils::create_tar_gz(upper_path, upper_path / "layer.tar.gz");
-                        std::string sha256_hash{Utils::sha256_file(upper_path / "layer.tar.gz")};
-                        std::string sha256_tar{sha256_hash + ".tar.gz"};
-                        Utils::rename_file_or_directory(upper_path / "layer.tar.gz", Utils::get_layers_path(sha256_hash.substr(7) + ".tar.gz"));
+                        {
+                                std::lock_guard lock{m_run_mutex};
+                                m_container_monitor->init(config);
+                                m_container_monitor->invoke_container();
+                        }
+                        fs::path upper_path{std::format("{}/filesystems/quiver_{}/upper_dir", base_dir, container_id)};
+                        fs::path layer_snapshot{std::format("{}/layer_snapshots/quiver_layer_{}", base_dir, hash)};
+                        Utils::ensure_dir(layer_snapshot);
+                        Utils::rename_file_or_directory(upper_path, layer_snapshot);
+                        auto layer_info{Utils::create_oci_layer(layer_snapshot, Utils::get_layers_path(hash + ".tar.gz"))};
+                        std::string sha256_hash{layer_info.blob_digest};
                         m_stage_layers.update_fn(stage.node_number,
                                         [&](std::vector<std::string>& layers) {
-                                        layers.emplace_back(sha256_tar);
+                                                layers.emplace_back(sha256_hash);
+                                        });
+                        m_stage_diff_ids.update_fn(stage.node_number,
+                                        [&](std::vector<std::string>& diff_ids) {
+                                                diff_ids.emplace_back(layer_info.diff_id);
                                         });
                         m_stage_lower_dirs.update_fn(stage.node_number,
                                         [&](std::vector<std::string>& lower_dir) {
-                                        lower_dir.emplace_back(upper_path.string());
+                                                lower_dir.emplace_back(layer_snapshot.string());
                                         });
                         current_digest = sha256_hash;
-                        m_hash_digest.insert(hash, sha256_hash);
-                        m_layer_cache_manager->store(hash, sha256_hash);
-                        m_in_flight_cache_manager->finish_success(hash, std::make_pair(LayerCache(sha256_hash), upper_path));
+                        LayerCache new_cache{sha256_hash, layer_info.diff_id, layer_snapshot.string()};
+                        m_hash_digest.insert(hash, new_cache);
+                        m_layer_cache_manager->store(hash, new_cache);
+                        m_in_flight_cache_manager->finish_success(hash, std::make_pair(new_cache, layer_snapshot));
                 }
                 catch (...) {
                         m_in_flight_cache_manager->finish_failure(hash, std::current_exception());
@@ -594,6 +679,10 @@ auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction
                 m_stage_layers.update_fn(stage.node_number,
                                 [&](std::vector<std::string>& layers) {
                                         layers.emplace_back(layer_cache.first.hash);
+                                });
+                m_stage_diff_ids.update_fn(stage.node_number,
+                                [&](std::vector<std::string>& diff_ids) {
+                                        diff_ids.emplace_back(layer_cache.first.diff_id);
                                 });
                 m_stage_lower_dirs.update_fn(stage.node_number,
                                 [&](std::vector<std::string>& lower_dir) {
@@ -619,9 +708,11 @@ auto BuildExecutor::change_permission_and_owners(const fs::path& path,
                 const std::optional<mode_t>& mode, const std::optional<std::pair<uid_t, gid_t>>& uid_gid) -> void {
         if (mode.has_value() && uid_gid.has_value()) {
                 if (fs::is_directory(path)) {
+                        Utils::change_permissions(path, mode.value());
+                        Utils::change_owners(path, uid_gid->first, uid_gid->second);
                         for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)) {
-                                Utils::change_permissions(path, mode.value());
-                                Utils::change_owners(path, uid_gid->first, uid_gid->second);
+                                Utils::change_permissions(entry.path(), mode.value());
+                                Utils::change_owners(entry.path(), uid_gid->first, uid_gid->second);
                         }
                 }
                 else {
@@ -631,8 +722,9 @@ auto BuildExecutor::change_permission_and_owners(const fs::path& path,
         }
         else if (mode.has_value()) {
                 if (fs::is_directory(path)) {
+                        Utils::change_permissions(path, mode.value());
                         for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)) {
-                                Utils::change_permissions(path, mode.value());
+                                Utils::change_permissions(entry.path(), mode.value());
                         }
                 }
                 else {
@@ -641,8 +733,9 @@ auto BuildExecutor::change_permission_and_owners(const fs::path& path,
         }
         else if (uid_gid.has_value()) {
                 if (fs::is_directory(path)) {
+                        Utils::change_owners(path, uid_gid->first, uid_gid->second);
                         for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)) {
-                                Utils::change_owners(path, uid_gid->first, uid_gid->second);
+                                Utils::change_owners(entry.path(), uid_gid->first, uid_gid->second);
                         }
                 }
                 else {
@@ -662,7 +755,7 @@ auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, Grap
                 }
         }
         for (const auto& copy_instruction : parsed_instructions.copy_instructions) {
-                if (!copy_instruction.is_dependency) {
+                if (copy_instruction.from_stage.has_value() && !copy_instruction.is_dependency) {
                         images.emplace(copy_instruction.from_stage.value());
                 }
         }
@@ -677,11 +770,11 @@ auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, Grap
                                                 std::string error{};
                                                 std::string out_path{};
                                                 json manifest{m_image_manager->pull(image, out_path, error)};
-                                                std::string top_layer_digest{manifest["layers"].back()["digest"].get<std::string>().substr()};
-                                                m_image_top_layer_digest.insert(image, top_layer_digest);
                                                 if (!error.empty()) {
                                                         throw std::runtime_error(error);
                                                 }
+                                                std::string top_layer_digest{manifest["layers"].back()["digest"].get<std::string>().substr(7)};
+                                                m_image_top_layer_digest.insert(image, top_layer_digest);
                                         }));
         }
         for (auto& worker : workgroup) {
@@ -749,7 +842,7 @@ auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, Grap
         }
 }
 
-[[nodiscard]] auto BuildExecutor::compute_files_checksum(const std::vector<fs::path>& srcs) -> std::string {
+[[nodiscard]] auto BuildExecutor::compute_files_checksum(const std::vector<fs::path>& srcs, const fs::path& root_dir) -> std::string {
         struct Entry {
                 std::string relative_path;
                 fs::path absolute_path;
@@ -758,14 +851,14 @@ auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, Grap
         std::vector<Entry> entries{};
         std::unordered_set<std::string> seen{};
         for (const auto& src : srcs) {
-                fs::path abs_path{src.is_absolute() ? src : m_build_dir / src};
+                fs::path abs_path{src.is_absolute() ? src : root_dir / src};
 
                 if (!fs::exists(abs_path) && !fs::is_symlink(abs_path)) {
                         throw std::runtime_error(std::format("Build Executor Error: Source '{}' does not exist.", src.string()));
                 }
 
                 auto add_entry{[&](const fs::path& path) {
-                        std::string relative_path{fs::relative(path, m_build_dir).generic_string()};
+                        std::string relative_path{fs::relative(path, root_dir).generic_string()};
                         if (!seen.insert(relative_path).second) {
                                 return;
                         }
@@ -834,7 +927,7 @@ auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, Grap
 [[nodiscard]] auto BuildExecutor::get_instruction_hash(const Instruction::InstructionHash& instruction_hash) -> std::string {
         std::string input {
                 (!instruction_hash.parent_digest.empty() ? (instruction_hash.parent_digest + '\0') : "") +
-                (!instruction_hash.expanded_raw_ins.empty() ? (instruction_hash.expanded_raw_ins + '\0') : "") + '\0' +
+                (!instruction_hash.expanded_raw_ins.empty() ? (instruction_hash.expanded_raw_ins + '\0') : "") +
                 (!instruction_hash.source_stage.empty() ? (instruction_hash.source_stage + '\0') : "") +
                 (!instruction_hash.file_checksum.empty() ? (instruction_hash.file_checksum + '\0') : "") +
                 (!instruction_hash.workdir.empty() ? (instruction_hash.workdir + '\0') : "") +
@@ -856,10 +949,10 @@ auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, Grap
 }
 
 [[nodiscard]] auto BuildExecutor::download_file(const std::string& url, const fs::path& dst) -> fs::path {
-        auto get_response{cpr::Get(cpr::Url{url})};
-        auto it{get_response.header.find("content-disposition")};
+        auto head_response{cpr::Head(cpr::Url{url})};
+        auto it{head_response.header.find("content-disposition")};
         std::optional<std::string> filename{};
-        if (it != get_response.header.end()) {
+        if (it != head_response.header.end()) {
                 filename = get_filename_from_content_disposition(it->second);
                 if (!filename.has_value()) {
                         filename = get_temp_filename();
@@ -977,7 +1070,7 @@ auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, Grap
         for (auto& b : random)
                 b = static_cast<uint8_t>(rd());
 
-        blake3_hasher hasher;
+        blake3_hasher hasher{};
         blake3_hasher_init(&hasher);
         blake3_hasher_update(&hasher, random.data(), random.size());
 
@@ -990,3 +1083,4 @@ auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, Grap
         }
         return hex_stream.str();
 }
+
