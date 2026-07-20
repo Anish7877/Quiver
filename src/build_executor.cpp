@@ -208,7 +208,7 @@ auto BuildExecutor::exec_stage(GraphBuilder::Stage& stage,
                 }
         }
         if (stage.node_number == m_target_node) {
-                // TODO: save config for final image assembly
+                assemble_oci_image(stage, "quiver_build");
         }
         m_stage_final_digest.insert(stage.node_number, current_digest);
 }
@@ -274,14 +274,18 @@ auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction
                                         if (fs::is_directory(path) || instruction.dst.string().ends_with('/')) {
                                                 Utils::ensure_dir(final_dst);
                                                 Utils::copy_directory(path, final_dst);
-                                                change_permission_and_owners(final_dst, instruction.chmod, instruction.chown);
+                                                std::vector<std::string> current_lower_dirs{};
+                                                m_stage_lower_dirs.find(stage.node_number, current_lower_dirs);
+                                                change_permission_and_owners(final_dst, instruction.chmod, instruction.chown, current_lower_dirs);
                                         }
                                         else {
                                                 const auto parent{final_dst.parent_path()};
                                                 Utils::ensure_dir(parent);
                                                 Utils::copy_directory(path, parent);
                                                 Utils::rename_file_or_directory(parent / srcs.front().filename(), parent / instruction.dst);
-                                                change_permission_and_owners(parent / instruction.dst, instruction.chmod, instruction.chown);
+                                                std::vector<std::string> current_lower_dirs{};
+                                                m_stage_lower_dirs.find(stage.node_number, current_lower_dirs);
+                                                change_permission_and_owners(parent / instruction.dst, instruction.chmod, instruction.chown, current_lower_dirs);
                                         }
                                 }
                                 else {
@@ -299,7 +303,9 @@ auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction
                                                 throw std::runtime_error(std::format("ADD failed: source '{}' does not exist.", src.string()));
                                         }
                                 }
-                                change_permission_and_owners(final_dst, instruction.chmod, instruction.chown);
+                                std::vector<std::string> current_lower_dirs{};
+                                m_stage_lower_dirs.find(stage.node_number, current_lower_dirs);
+                                change_permission_and_owners(final_dst, instruction.chmod, instruction.chown, current_lower_dirs);
                         }
                         auto layer_info{Utils::create_oci_layer(dummy_path, Utils::get_layers_path(hash + ".tar.gz"))};
                         std::string sha256_hash{layer_info.blob_digest};
@@ -316,7 +322,7 @@ auto BuildExecutor::exec_add(const GraphBuilder::Stage& stage, const Instruction
                                                 lower_dir.emplace_back(dummy_path.string());
                                         });
                         current_digest = sha256_hash;
-                        LayerCache new_cache{sha256_hash, layer_info.diff_id, dummy_path.string()};
+                        LayerCache new_cache{sha256_hash, layer_info.diff_id, dummy_path.string(), static_cast<int64_t>(layer_info.blob_size)};
                         m_hash_digest.insert(hash, new_cache);
                         m_layer_cache_manager->store(hash, new_cache);
                         m_in_flight_cache_manager->finish_success(hash, std::make_pair(new_cache, dummy_path));
@@ -453,7 +459,9 @@ auto BuildExecutor::exec_copy(const GraphBuilder::Stage& stage, const Instructio
                                         throw std::runtime_error(std::format("COPY failed: source '{}' does not exist.", src.string()));
                                 }
                         }
-                        change_permission_and_owners(final_dst, instruction.chmod, instruction.chown);
+                        std::vector<std::string> current_lower_dirs{};
+                        m_stage_lower_dirs.find(stage.node_number, current_lower_dirs);
+                        change_permission_and_owners(final_dst, instruction.chmod, instruction.chown, current_lower_dirs);
                         auto layer_info{Utils::create_oci_layer(dummy_path, Utils::get_layers_path(hash + ".tar.gz"))};
                         std::string sha256_hash{layer_info.blob_digest};
                         m_stage_layers.update_fn(stage.node_number,
@@ -469,7 +477,7 @@ auto BuildExecutor::exec_copy(const GraphBuilder::Stage& stage, const Instructio
                                                 lower_dir.emplace_back(dummy_path.string());
                                         });
                         current_digest = sha256_hash;
-                        LayerCache new_cache{sha256_hash, layer_info.diff_id, dummy_path.string()};
+                        LayerCache new_cache{sha256_hash, layer_info.diff_id, dummy_path.string(), static_cast<int64_t>(layer_info.blob_size)};
                         m_hash_digest.insert(hash, new_cache);
                         m_layer_cache_manager->store(hash, new_cache);
                         m_in_flight_cache_manager->finish_success(hash, std::make_pair(new_cache, dummy_path));
@@ -635,8 +643,11 @@ auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction
                                 config.cwd.value = stage.current_workdir.value().workdir;
                         }
                         if (stage.current_user.has_value()) {
-                                config.user.uid = stage.current_user->first;
-                                config.user.gid = stage.current_user->second;
+                                std::vector<std::string> current_lower_dirs{};
+                                m_stage_lower_dirs.find(stage.node_number, current_lower_dirs);
+                                auto uid_gid = Utils::resolve_user_group(current_lower_dirs, stage.current_user.value());
+                                config.user.uid = uid_gid.first;
+                                config.user.gid = uid_gid.second;
                         }
                         config.env.value = std::vector(config_envs.begin(), config_envs.end());
                         config.args.value = config_args;
@@ -664,10 +675,14 @@ auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction
                                                 lower_dir.emplace_back(layer_snapshot.string());
                                         });
                         current_digest = sha256_hash;
-                        LayerCache new_cache{sha256_hash, layer_info.diff_id, layer_snapshot.string()};
+                        LayerCache new_cache{sha256_hash, layer_info.diff_id, layer_snapshot.string(), static_cast<int64_t>(layer_info.blob_size)};
                         m_hash_digest.insert(hash, new_cache);
                         m_layer_cache_manager->store(hash, new_cache);
                         m_in_flight_cache_manager->finish_success(hash, std::make_pair(new_cache, layer_snapshot));
+                        m_stage_layer_caches.update_fn(stage.node_number,
+                                        [&](std::vector<LayerCache>& caches) {
+                                                caches.emplace_back(new_cache);
+                                        });
                 }
                 catch (...) {
                         m_in_flight_cache_manager->finish_failure(hash, std::current_exception());
@@ -697,7 +712,7 @@ auto BuildExecutor::exec_shell(GraphBuilder::Stage& stage, const Instruction::Sh
 }
 
 auto BuildExecutor::exec_user(GraphBuilder::Stage& stage, const Instruction::UserInstruction& instruction) -> void {
-        stage.current_user = std::make_pair(instruction.uid.value(), instruction.gid.value());
+        stage.current_user = instruction.user_group;
 }
 
 auto BuildExecutor::exec_workdir(GraphBuilder::Stage& stage, const Instruction::WorkdirInstruction& instruction) -> void {
@@ -705,7 +720,12 @@ auto BuildExecutor::exec_workdir(GraphBuilder::Stage& stage, const Instruction::
 }
 
 auto BuildExecutor::change_permission_and_owners(const fs::path& path,
-                const std::optional<mode_t>& mode, const std::optional<std::pair<uid_t, gid_t>>& uid_gid) -> void {
+                const std::optional<mode_t>& mode, const std::optional<std::string>& chown, const std::vector<std::string>& lower_dirs) -> void {
+        std::optional<std::pair<uid_t, gid_t>> uid_gid = std::nullopt;
+        if (chown.has_value()) {
+                uid_gid = Utils::resolve_user_group(lower_dirs, chown.value());
+        }
+
         if (mode.has_value() && uid_gid.has_value()) {
                 if (fs::is_directory(path)) {
                         Utils::change_permissions(path, mode.value());
@@ -1084,3 +1104,113 @@ auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, Grap
         return hex_stream.str();
 }
 
+
+auto BuildExecutor::assemble_oci_image(const GraphBuilder::Stage& stage, const std::string& target_name) -> void {
+        std::vector<std::string> layers{};
+        if (!m_stage_layers.find(stage.node_number, layers)) {
+                throw std::runtime_error("Build Executor Error: Stage layers not found.");
+        }
+        std::vector<std::string> diff_ids{};
+        if (!m_stage_diff_ids.find(stage.node_number, diff_ids)) {
+                throw std::runtime_error("Build Executor Error: Stage diff_ids not found.");
+        }
+
+        nlohmann::json manifest = {
+                {"schemaVersion", 2},
+                {"mediaType", "application/vnd.oci.image.manifest.v1+json"},
+                {"layers", nlohmann::json::array()}
+        };
+        nlohmann::json config = {
+                {"architecture", "amd64"},
+                {"os", "linux"},
+                {"config", {
+                        {"Env", nlohmann::json::array()},
+                        {"Cmd", nlohmann::json::array()},
+                        {"Entrypoint", nlohmann::json::array()},
+                        {"WorkingDir", ""},
+                        {"User", ""}
+                }},
+                {"rootfs", {
+                        {"type", "layers"},
+                        {"diff_ids", diff_ids}
+                }}
+        };
+
+        if (stage.cmd_instruction.has_value()) {
+                if (stage.cmd_instruction->is_shell_form) {
+                        config["config"]["Cmd"] = stage.cmd_instruction->shell_args;
+                } else if (stage.cmd_instruction->is_json_form) {
+                        config["config"]["Cmd"] = stage.cmd_instruction->json_args;
+                }
+        }
+        if (stage.entrypoint_instruction.has_value()) {
+                if (stage.entrypoint_instruction->is_shell_form) {
+                        config["config"]["Entrypoint"] = stage.entrypoint_instruction->shell_args;
+                } else if (stage.entrypoint_instruction->is_json_form) {
+                        config["config"]["Entrypoint"] = stage.entrypoint_instruction->json_args;
+                }
+        }
+        if (stage.current_workdir.has_value()) {
+                config["config"]["WorkingDir"] = stage.current_workdir->workdir;
+        }
+        if (stage.current_user.has_value()) {
+                config["config"]["User"] = stage.current_user.value();
+        }
+
+        for (const auto& [key, value] : stage.local_envs) {
+                config["config"]["Env"].push_back(key + "=" + value);
+        }
+
+        for (const auto& layer_hash : layers) {
+                auto cache_opt = m_layer_cache_manager->lookup(layer_hash);
+                if (!cache_opt.has_value()) {
+                        throw std::runtime_error("Build Executor Error: layer cache missing for " + layer_hash);
+                }
+                nlohmann::json layer_json = {
+                        {"mediaType", "application/vnd.oci.image.layer.v1.tar+gzip"},
+                        {"digest", "sha256:" + layer_hash},
+                        {"size", cache_opt->blob_size}
+                };
+                manifest["layers"].push_back(layer_json);
+        }
+
+        std::string config_str = config.dump();
+        std::string config_digest = Utils::sha256(config_str);
+        manifest["config"] = {
+                {"mediaType", "application/vnd.oci.image.config.v1+json"},
+                {"digest", "sha256:" + config_digest},
+                {"size", config_str.length()}
+        };
+
+        fs::path target_path = Utils::get_image_path(target_name);
+        Utils::ensure_dir(target_path);
+
+        nlohmann::json index = {
+                {"schemaVersion", 2},
+                {"manifests", {
+                        {
+                                {"mediaType", "application/vnd.oci.image.manifest.v1+json"},
+                                {"digest", "sha256:" + Utils::sha256(manifest.dump())},
+                                {"size", manifest.dump().length()},
+                                {"annotations", {
+                                        {"org.opencontainers.image.ref.name", target_name}
+                                }}
+                        }
+                }}
+        };
+        Utils::write_file(target_path / "index.json", index.dump());
+        Utils::write_file(target_path / "oci-layout", R"({"imageLayoutVersion": "1.0.0"})");
+
+        fs::path blobs_dir = target_path / "blobs" / "sha256";
+        Utils::ensure_dir(blobs_dir);
+        Utils::write_file(blobs_dir / config_digest, config_str);
+        Utils::write_file(blobs_dir / Utils::sha256(manifest.dump()), manifest.dump());
+
+        for (const auto& layer_hash : layers) {
+                fs::path source_layer = Utils::get_layers_path(layer_hash + ".tar.gz");
+                fs::path target_blob = blobs_dir / layer_hash;
+                if (!fs::exists(target_blob)) {
+                        fs::create_hard_link(source_layer, target_blob);
+                }
+        }
+}

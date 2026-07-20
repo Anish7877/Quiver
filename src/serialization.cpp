@@ -371,6 +371,7 @@ auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const Lay
         fb_builder.add_hash(hash_off);
         fb_builder.add_diff_id(diff_id_off);
         fb_builder.add_lower_dir(lower_dir_off);
+        fb_builder.add_blob_size(obj.blob_size);
         return fb_builder.Finish();
 }
 
@@ -380,5 +381,6 @@ auto Serialization::deserialize(const FB::LayerCache* fb) -> LayerCache {
         if (fb->hash()) obj.hash = fb->hash()->str();
         if (fb->diff_id()) obj.diff_id = fb->diff_id()->str();
         if (fb->lower_dir()) obj.lower_dir = fb->lower_dir()->str();
+        obj.blob_size = fb->blob_size();
         return obj;
 }

@@ -18,7 +18,7 @@ class GraphBuilder{
                         std::string base_image{};
                         std::optional<std::string> stage_alias{std::nullopt};
                         std::optional<std::string> stop_signal{std::nullopt};
-                        std::optional<std::pair<uid_t, gid_t>> current_user{std::nullopt};
+                        std::optional<std::string> current_user{std::nullopt};
                         std::optional<Instruction::ShellInstruction> current_shell{std::nullopt};
                         std::optional<Instruction::WorkdirInstruction> current_workdir{std::nullopt};
                         std::vector<size_t> instruction_indices{};
@@ -27,8 +27,8 @@ class GraphBuilder{
                         std::unordered_map<std::string, std::string> local_args{};
                         std::map<std::string, std::string> local_envs{};
                         std::unordered_map<std::string, std::string> local_labels{};
-                        std::vector<Instruction::CmdInstruction> cmd_instructions{};
-                        std::vector<Instruction::EntrypointInstruction> entrypoint_instructions{};
+                        std::optional<Instruction::CmdInstruction> cmd_instruction{std::nullopt};
+                        std::optional<Instruction::EntrypointInstruction> entrypoint_instruction{std::nullopt};
                 };
                 struct ParsedInstructions {
                         std::vector<Instruction::CopyInstruction> copy_instructions{};

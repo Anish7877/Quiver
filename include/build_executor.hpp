@@ -33,8 +33,9 @@ class BuildExecutor {
                 auto exec_shell(GraphBuilder::Stage&, const Instruction::ShellInstruction&) -> void;
                 auto exec_user(GraphBuilder::Stage&, const Instruction::UserInstruction&) -> void;
                 auto exec_workdir(GraphBuilder::Stage&, const Instruction::WorkdirInstruction&) -> void;
-                auto change_permission_and_owners(const fs::path&, const std::optional<mode_t>&, const std::optional<std::pair<uid_t, gid_t>>&) -> void;
+                auto change_permission_and_owners(const fs::path&, const std::optional<mode_t>&, const std::optional<std::string>&, const std::vector<std::string>&) -> void;
                 auto prepare(const std::vector<GraphBuilder::Stage>&, GraphBuilder::ParsedInstructions&, const GraphBuilder::ParsedInstructionsMaps&) -> void;
+                auto assemble_oci_image(const GraphBuilder::Stage& stage, const std::string& target_name) -> void;
                 [[nodiscard]] auto compute_files_checksum(const std::vector<fs::path>&, const fs::path&) -> std::string;
                 [[nodiscard]] auto get_instruction_hash(const Instruction::InstructionHash&) -> std::string;
                 [[nodiscard]] auto download_file(const std::string&, const fs::path&) -> fs::path;

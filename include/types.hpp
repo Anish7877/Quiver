@@ -119,6 +119,7 @@ struct LayerCache {
         std::string hash{};
         std::string diff_id{};
         std::string lower_dir{};
+        int64_t blob_size{0};
 };
 
 struct ImageMetadata {

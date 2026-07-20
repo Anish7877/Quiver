@@ -42,7 +42,7 @@ namespace Instruction {
                 std::string env{};
         };
         struct AddInstruction {
-                std::optional<std::pair<uid_t, gid_t>> chown{std::nullopt};
+                std::optional<std::string> chown{std::nullopt};
                 std::optional<mode_t> chmod{std::nullopt};
                 std::vector<std::string> urls{};
                 std::vector<fs::path> srcs{};
@@ -51,7 +51,7 @@ namespace Instruction {
         struct CopyInstruction {
                 bool is_dependency{false};
                 std::optional<std::string> from_stage{};
-                std::optional<std::pair<uid_t, gid_t>> chown{std::nullopt};
+                std::optional<std::string> chown{std::nullopt};
                 std::optional<mode_t> chmod{std::nullopt};
                 std::vector<fs::path> srcs{};
                 fs::path dst{};
@@ -81,9 +81,8 @@ namespace Instruction {
         struct ShellInstruction {
                 std::vector<std::string> shell_args{};
         };
-        struct UserInstruction {
-                std::optional<uid_t> uid{};
-                std::optional<gid_t> gid{};
+        struct UserInstruction{
+                std::string user_group{};
         };
         struct WorkdirInstruction {
                 fs::path workdir{};

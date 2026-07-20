@@ -70,7 +70,11 @@ auto LayerCacheManager::init() -> void {
                 throw std::runtime_error(status.get_error());
         }
         const auto& results{status.get_result()};
-        return LayerCacheDbManager::extract_obj(results.front().value);
+        auto obj{LayerCacheDbManager::extract_obj(results.front().value)};
+        if (obj.has_value() && obj->blob_size == 0) {
+                return std::nullopt;
+        }
+        return obj;
 }
 
 auto LayerCacheManager::store(const std::string& key, const LayerCache& cache) -> void {

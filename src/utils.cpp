@@ -178,8 +178,15 @@ auto Utils::get_layers_path(std::string_view layer_name) -> fs::path {
         return path;
 }
 
+auto Utils::sanitize_image_name(std::string_view image_name) -> std::string {
+        std::string safe_name{image_name};
+        std::replace(safe_name.begin(), safe_name.end(), ':', '_');
+        std::replace(safe_name.begin(), safe_name.end(), '/', '_');
+        return safe_name;
+}
+
 auto Utils::get_image_path(std::string_view image_name) -> fs::path {
-        std::string path{std::format("{}/images/{}", get_base_dir().string(), image_name)};
+        std::string path{std::format("{}/images/{}", get_base_dir().string(), sanitize_image_name(image_name))};
         return path;
 }
 
@@ -414,6 +421,104 @@ auto Utils::parse_subuid(const std::string& username) -> std::vector<SubIDRange>
         return ranges;
 }
 
+auto Utils::resolve_user_group(const std::vector<std::string>& lower_dirs, const std::string& spec) -> std::pair<uid_t, gid_t> {
+        auto is_number{[](std::string_view s) -> bool {
+                return !s.empty() && std::all_of(s.begin(), s.end(),
+                                [](unsigned char c) -> bool{ return std::isdigit(c); });
+        }};
+
+        size_t colon_index{spec.find(':')};
+        std::string user = (colon_index == std::string::npos) ? spec : spec.substr(0, colon_index);
+        std::string group = (colon_index == std::string::npos) ? "" : spec.substr(colon_index + 1);
+
+        uid_t uid = 0;
+        gid_t gid = 0;
+        bool uid_set = false;
+        bool gid_set = false;
+
+        if (is_number(user)) {
+                uid = static_cast<uid_t>(std::stoul(user));
+                uid_set = true;
+                if (group.empty()) {
+                        gid = static_cast<gid_t>(uid);
+                        gid_set = true;
+                }
+        }
+        
+        if (!group.empty() && is_number(group)) {
+                gid = static_cast<gid_t>(std::stoul(group));
+                gid_set = true;
+        }
+
+        if (!uid_set || !gid_set) {
+                // Find /etc/passwd and /etc/group from lower_dirs (top to bottom)
+                fs::path passwd_file;
+                fs::path group_file;
+                
+                for (const auto& dir : lower_dirs) {
+                        if (passwd_file.empty() && fs::exists(fs::path(dir) / "etc" / "passwd")) {
+                                passwd_file = fs::path(dir) / "etc" / "passwd";
+                        }
+                        if (group_file.empty() && fs::exists(fs::path(dir) / "etc" / "group")) {
+                                group_file = fs::path(dir) / "etc" / "group";
+                        }
+                        if (!passwd_file.empty() && !group_file.empty()) break;
+                }
+
+                if (!uid_set && !passwd_file.empty()) {
+                        std::ifstream ifs(passwd_file);
+                        std::string line;
+                        while (std::getline(ifs, line)) {
+                                size_t p1 = line.find(':');
+                                if (p1 == std::string::npos) continue;
+                                if (line.substr(0, p1) == user) {
+                                        size_t p2 = line.find(':', p1 + 1);
+                                        size_t p3 = line.find(':', p2 + 1);
+                                        size_t p4 = line.find(':', p3 + 1);
+                                        if (p3 != std::string::npos && p4 != std::string::npos) {
+                                                uid = static_cast<uid_t>(std::stoul(line.substr(p2 + 1, p3 - p2 - 1)));
+                                                if (group.empty()) {
+                                                        gid = static_cast<gid_t>(std::stoul(line.substr(p3 + 1, p4 - p3 - 1)));
+                                                        gid_set = true;
+                                                }
+                                                uid_set = true;
+                                        }
+                                        break;
+                                }
+                        }
+                }
+
+                if (!gid_set && !group.empty() && fs::exists(group_file)) {
+                        std::ifstream ifs(group_file);
+                        std::string line;
+                        while (std::getline(ifs, line)) {
+                                size_t p1 = line.find(':');
+                                if (p1 == std::string::npos) continue;
+                                if (line.substr(0, p1) == group) {
+                                        size_t p2 = line.find(':', p1 + 1);
+                                        size_t p3 = line.find(':', p2 + 1);
+                                        if (p2 != std::string::npos && p3 != std::string::npos) {
+                                                gid = static_cast<gid_t>(std::stoul(line.substr(p2 + 1, p3 - p2 - 1)));
+                                                gid_set = true;
+                                        }
+                                        break;
+                                }
+                        }
+                }
+        }
+
+        if (!uid_set && !is_number(user)) {
+                // throw std::runtime_error(std::format("Unknown user '{}'", user));
+                // Usually Docker defaults to 0 if not found, or fails. We fail to match builder.
+                throw std::runtime_error(std::format("Unknown user '{}'", user));
+        }
+        if (!gid_set && !group.empty() && !is_number(group)) {
+                throw std::runtime_error(std::format("Unknown group '{}'", group));
+        }
+
+        return {uid, gid};
+}
+
 auto Utils::get_username() -> std::string {
         uid_t uid{getuid()};
         struct passwd* pw{getpwuid(uid)};
@@ -559,6 +664,133 @@ auto Utils::extract_tarball(const std::string& tarball_path, const std::string& 
                 // 3. Block path traversal purely based on the normalized string
                 if (entry_path.string().starts_with("..")) [[unlikely]] {
                         std::cerr << std::format("Security Warning: Blocked path traversal attempt in tarball: {}\n", entry_path.string());
+                        continue;
+                }
+
+                // 4. Safely construct the final absolute path
+                const fs::path full_path{canonical_dest / entry_path};
+                archive_entry_set_pathname(entry, full_path.c_str());
+
+                // 5. Handle hard links with the exact same string-only normalization
+                const char* hardlink_target = archive_entry_hardlink(entry);
+                if (hardlink_target != nullptr) {
+                        std::string raw_hl = hardlink_target;
+                        while (!raw_hl.empty() && raw_hl.front() == '/') {
+                                raw_hl.erase(0, 1);
+                        }
+
+                        fs::path hl_path{raw_hl};
+                        hl_path = hl_path.lexically_normal();
+
+                        if (hl_path.string().starts_with("..")) {
+                                std::cerr << std::format("Security Warning: Blocked hardlink traversal attempt in tarball: {}\n", hl_path.string());
+                                continue;
+                        }
+                        fs::path full_hardlink_path = canonical_dest / hl_path;
+                        archive_entry_set_hardlink(entry, full_hardlink_path.c_str());
+                }
+                r = archive_write_header(ext, entry);
+                if (r < ARCHIVE_OK) [[unlikely]] {
+                        std::cerr << std::format("Tar Error: failed to write header for {} - {}\n",
+                                        archive_entry_pathname(entry), archive_error_string(ext));
+                } else if (archive_entry_size(entry) > 0) {
+                        // Copy the data from the archive to the disk
+                        const void* buff;
+                        size_t size;
+                        la_int64_t offset;
+
+                        while (true) {
+                                r = archive_read_data_block(a, &buff, &size, &offset);
+                                if (r == ARCHIVE_EOF) break;
+                                if (r < ARCHIVE_OK) [[unlikely]] break;
+
+                                r = archive_write_data_block(ext, buff, size, offset);
+                                if (r < ARCHIVE_OK) [[unlikely]] {
+                                        std::cerr << std::format("Tar Error: data write failed - {}\n", archive_error_string(ext));
+                                        break;
+                                }
+                        }
+                }
+
+                r = archive_write_finish_entry(ext);
+                if (r < ARCHIVE_OK) [[unlikely]] {
+                        std::cerr << std::format("Tar Error: finish entry failed - {}\n", archive_error_string(ext));
+                }
+        }
+}
+
+auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string& destination_path) -> void {
+        struct archive* a;
+        struct archive* ext;
+        struct archive_entry* entry;
+
+        // Standard extraction flags: preserve time, permissions, ACLs, flags, and security checks
+        int flags{ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL | ARCHIVE_EXTRACT_FFLAGS |
+                  ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS | ARCHIVE_EXTRACT_SECURE_SYMLINKS};
+        int r;
+
+        a = archive_read_new();
+        archive_read_support_format_all(a);
+        archive_read_support_filter_all(a);
+
+        ext = archive_write_disk_new();
+        archive_write_disk_set_options(ext, flags);
+        archive_write_disk_set_standard_lookup(ext);
+
+        std::unique_ptr<struct archive, decltype(&archive_read_free)> a_guard{a, archive_read_free};
+        std::unique_ptr<struct archive, decltype(&archive_write_free)> ext_guard{ext, archive_write_free};
+
+        if (archive_read_open_filename(a, tarball_path.c_str(), 10240) != ARCHIVE_OK) [[unlikely]] {
+                throw std::runtime_error(std::format("Tar Error: Could not open {} - {}", tarball_path, archive_error_string(a)));
+        }
+
+        // Pre-calculate the canonical destination to use as a security boundary
+        const fs::path canonical_dest{fs::weakly_canonical(destination_path)};
+
+        while (true) {
+                r = archive_read_next_header(a, &entry);
+                if (r == ARCHIVE_EOF) break;
+                if (r < ARCHIVE_OK) [[unlikely]] {
+                        std::cerr << std::format("Tar Warning: {}\n", archive_error_string(a));
+                        if (r < ARCHIVE_WARN) throw std::runtime_error("Tar Critical Error");
+                }
+
+                // --- SECURITY CHECK: Path Traversal Guard ---
+                std::string raw_path = archive_entry_pathname(entry);
+
+                // 1. Strip leading slashes to prevent absolute path overriding
+                while (!raw_path.empty() && raw_path.front() == '/') {
+                        raw_path.erase(0, 1);
+                }
+
+                // 2. Lexically normalize (resolves . and .. textually, WITHOUT touching the host disk)
+                fs::path entry_path{raw_path};
+                entry_path = entry_path.lexically_normal();
+
+                // 3. Block path traversal purely based on the normalized string
+                if (entry_path.string().starts_with("..")) [[unlikely]] {
+                        std::cerr << std::format("Security Warning: Blocked path traversal attempt in tarball: {}\n", entry_path.string());
+                        continue;
+                }
+
+                // OCI Whiteout Handling
+                std::string filename = entry_path.filename().string();
+                if (filename == ".wh..wh..opq") {
+                        fs::path parent_dir = canonical_dest / entry_path.parent_path();
+                        if (fs::exists(parent_dir) && fs::is_directory(parent_dir)) {
+                                for (auto& p : fs::directory_iterator(parent_dir)) {
+                                        fs::remove_all(p.path());
+                                }
+                        }
+                        // Skip writing the .wh..wh..opq file
+                        continue;
+                } else if (filename.starts_with(".wh.")) {
+                        std::string target = filename.substr(4);
+                        fs::path target_path = canonical_dest / entry_path.parent_path() / target;
+                        if (fs::exists(target_path)) {
+                                fs::remove_all(target_path);
+                        }
+                        // Skip writing the whiteout file
                         continue;
                 }
 
@@ -1041,9 +1273,9 @@ auto Utils::create_oci_layer(
                         continue;
                 }
 
-                // Reproducible metadata normalization (BuildKit compatible)
-                archive_entry_set_uid(ae, 0);
-                archive_entry_set_gid(ae, 0);
+                // Preserve real ownership, but normalize mtime for reproducible builds
+                archive_entry_set_uid(ae, st.st_uid);
+                archive_entry_set_gid(ae, st.st_gid);
                 archive_entry_set_uname(ae, "");
                 archive_entry_set_gname(ae, "");
                 archive_entry_set_mtime(ae, 0, 0);

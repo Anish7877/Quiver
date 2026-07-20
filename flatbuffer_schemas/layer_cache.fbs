@@ -4,6 +4,7 @@ table LayerCache {
         hash : string;
         diff_id : string;
         lower_dir : string;
+        blob_size : long;
 }
 
 root_type LayerCache;

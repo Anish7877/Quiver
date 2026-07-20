@@ -185,11 +185,7 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
                 return {};
         }
         //--------------------------------------------------------------------------------------------------------
-        std::string safeImageName = image_name;
-        std::replace(safeImageName.begin(), safeImageName.end(), ':', '_');
-        std::replace(safeImageName.begin(), safeImageName.end(), '/', '_');
-
-        fs::path img_dest{m_images_root / "images" / safeImageName};
+        fs::path img_dest{Utils::get_image_path(image_name)};
         Utils::ensure_dir(img_dest);
 
         std::vector<std::future<std::string>> download_futures;
@@ -382,7 +378,7 @@ auto ImageManager::download_layer(const std::string& repo, const std::string& di
 
 auto ImageManager::extract_layer(const fs::path& tarball_path, const fs::path& destination, std::string& error) -> bool {
         try {
-                Utils::extract_tarball(tarball_path.string(), destination.string());
+                Utils::extract_oci_layer(tarball_path.string(), destination.string());
                 return true;
         } catch (const std::exception& e) {
                 error = e.what(); return false;
@@ -390,11 +386,8 @@ auto ImageManager::extract_layer(const fs::path& tarball_path, const fs::path& d
 }
 
 auto ImageManager::remove(const std::string& image_name, [[maybe_unused]] std::string& error) -> bool {
-        std::string safeImageName = image_name;
-        std::replace(safeImageName.begin(), safeImageName.end(), ':', '_');
-        std::replace(safeImageName.begin(), safeImageName.end(), '/', '_');
         try {
-                Utils::remove_directory(m_images_root / "images" / safeImageName);
+                Utils::remove_directory(Utils::get_image_path(image_name));
         }
         catch (const std::exception& e) {
                 std::cerr << e.what() << '\n';

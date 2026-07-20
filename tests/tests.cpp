@@ -11,6 +11,100 @@ auto Tests::test_utils() -> void {
         test(Utils::write_file, "/home/anish/Desktop/test_dir/a.txt", "Hello World", false);
         test(Utils::get_base_dir, "/home/anish/.quiver");
         test(Utils::get_image_path, "/home/anish/.quiver/images/abc", "abc");
+        test(Utils::get_image_path, "/home/anish/.quiver/images/myregistry.com_library_ubuntu_22.04", "myregistry.com/library/ubuntu:22.04");
+
+        // Test OCI whiteouts
+        auto test_whiteouts{[]() {
+                fs::path temp_dir{"/tmp/quiver_test_whiteouts"};
+                Utils::remove_directory(temp_dir);
+                Utils::ensure_dir(temp_dir);
+                Utils::ensure_dir(temp_dir / "a");
+                Utils::write_file(temp_dir / "a" / "b", "hello", false);
+                Utils::write_file(temp_dir / "a" / "c", "world", false);
+                
+                // Create tarball with .wh.b
+                fs::path upper_dir{"/tmp/quiver_test_whiteouts_upper"};
+                Utils::remove_directory(upper_dir);
+                Utils::ensure_dir(upper_dir);
+                Utils::ensure_dir(upper_dir / "a");
+                Utils::write_file(upper_dir / "a" / ".wh.b", "", false);
+                Utils::write_file(upper_dir / "a" / ".wh..wh..opq", "", false);
+                
+                fs::path tar_path{"/tmp/quiver_test_whiteouts.tar.gz"};
+                Utils::create_tar_gz(upper_dir.string(), tar_path.string());
+                
+                Utils::extract_oci_layer(tar_path.string(), temp_dir.string());
+                
+                if (fs::exists(temp_dir / "a" / "b") || fs::exists(temp_dir / "a" / "c")) {
+                        throw std::runtime_error("Whiteout extraction failed");
+                }
+                if (fs::exists(temp_dir / "a" / ".wh.b") || fs::exists(temp_dir / "a" / ".wh..wh..opq")) {
+                        throw std::runtime_error("Whiteout markers should not be extracted");
+                }
+        }};
+        test(test_whiteouts);
+
+        // Test UID/GID preservation in create_oci_layer
+        auto test_oci_layer_ownership{[]() {
+                fs::path temp_dir{"/tmp/quiver_test_ownership"};
+                Utils::remove_directory(temp_dir);
+                Utils::ensure_dir(temp_dir);
+                Utils::write_file(temp_dir / "test_file", "hello", false);
+                
+                // We'll just test that whatever ownership it has is preserved.
+                // It currently has our uid/gid.
+                struct stat st;
+                stat((temp_dir / "test_file").c_str(), &st);
+                uid_t expected_uid = st.st_uid;
+                gid_t expected_gid = st.st_gid;
+                
+                fs::path tar_path{"/tmp/quiver_test_ownership.tar.gz"};
+                Utils::create_oci_layer(temp_dir.string(), tar_path.string());
+                
+                // Read the tar archive to verify
+                struct archive* a = archive_read_new();
+                archive_read_support_format_all(a);
+                archive_read_support_filter_all(a);
+                if (archive_read_open_filename(a, tar_path.c_str(), 10240) != ARCHIVE_OK) {
+                        throw std::runtime_error("Failed to open tar for reading");
+                }
+                struct archive_entry* entry;
+                bool found = false;
+                while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+                        std::string path = archive_entry_pathname(entry);
+                        if (path == "test_file") {
+                                found = true;
+                                if (archive_entry_uid(entry) != expected_uid || archive_entry_gid(entry) != expected_gid) {
+                                        throw std::runtime_error("UID/GID not preserved");
+                                }
+                        }
+                }
+                archive_read_free(a);
+                if (!found) throw std::runtime_error("File not found in archive");
+        }};
+        test(test_oci_layer_ownership);
+        auto test_resolve_user_group{[]() {
+                fs::path temp_dir{"/tmp/quiver_test_resolve_user"};
+                Utils::remove_directory(temp_dir);
+                Utils::ensure_dir(temp_dir / "etc");
+                
+                Utils::write_file(temp_dir / "etc" / "passwd", "root:x:0:0:root:/root:/bin/bash\ntestuser:x:1001:1002::/home/testuser:/bin/sh\n", false);
+                Utils::write_file(temp_dir / "etc" / "group", "root:x:0:\ntestgroup:x:1002:\n", false);
+                
+                std::vector<std::string> lower_dirs{temp_dir.string()};
+                
+                auto [uid1, gid1] = Utils::resolve_user_group(lower_dirs, "1005:1006");
+                if (uid1 != 1005 || gid1 != 1006) throw std::runtime_error("numeric uid/gid failed");
+                
+                auto [uid2, gid2] = Utils::resolve_user_group(lower_dirs, "testuser:testgroup");
+                if (uid2 != 1001 || gid2 != 1002) throw std::runtime_error("named user/group failed");
+                
+                auto [uid3, gid3] = Utils::resolve_user_group(lower_dirs, "testuser");
+                if (uid3 != 1001 || gid3 != 1002) throw std::runtime_error("named user failed");
+                
+                Utils::remove_directory(temp_dir);
+        }};
+        test(test_resolve_user_group);
 }
 
 auto Tests::test_serialization() -> void
