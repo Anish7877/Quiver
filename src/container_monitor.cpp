@@ -1,14 +1,17 @@
 #include "cgroups_manager_creator.hpp"
 #include "cgroups_manager_interface.hpp"
 #include "container_monitor.hpp"
+#include "container_db_manager.hpp"
 #include "container_runtime.hpp"
 #include "logger_command_queue.hpp"
 #include "pasta_network.hpp"
 #include "pty_session_manager.hpp"
 #include "scoped_guard.hpp"
+#include "signal_handler.hpp"
 #include "types.hpp"
 #include "utils.hpp"
 #include "value_heap.hpp"
+#include "container_db_manager.hpp"
 #include <atomic>
 #include <csignal>
 #include <cerrno>
@@ -18,6 +21,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <linux/prctl.h>
 #include <memory>
 #include <poll.h>
 #include <pty.h>
@@ -33,15 +37,18 @@
 #include <unistd.h>
 #include <vector>
 #include <fcntl.h>
+#include <sys/prctl.h>
 namespace chrono = std::chrono;
 
 ContainerMonitor::ContainerMonitor() = default;
 
-auto ContainerMonitor::init(const ContainerConfig& config) -> void {
+auto ContainerMonitor::init(const ContainerConfig& config, const std::string& image,
+                const std::string& container_name, bool is_new) -> void {
         m_container_config = config;
         m_value_heap = &ValueHeap::get_instance();
         m_log_cmd_queue = &LoggerCommandQueue::get_instance();
         m_pty_session_manager = &PtySessionManager::get_instance();
+        m_container_db_manager = &ContainerDbManager::get_instance();
         m_cgroups_manager = CGroupsManagerCreator::create_cgourps_manager(m_container_config.container_id, m_container_config.cgroups_path);
         m_value_heap->map_buffer(Utils::get_value_heap_buf_name(), ValueHeap::VALUE_HEAP_SIZE, false);
         if (!m_value_heap->ok()) [[unlikely]] {
@@ -51,6 +58,17 @@ auto ContainerMonitor::init(const ContainerConfig& config) -> void {
         if (!m_log_cmd_queue->ok()) [[unlikely]] {
                 throw std::runtime_error(m_log_cmd_queue->get_error());
         }
+        m_container_db_manager->init();
+        if (is_new) {
+                ContainerDbObject db_object{};
+                db_object.config = std::move(config);
+                db_object.image = image;
+                db_object.name = container_name.empty() ? std::format("quiver_{}", config.container_id.substr(0, 6)) : std::move(container_name);
+                db_object.status = "created";
+                db_object.boot_time = Utils::get_boot_time();
+                db_object.created_at = std::format("{}", chrono::system_clock::now());
+                m_container_db_manager->add_container(db_object);
+        }
 }
 
 auto ContainerMonitor::setup_usernamespace() -> void {
@@ -58,7 +76,7 @@ auto ContainerMonitor::setup_usernamespace() -> void {
         setup_gid_map();
 }
 
-auto ContainerMonitor::start_logging(int master_fd) -> bool {
+auto ContainerMonitor::start_logging() -> void {
         m_logging_active.store(true, std::memory_order_release);
         m_log_worker = std::jthread([&]() {
                                 pollfd fds[2];
@@ -82,10 +100,10 @@ auto ContainerMonitor::start_logging(int master_fd) -> bool {
                                                 char buffer[4096];
                                                 ssize_t bytes_read{read(fds[0].fd, buffer, sizeof(buffer))};
                                                 if (bytes_read > 0) {
-                                                        std::cout << std::string(buffer, bytes_read);
+                                                        std::cout.write(buffer, bytes_read);
                                                         std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
                                                                         chrono::system_clock::now(), m_container_config.container_id,
-                                                                        std::string(buffer, bytes_read))};
+                                                                        std::string_view(buffer, bytes_read))};
                                                         this->log_event(log_data, TargetLog::CONTAINERLOG);
                                                 }
                                         }
@@ -97,10 +115,10 @@ auto ContainerMonitor::start_logging(int master_fd) -> bool {
                                                 char buffer[4096];
                                                 ssize_t bytes_read{read(fds[1].fd, buffer, sizeof(buffer))};
                                                 if (bytes_read > 0) {
-                                                        std::cout << std::string(buffer, bytes_read);
+                                                        std::cout.write(buffer, bytes_read);
                                                         std::string log_data{std::format("[{}] [{}] [STDERR] {}.\n",
                                                                         chrono::system_clock::now(), m_container_config.container_id,
-                                                                        std::string(buffer, bytes_read))};
+                                                                        std::string_view(buffer, bytes_read))};
                                                         this->log_event(log_data, TargetLog::CONTAINERLOG);
                                                 }
                                         }
@@ -113,10 +131,9 @@ auto ContainerMonitor::start_logging(int master_fd) -> bool {
                                 if (m_std_out_fd[0] != -1) close(m_std_out_fd[0]);
                                 if (m_std_err_fd[0] != -1) close(m_std_err_fd[0]);
                         });
-        return true;
 }
 
-auto ContainerMonitor::foreground_logging() -> bool {
+auto ContainerMonitor::foreground_logging() -> void {
         pollfd fds[2];
 
         fds[0].fd = m_std_out_fd[0];
@@ -134,7 +151,7 @@ auto ContainerMonitor::foreground_logging() -> bool {
                         if (errno == EINTR)
                                 continue;
 
-                        return EXIT_FAILURE;
+                        return;
                 }
 
                 if (fds[0].fd != -1 && (fds[0].revents & POLLIN)) {
@@ -144,11 +161,11 @@ auto ContainerMonitor::foreground_logging() -> bool {
 
                         if (bytes_read > 0) {
                                 if (!Utils::write_all(STDOUT_FILENO, buffer, bytes_read)) {
-                                        return false;
+                                        return;
                                 }
                                 std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
                                                 chrono::system_clock::now(), m_container_config.container_id,
-                                                std::string(buffer, bytes_read))};
+                                                std::string_view(buffer, bytes_read))};
                                 this->log_event(log_data, TargetLog::CONTAINERLOG);
                         }
                 }
@@ -167,11 +184,11 @@ auto ContainerMonitor::foreground_logging() -> bool {
 
                         if (bytes_read > 0) {
                                 if (!Utils::write_all(STDERR_FILENO, buffer, bytes_read)) {
-                                        return false;
+                                        return;
                                 }
                                 std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
                                                 chrono::system_clock::now(), m_container_config.container_id,
-                                                std::string(buffer, bytes_read))};
+                                                std::string_view(buffer, bytes_read))};
                                 this->log_event(log_data, TargetLog::CONTAINERLOG);
                         }
                 }
@@ -183,8 +200,6 @@ auto ContainerMonitor::foreground_logging() -> bool {
                         --open_pipes;
                 }
         }
-
-        return true;
 }
 
 auto ContainerMonitor::invoke_container() -> void {
@@ -217,18 +232,20 @@ auto ContainerMonitor::invoke_container() -> void {
                 return;
         }
 
+        m_monitor_pid = getpid();
+
         if (m_container_config.detach.value) {
                 if (setsid() == -1) [[unlikely]] {
-                        std::cerr << "Daemon Fatal: setsid failed.\n";
+                        std::cerr << "Monitor Fatal: setsid failed.\n";
                         _exit(EXIT_FAILURE);
                 }
         }
         if (!attach_to_stdio()) [[unlikely]] {
-                std::cerr << "Daemon Fatal: Failed to attach stdio.\n";
+                std::cerr << "Monitor Fatal: Failed to attach stdio.\n";
                 _exit(EXIT_FAILURE);
         }
         if (pipe(m_container_to_monitor_fd) == -1 || pipe(m_monitor_to_container_fd) == -1) [[unlikely]] {
-                std::cerr << "Daemon Fatal: pipe creation failed.\n";
+                std::cerr << "Monitor Fatal: pipe creation failed.\n";
                 _exit(EXIT_FAILURE);
         }
         ScopeGuard fork_guard{[this]() -> void {
@@ -240,7 +257,7 @@ auto ContainerMonitor::invoke_container() -> void {
         };
         m_container_pid = fork();
         if (m_container_pid == -1) [[unlikely]] {
-                std::cerr << "Daemon Fatal: fork failed.\n";
+                std::cerr << "Monitor Fatal: fork failed.\n";
                 _exit(EXIT_FAILURE);
         }
         if (m_container_pid == 0) {
@@ -257,6 +274,17 @@ auto ContainerMonitor::invoke_container() -> void {
 auto ContainerMonitor::run_container_child() -> void {
         close(m_container_to_monitor_fd[0]);
         close(m_monitor_to_container_fd[1]);
+        if (prctl(PR_SET_PDEATHSIG, SIGKILL) == -1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: prctl for death signal failed\n",
+                                        chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
+                _exit(EXIT_FAILURE);
+        }
+
+        if (getppid() != m_monitor_pid) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: Monitor died before container\n",
+                                        chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
+                _exit(EXIT_FAILURE);
+        }
 
         int flags{resolve_namespaces()};
         if (unshare(CLONE_NEWUSER | flags) == -1) [[unlikely]] {
@@ -292,6 +320,11 @@ auto ContainerMonitor::run_container_child() -> void {
                 dup2(m_std_err_fd[1], STDERR_FILENO);
                 close(m_std_out_fd[1]);
                 close(m_std_err_fd[1]);
+                int null_fd{open("/dev/null", O_RDONLY)};
+                if (null_fd != -1) {
+                        dup2(null_fd, STDIN_FILENO);
+                        close(null_fd);
+                }
         }
         m_runtime = std::make_unique<ContainerRuntime>(m_container_config);
         m_runtime->run_container();
@@ -301,6 +334,8 @@ auto ContainerMonitor::run_container_child() -> void {
 auto ContainerMonitor::run_monitor_parent() -> void {
         close(m_monitor_to_container_fd[0]);
         close(m_container_to_monitor_fd[1]);
+
+
 
         try {
                 m_cgroups_manager->attach_process(m_container_pid);
@@ -315,7 +350,7 @@ auto ContainerMonitor::run_monitor_parent() -> void {
 
         char buf{};
         if (read(m_container_to_monitor_fd[0], &buf, 1) != 1) [[unlikely]] {
-                std::cerr << "\n[Daemon Error] Child failed during unshare() or setup!\n";
+                std::cerr << "\n[Monitor Error] Child failed during unshare() or setup!\n";
                 close(m_container_to_monitor_fd[0]);
                 _exit(EXIT_FAILURE);
         }
@@ -325,22 +360,29 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                 setup_usernamespace();
         }
         catch (const std::exception& e) {
-                std::cerr << "\n[Daemon Error] User Namespace mapping failed: " << e.what() << "\n";
+                std::cerr << "\n[Monitor Error] User Namespace mapping failed: " << e.what() << "\n";
                 _exit(EXIT_FAILURE);
         }
-        m_container_config.net_pid = PastaNetwork::setup_networking(m_container_pid, m_container_config.networks);
+        bool network_required{true};
+        for (const auto& [path, namespace_str] : m_container_config.namespaces) {
+                if (namespace_str == "network" && !path.empty()) {
+                        network_required = false;
+                }
+        }
+        if (network_required) {
+                m_container_config.net_pid = PastaNetwork::setup_networking(m_container_pid, m_container_config.networks);
+                bool network_ready{wait_for_network()};
 
+                if (!network_ready) [[unlikely]] {
+                        std::cerr << "\n[Monitor Error] Pasta failed to configure network within 1 second.\n";
+                        close(m_monitor_to_container_fd[1]);
+                        _exit(EXIT_FAILURE);
+                }
+        }
         ScopeGuard pasta_guard{[this]() -> void {
+                if (m_container_config.net_pid > 0)
                         kill(m_container_config.net_pid, SIGTERM);
         }};
-
-        bool network_ready{wait_for_network()};
-
-        if (!network_ready) [[unlikely]] {
-                std::cerr << "\n[Daemon Error] Pasta failed to configure network within 1 second.\n";
-                close(m_monitor_to_container_fd[1]);
-                _exit(EXIT_FAILURE);
-        }
 
         char go_sig{'1'};
         if (write(m_monitor_to_container_fd[1], &go_sig, 1) == -1) [[unlikely]] {
@@ -376,25 +418,19 @@ auto ContainerMonitor::run_monitor_parent() -> void {
         cgroups_guard.dismiss();
         pasta_guard.dismiss();
 
-        if (m_container_config.terminal.value) {
-                setup_socket_connection();
+        auto& signal_handler{SignalHandler::get_instance()};
+        signal_handler.set_target_pid(m_container_pid);
+        signal_handler.handle_signals();
 
-                std::jthread([this, master_fd]() {
-                        while (true) {
-                                int client_fd{accept(m_socket_fd, nullptr, nullptr)};
-                                if (client_fd == -1) break;
-                                m_pty_session_manager->send_master_fd(client_fd, master_fd);
-                                close(client_fd);
-                        }
-                }).detach();
+        auto container{m_container_db_manager->get_container(m_container_config.container_id)};
+        if (container) {
+                container->config.pid = m_container_pid;
+                container->config.final_filesystem = m_container_config.vfs ? Utils::get_vfs_path(m_container_config.container_id).string() :
+                        std::format("{}/filesystems/quiver_{}", Utils::get_base_dir().string(), m_container_config.container_id);
+                container->boot_time = Utils::get_boot_time();
+                container->status = "running";
+                m_container_db_manager->update_container(m_container_config.container_id, container.value());
         }
-        else if (!m_container_config.detach.value) {
-                foreground_logging();
-        }
-        else {
-                start_logging(master_fd);
-        }
-
         std::atomic<bool> container_running{true};
 
         std::jthread watchdog_thread{[&container_running]() {
@@ -417,19 +453,72 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                 if (watchdog_thread.joinable()) {
                         watchdog_thread.join();
                 }
+                auto container{m_container_db_manager->get_container(m_container_config.container_id)};
+                if (container) {
+                        container->status = "exited";
+                        m_container_db_manager->update_container(m_container_config.container_id, container.value());
+                }
         }};
 
+        if (m_container_config.terminal.value) {
+                setup_socket_connection();
+                std::jthread([this, master_fd]() {
+                        while (true) {
+                                int client_fd{accept(m_socket_fd, nullptr, nullptr)};
+                                if (client_fd == -1) break;
+                                m_pty_session_manager->send_master_fd(client_fd, master_fd);
+                                close(client_fd);
+                        }
+                }).detach();
+        }
+        else if (!m_container_config.detach.value) {
+                foreground_logging();
+        }
+        else {
+                start_logging();
+        }
+
+        std::string db_status{"exited"};
+        int final_exit_code{EXIT_FAILURE};
         int status{};
         while (waitpid(m_container_pid, &status, 0) == -1) {
                 if (errno == EINTR) continue;
-                _exit(EXIT_FAILURE);
+                break;
         }
+
         if (WIFEXITED(status)) {
-                _exit(WEXITSTATUS(status));
+                final_exit_code = WEXITSTATUS(status);
         } else if (WIFSIGNALED(status)) {
-                _exit(128 + WTERMSIG(status));
+                int sig{WTERMSIG(status)};
+                final_exit_code = 128 + WTERMSIG(status);
+
+                if (sig == SIGKILL) {
+                        db_status = "killed";
+                }
+                else if (sig == SIGTERM) {
+                        db_status = "powered off";
+                }
         }
-        _exit(EXIT_FAILURE);
+
+        container_teardown_guard.dismiss();
+
+        m_cgroups_manager->stop();
+        if (m_container_config.net_pid > 0) {
+                kill(m_container_config.net_pid, SIGTERM);
+        }
+
+        container_running.store(false, std::memory_order_release);
+        if (watchdog_thread.joinable()) {
+                watchdog_thread.join();
+        }
+
+        auto end_container{m_container_db_manager->get_container(m_container_config.container_id)};
+        if (end_container) {
+                end_container->status = std::move(db_status);
+                m_container_db_manager->update_container(m_container_config.container_id, end_container.value());
+        }
+
+        _exit(final_exit_code);
 }
 
 auto ContainerMonitor::resolve_namespaces() -> int {
@@ -521,10 +610,23 @@ auto ContainerMonitor::wait_for_network() -> bool {
 }
 
 auto ContainerMonitor::setup_uid_map() -> void {
+        std::string username{Utils::get_username()};
+        uid_t host_uid{getuid()};
+        auto ranges{Utils::parse_subuid(username)};
+
+        if (ranges.empty()) {
+                throw std::runtime_error("No subuid range found in /etc/subuid for user");
+        }
+        std::stringstream payload{""};
+
+        payload << "0 " << host_uid << " 1\n";
+        uint32_t container_id{1};
+        for (const auto& r : ranges) {
+                payload << container_id << " " << r.start << " " << r.count << "\n";
+                container_id += r.count;
+        }
         const char* newuidmap_path{"/usr/bin/newuidmap"};
-        std::string payload{std::format("{} {} {}\n", m_container_config.uid_mapping.container_id,
-                        m_container_config.uid_mapping.host_id, m_container_config.uid_mapping.size)};
-        exec_mapping_tool(newuidmap_path, payload);
+        exec_mapping_tool(newuidmap_path, payload.str());
 }
 
 auto ContainerMonitor::setup_gid_map() -> void {
@@ -714,7 +816,7 @@ auto ContainerMonitor::attach_to_container(const std::string& container_id) -> v
                                 }
                                 std::string log_data{std::format("[{}] [{}] [PTY] {}.\n",
                                                 chrono::system_clock::now(), m_container_config.container_id,
-                                                std::string(buf, n))};
+                                                std::string_view(buf, n))};
                                 this->log_event(log_data, TargetLog::CONTAINERLOG);
                         }
                 }

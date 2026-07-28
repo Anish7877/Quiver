@@ -9,7 +9,7 @@ class DatabaseCommandQueue : public CommandQueue<DatabaseJobData>, public Single
         friend class Singleton<DatabaseCommandQueue>;
         static constexpr std::size_t QUEUE_SIZE{25000};
         private:
-                DatabaseCommandQueue();
+                DatabaseCommandQueue() = default;
                 ~DatabaseCommandQueue();
         public:
                 DatabaseCommandQueue(const DatabaseCommandQueue&) = delete;

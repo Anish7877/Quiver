@@ -1,6 +1,10 @@
 #pragma once
 #include "singleton.hpp"
 #include "types.hpp"
+#include <optional>
+#include <string>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 class DatabaseCommandQueue;
 class ValueHeap;
@@ -15,12 +19,18 @@ class ContainerDbManager : public Singleton<ContainerDbManager> {
                 auto operator=(const ContainerDbManager&) -> ContainerDbManager& = delete;
                 auto operator=(ContainerDbManager&&) -> ContainerDbManager& = delete;
 
-                auto add_container(const ContainerDbObject&) -> bool;
-                auto update_container() -> bool;
-                auto list_all_container() -> bool;
-                auto list_all_running_container() -> bool;
-                auto remove_container() -> bool;
+                auto init() -> void;
+                auto add_container(const ContainerDbObject&) -> void;
+                auto remove_container(const std::string&) -> void;
+                auto update_container(const std::string&, const ContainerDbObject&) -> void;
+                auto list_all_container() -> void;
+                auto list_all_running_container() -> void;
+                auto get_container(const std::string&) -> std::optional<ContainerDbObject>;
+                auto inspect_container(const std::string&) -> void;
         private:
+                auto extract_metadata(const std::string&) -> std::optional<ContainerDbObject>;
                 DatabaseCommandQueue* m_db_command_queue{nullptr};
                 ValueHeap* m_value_heap{nullptr};
+                sockaddr_un m_addr{};
+                std::string m_socket_path{};
 };

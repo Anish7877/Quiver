@@ -54,6 +54,7 @@ class BuildExecutor {
                 libcuckoo::cuckoohash_map<size_t, std::vector<std::string>> m_stage_lower_dirs{};
                 libcuckoo::cuckoohash_map<size_t, std::vector<std::string>> m_stage_layers{};
                 libcuckoo::cuckoohash_map<size_t, std::vector<std::string>> m_stage_diff_ids{};
+                libcuckoo::cuckoohash_map<size_t, std::vector<LayerCache>> m_stage_layer_caches{};
                 libcuckoo::cuckoohash_map<std::string, LayerCache> m_hash_digest{};
                 libcuckoo::cuckoohash_map<std::string, fs::path> m_url_downloaded_file{};
                 libcuckoo::cuckoohash_map<std::string, std::string> m_image_top_layer_digest{};

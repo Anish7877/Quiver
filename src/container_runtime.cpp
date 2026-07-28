@@ -1,5 +1,6 @@
 #include "caps_manager.hpp"
 #include "container_runtime.hpp"
+#include "container_db_manager.hpp"
 #include "logger_command_queue.hpp"
 #include "mount.hpp"
 #include "oci_runtime.hpp"
@@ -9,7 +10,6 @@
 #include "types.hpp"
 #include "utils.hpp"
 #include "value_heap.hpp"
-#include <asm-generic/ioctls.h>
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
@@ -252,6 +252,11 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                         / std::format("quiver_{}", m_container_config.container_id) / "work_dir"};
                 fs::path merged_dir{Utils::get_base_dir() / "filesystems"
                         / std::format("quiver_{}", m_container_config.container_id) / "merged_dir"};
+                if (!m_container_config.final_filesystem.empty()) {
+                        upper_dir = final_filesystem / "upper_dir";
+                        work_dir = final_filesystem / "work_dir";
+                        merged_dir = final_filesystem / "merged_dir";
+                }
                 try {
                         Utils::ensure_dir(upper_dir);
                         Utils::ensure_dir(work_dir);
@@ -262,9 +267,12 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                                                 m_container_config.container_id, e.what()));
                         _exit(EXIT_FAILURE);
                 }
-                std::string opts{std::format("lowerdir={},upperdir={},workdir={}", lower_dir.string(),
-                                              upper_dir.string(), work_dir.string())};
-                if (mount("overlay", merged_dir.c_str(), "overlay", MS_NODEV, opts.c_str()) == 0) {
+                std::string base_opts{std::format("lowerdir={},upperdir={},workdir={}",
+                                        lower_dir.string(), upper_dir.string(), work_dir.string())};
+
+                std::string native_opts{base_opts + ",userxattr,redirect_dir=on"};
+
+                if (mount("overlay", merged_dir.c_str(), "overlay", MS_NODEV, native_opts.c_str()) == 0) {
                         is_overlay_mounted = true;
                 }
                 else {
@@ -284,7 +292,7 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                                         _exit(EXIT_FAILURE);
                                 }
                                 if (fuse_pid == 0) {
-                                        execlp("fuse-overlayfs", "fuse-overlayfs", "-o", opts.c_str(), merged_dir.c_str(),nullptr);
+                                        execlp("fuse-overlayfs", "fuse-overlayfs", "-o", base_opts.c_str(), merged_dir.c_str(),nullptr);
                                         _exit(EXIT_FAILURE);
                                 }
 

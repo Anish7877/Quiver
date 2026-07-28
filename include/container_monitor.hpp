@@ -13,6 +13,7 @@ class ValueHeap;
 class PtySessionManager;
 class ContainerRuntime;
 class CGroupsManagerInterface;
+class ContainerDbManager;
 class ContainerMonitor : public Singleton<ContainerMonitor> {
         friend class Singleton<ContainerMonitor>;
         private:
@@ -24,11 +25,11 @@ class ContainerMonitor : public Singleton<ContainerMonitor> {
                 auto operator=(const ContainerMonitor&) -> ContainerMonitor& = delete;
                 auto operator=(ContainerMonitor&&) -> ContainerMonitor& = delete;
 
-                auto init(const ContainerConfig&) -> void;
+                auto init(const ContainerConfig&, const std::string&, const std::string&, bool) -> void;
                 auto setup_usernamespace() -> void;
                 auto invoke_container() -> void;
-                auto start_logging(int master_fd = -1) -> bool;
-                auto foreground_logging() -> bool;
+                auto start_logging() -> void;
+                auto foreground_logging() -> void;
                 auto attach_to_container(const std::string&) -> void;
         private:
                 auto run_container_child() -> void;
@@ -53,6 +54,7 @@ class ContainerMonitor : public Singleton<ContainerMonitor> {
                 LoggerCommandQueue* m_log_cmd_queue{nullptr};
                 ValueHeap* m_value_heap{nullptr};
                 PtySessionManager* m_pty_session_manager{nullptr};
+                ContainerDbManager* m_container_db_manager{nullptr};
                 pid_t m_monitor_pid{-1};
                 pid_t m_container_pid{-1};
                 int m_std_out_fd[2]{-1, -1};

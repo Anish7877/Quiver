@@ -160,101 +160,125 @@ auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const Con
         fb_builder.add_networks(networks_off);
         fb_builder.add_namespaces(namespaces_off);
         fb_builder.add_timeoffsets(timeoffsets_off);
+        auto config_off = fb_builder.Finish();
+
+        auto name_off = builder.CreateString(obj.name);
+        auto image_off = builder.CreateString(obj.image);
+        auto status_off = builder.CreateString(obj.status);
+        auto created_at_off { builder.CreateString(obj.created_at) };
+        auto final_filesystem_off { builder.CreateString(obj.config.final_filesystem) };
+
+        FB::ContainerMetadataBuilder meta_builder { builder };
+        meta_builder.add_config(config_off);
+        meta_builder.add_name(name_off);
+        meta_builder.add_image(image_off);
+        meta_builder.add_status(status_off);
+        meta_builder.add_created_at(created_at_off);
+        meta_builder.add_final_filesystem(final_filesystem_off);
+        meta_builder.add_boot_time(obj.boot_time);
+        return meta_builder.Finish();
 }
 auto Serialization::deserialize(const FB::ContainerMetadata* fb) -> ContainerDbObject {
         ContainerDbObject obj{};
         if (!fb) return obj;
-        obj.pty_slave_fd  = fb->config()->pty_slave_fd();
-        obj.control_sock  = fb->control_sock();
-        obj.pid           = fb->pid();
-        obj.net_pid       = fb->net_pid();
-        obj.vfs           = fb->vfs();
-        if (fb->container_id())   obj.container_id   = fb->container_id()->str();
-        if (fb->hostname())       obj.hostname        = fb->hostname()->str();
-        if (fb->domain_name())    obj.domain_name     = fb->domain_name()->str();
-        if (fb->pty_slave_name()) obj.pty_slave_name  = fb->pty_slave_name()->str();
-        if (fb->cgroups_path())   obj.cgroups_path    = fb->cgroups_path()->str();
-        if (const auto* r = fb->rootfs()) {
-                if (r->path()) obj.rootfs.path = r->path()->str();
-                obj.rootfs.read_only = r->read_only();
+        if (fb->name()) obj.name = fb->name()->str();
+        if (fb->image()) obj.image = fb->image()->str();
+        if (fb->status()) obj.status = fb->status()->str();
+        if (fb->created_at()) obj.created_at = fb->created_at()->str();
+
+        auto fb_conf = fb->config();
+        if (!fb_conf) return obj;
+        obj.config.pty_slave_fd  = fb_conf->pty_slave_fd();
+        obj.config.control_sock  = fb_conf->control_sock();
+        obj.config.pid           = fb_conf->pid();
+        obj.config.net_pid       = fb_conf->net_pid();
+        obj.config.vfs           = fb_conf->vfs();
+        if (fb_conf->container_id())   obj.config.container_id   = fb_conf->container_id()->str();
+        if (fb_conf->hostname())       obj.config.hostname        = fb_conf->hostname()->str();
+        if (fb_conf->domain_name())    obj.config.domain_name     = fb_conf->domain_name()->str();
+        if (fb_conf->pty_slave_name()) obj.config.pty_slave_name  = fb_conf->pty_slave_name()->str();
+        if (fb_conf->cgroups_path())   obj.config.cgroups_path    = fb_conf->cgroups_path()->str();
+        if (const auto* r = fb_conf->rootfs()) {
+                if (r->path()) obj.config.rootfs.path = r->path()->str();
+                obj.config.rootfs.read_only = r->read_only();
         }
-        if (const auto* rp = fb->rootfs_propagation()) {
-                if (rp->type()) obj.rootfs_propagation.type = rp->type()->str();
+        if (const auto* rp = fb_conf->rootfs_propagation()) {
+                if (rp->type()) obj.config.rootfs_propagation.type = rp->type()->str();
         }
-        if (const auto* t = fb->terminal()) obj.terminal.value         = t->value();
-        if (const auto* d = fb->detach())   obj.detach.value           = d->value();
-        if (const auto* c = fb->console_size()) {
-                obj.console_size.height = c->height();
-                obj.console_size.width  = c->width();
+        if (const auto* t = fb_conf->terminal()) obj.config.terminal.value         = t->value();
+        if (const auto* d = fb_conf->detach())   obj.config.detach.value           = d->value();
+        if (const auto* c = fb_conf->console_size()) {
+                obj.config.console_size.height = c->height();
+                obj.config.console_size.width  = c->width();
         }
-        if (const auto* u = fb->user()) {
-                obj.user.uid   = u->uid();
-                obj.user.gid   = u->gid();
-                obj.user.umask = u->umask();
+        if (const auto* u = fb_conf->user()) {
+                obj.config.user.uid   = u->uid();
+                obj.config.user.gid   = u->gid();
+                obj.config.user.umask = u->umask();
                 if (u->additional_gids()) {
-                        obj.user.additional_gids.assign(
+                        obj.config.user.additional_gids.assign(
                                         u->additional_gids()->begin(), u->additional_gids()->end());
                 }
         }
-        if (const auto* um = fb->uid_mapping()) {
-                obj.uid_mapping.container_id = um->container_id();
-                obj.uid_mapping.host_id      = um->host_id();
-                obj.uid_mapping.size         = um->size();
+        if (const auto* um = fb_conf->uid_mapping()) {
+                obj.config.uid_mapping.container_id = um->container_id();
+                obj.config.uid_mapping.host_id      = um->host_id();
+                obj.config.uid_mapping.size         = um->size();
         }
-        if (const auto* gm = fb->gid_mapping()) {
-                obj.gid_mapping.container_id = gm->container_id();
-                obj.gid_mapping.host_id      = gm->host_id();
-                obj.gid_mapping.size         = gm->size();
+        if (const auto* gm = fb_conf->gid_mapping()) {
+                obj.config.gid_mapping.container_id = gm->container_id();
+                obj.config.gid_mapping.host_id      = gm->host_id();
+                obj.config.gid_mapping.size         = gm->size();
         }
-        if (const auto* e = fb->env()) {
+        if (const auto* e = fb_conf->env()) {
                 if (e->value()) {
-                        for (const auto* s : *e->value()) obj.env.value.push_back(s->str());
+                        for (const auto* s : *e->value()) obj.config.env.value.push_back(s->str());
                 }
         }
-        if (const auto* c = fb->cwd()) {
-                if (c->value()) obj.cwd.value = c->value()->str();
+        if (const auto* c = fb_conf->cwd()) {
+                if (c->value()) obj.config.cwd.value = c->value()->str();
         }
-        if (const auto* a = fb->args()) {
+        if (const auto* a = fb_conf->args()) {
                 if (a->value()) {
-                        for (const auto* s : *a->value()) obj.args.value.push_back(s->str());
+                        for (const auto* s : *a->value()) obj.config.args.value.push_back(s->str());
                 }
         }
-        if (const auto* o = fb->oom_score())         obj.oom_score.value         = o->value();
-        if (const auto* n = fb->no_new_privileges()) obj.no_new_privileges.value = n->value();
-        if (const auto* s = fb->schedular_opts()) {
-                if (s->flags())  for (const auto* f : *s->flags())  obj.schedular_opts.flags.push_back(f->str());
-                if (s->policy()) obj.schedular_opts.policy   = s->policy()->str();
-                obj.schedular_opts.runtime  = s->runtime();
-                obj.schedular_opts.deadline = s->deadline();
-                obj.schedular_opts.period   = s->period();
-                obj.schedular_opts.nice     = s->nice();
-                obj.schedular_opts.priority = s->priority();
+        if (const auto* o = fb_conf->oom_score())         obj.config.oom_score.value         = o->value();
+        if (const auto* n = fb_conf->no_new_privileges()) obj.config.no_new_privileges.value = n->value();
+        if (const auto* s = fb_conf->schedular_opts()) {
+                if (s->flags())  for (const auto* f : *s->flags())  obj.config.schedular_opts.flags.push_back(f->str());
+                if (s->policy()) obj.config.schedular_opts.policy   = s->policy()->str();
+                obj.config.schedular_opts.runtime  = s->runtime();
+                obj.config.schedular_opts.deadline = s->deadline();
+                obj.config.schedular_opts.period   = s->period();
+                obj.config.schedular_opts.nice     = s->nice();
+                obj.config.schedular_opts.priority = s->priority();
         }
-        if (const auto* c = fb->capabilities()) {
+        if (const auto* c = fb_conf->capabilities()) {
                 auto copy = [](const flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>* v,
                                 std::vector<std::string>& out) {
                         if (v) for (const auto* s : *v) out.push_back(s->str());
                 };
-                copy(c->bounding(),    obj.capabilities.bounding);
-                copy(c->effective(),   obj.capabilities.effective);
-                copy(c->inheritable(), obj.capabilities.inheritable);
-                copy(c->permitted(),   obj.capabilities.permitted);
-                copy(c->ambient(),     obj.capabilities.ambient);
+                copy(c->bounding(),    obj.config.capabilities.bounding);
+                copy(c->effective(),   obj.config.capabilities.effective);
+                copy(c->inheritable(), obj.config.capabilities.inheritable);
+                copy(c->permitted(),   obj.config.capabilities.permitted);
+                copy(c->ambient(),     obj.config.capabilities.ambient);
         }
-        if (fb->rlimits()) {
-                for (const auto* rl : *fb->rlimits()) {
+        if (fb_conf->rlimits()) {
+                for (const auto* rl : *fb_conf->rlimits()) {
                         OCIRuntime::RLimit r{};
                         if (rl->name()) r.name = rl->name()->str();
                         r.hard_limit = rl->hard_limit();
                         r.soft_limit = rl->soft_limit();
-                        obj.rlimits.push_back(std::move(r));
+                        obj.config.rlimits.push_back(std::move(r));
                 }
         }
-        if (const auto* sc = fb->seccomp()) {
-                if (sc->archs())          for (const auto* s : *sc->archs())  obj.seccomp.archs.push_back(s->str());
-                if (sc->flags())          for (const auto* s : *sc->flags())  obj.seccomp.flags.push_back(s->str());
-                if (sc->default_action()) obj.seccomp.default_action = sc->default_action()->str();
-                obj.seccomp.default_errno = sc->default_errno();
+        if (const auto* sc = fb_conf->seccomp()) {
+                if (sc->archs())          for (const auto* s : *sc->archs())  obj.config.seccomp.archs.push_back(s->str());
+                if (sc->flags())          for (const auto* s : *sc->flags())  obj.config.seccomp.flags.push_back(s->str());
+                if (sc->default_action()) obj.config.seccomp.default_action = sc->default_action()->str();
+                obj.config.seccomp.default_errno = sc->default_errno();
                 if (sc->syscalls()) {
                         for (const auto* rule : *sc->syscalls()) {
                                 OCIRuntime::Seccomp::SyscallRule sr{};
@@ -271,43 +295,43 @@ auto Serialization::deserialize(const FB::ContainerMetadata* fb) -> ContainerDbO
                                                 sr.args.push_back(std::move(a));
                                         }
                                 }
-                                obj.seccomp.syscalls.push_back(std::move(sr));
+                                obj.config.seccomp.syscalls.push_back(std::move(sr));
                         }
                 }
         }
-        if (fb->devices()) {
-                for (const auto* dev : *fb->devices()) {
+        if (fb_conf->devices()) {
+                for (const auto* dev : *fb_conf->devices()) {
                         OCIRuntime::Device d{};
                         if (dev->host_path())      d.host_path      = dev->host_path()->str();
                         if (dev->container_path()) d.container_path = dev->container_path()->str();
-                        obj.devices.push_back(std::move(d));
+                        obj.config.devices.push_back(std::move(d));
                 }
         }
-        if (const auto* net = fb->networks()) {
-                if (net->tcp_ports()) for (const auto* p : *net->tcp_ports()) obj.networks.tcp_ports.push_back(p->str());
-                if (net->udp_ports()) for (const auto* p : *net->udp_ports()) obj.networks.udp_ports.push_back(p->str());
-                obj.networks.auto_tcp = net->auto_tcp();
-                obj.networks.auto_udp = net->auto_udp();
+        if (const auto* net = fb_conf->networks()) {
+                if (net->tcp_ports()) for (const auto* p : *net->tcp_ports()) obj.config.networks.tcp_ports.push_back(p->str());
+                if (net->udp_ports()) for (const auto* p : *net->udp_ports()) obj.config.networks.udp_ports.push_back(p->str());
+                obj.config.networks.auto_tcp = net->auto_tcp();
+                obj.config.networks.auto_udp = net->auto_udp();
         }
-        if (fb->timeoffsets()) {
-                for (const auto* to : *fb->timeoffsets()) {
+        if (fb_conf->timeoffsets()) {
+                for (const auto* to : *fb_conf->timeoffsets()) {
                         OCIRuntime::TimeOffset t{};
                         if (to->type()) t.type = to->type()->str();
                         t.secs    = to->secs();
                         t.nanosecs = to->nanosecs();
-                        obj.timeoffsets.push_back(std::move(t));
+                        obj.config.timeoffsets.push_back(std::move(t));
                 }
         }
-        if (fb->namespaces()) {
-                for (const auto* ns : *fb->namespaces()) {
+        if (fb_conf->namespaces()) {
+                for (const auto* ns : *fb_conf->namespaces()) {
                         OCIRuntime::Namespace n{};
                         if (ns->path()) n.path = ns->path()->str();
                         if (ns->type()) n.type = ns->type()->str();
-                        obj.namespaces.push_back(std::move(n));
+                        obj.config.namespaces.push_back(std::move(n));
                 }
         }
-        if (fb->mounts()) {
-                for (const auto* mnt : *fb->mounts()) {
+        if (fb_conf->mounts()) {
+                for (const auto* mnt : *fb_conf->mounts()) {
                         OCIRuntime::Mount m{};
                         if (mnt->options())     for (const auto* s : *mnt->options()) m.options.push_back(s->str());
                         if (mnt->flags())       for (const auto* s : *mnt->flags())   m.flags.push_back(s->str());
@@ -315,16 +339,16 @@ auto Serialization::deserialize(const FB::ContainerMetadata* fb) -> ContainerDbO
                         if (mnt->destination()) m.destination = mnt->destination()->str();
                         if (mnt->type())        m.type        = mnt->type()->str();
                         if (mnt->source())      m.source      = mnt->source()->str();
-                        obj.mounts.push_back(std::move(m));
+                        obj.config.mounts.push_back(std::move(m));
                 }
         }
-        if (fb->masked_paths() && fb->masked_paths()->paths()) {
-                for (const auto* p : *fb->masked_paths()->paths())
-                        obj.masked_paths.paths.push_back(p->str());
+        if (fb_conf->masked_paths() && fb_conf->masked_paths()->paths()) {
+                for (const auto* p : *fb_conf->masked_paths()->paths())
+                        obj.config.masked_paths.paths.push_back(p->str());
         }
-        if (fb->read_only_paths() && fb->read_only_paths()->paths()) {
-                for (const auto* p : *fb->read_only_paths()->paths())
-                        obj.read_only_paths.paths.push_back(p->str());
+        if (fb_conf->read_only_paths() && fb_conf->read_only_paths()->paths()) {
+                for (const auto* p : *fb_conf->read_only_paths()->paths())
+                        obj.config.read_only_paths.paths.push_back(p->str());
         }
         return obj;
 }
@@ -363,24 +387,24 @@ auto Serialization::deserialize(const FB::ImageMetadata* fb) -> ImageMetadata {
         return obj;
 }
 
-auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const LayerCache& obj) -> flatbuffers::Offset<FB::LayerCache> {
-        auto hash_off { builder.CreateString(obj.hash) };
-        auto diff_id_off { builder.CreateString(obj.diff_id) };
-        auto lower_dir_off { builder.CreateString(obj.lower_dir) };
-        FB::LayerCacheBuilder fb_builder { builder };
-        fb_builder.add_hash(hash_off);
-        fb_builder.add_diff_id(diff_id_off);
-        fb_builder.add_lower_dir(lower_dir_off);
-        fb_builder.add_blob_size(obj.blob_size);
-        return fb_builder.Finish();
-}
-
-auto Serialization::deserialize(const FB::LayerCache* fb) -> LayerCache {
-        LayerCache obj{};
-        if (!fb) return obj;
-        if (fb->hash()) obj.hash = fb->hash()->str();
-        if (fb->diff_id()) obj.diff_id = fb->diff_id()->str();
-        if (fb->lower_dir()) obj.lower_dir = fb->lower_dir()->str();
-        obj.blob_size = fb->blob_size();
-        return obj;
-}
+//auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const LayerCache& obj) -> flatbuffers::Offset<FB::LayerCache> {
+//        auto hash_off { builder.CreateString(obj.hash) };
+//        auto diff_id_off { builder.CreateString(obj.diff_id) };
+//        auto lower_dir_off { builder.CreateString(obj.lower_dir) };
+//        FB::LayerCacheBuilder fb_builder { builder };
+//        fb_builder.add_hash(hash_off);
+//        fb_builder.add_diff_id(diff_id_off);
+//        fb_builder.add_lower_dir(lower_dir_off);
+//        fb_builder.add_blob_size(obj.blob_size);
+//        return fb_builder.Finish();
+//}
+//
+//auto Serialization::deserialize(const FB::LayerCache* fb) -> LayerCache {
+//        LayerCache obj{};
+//        if (!fb) return obj;
+//        if (fb->hash()) obj.hash = fb>hash()->str();
+//        if (fb->diff_id()) obj.diff_id = fb->diff_id()->str();
+//        if (fb->lower_dir()) obj.lower_dir = fb->lower_dir()->str();
+//        obj.blob_size = fb->blob_size();
+//        return obj;
+//}

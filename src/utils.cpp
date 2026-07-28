@@ -7,10 +7,12 @@
 #include <array>
 #include <atomic>
 #include <blake3.h>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <fcntl.h>
 #include <filesystem>
 #include <format>
@@ -18,9 +20,11 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <nlohmann/json_fwd.hpp>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/sha.h>
+#include <ostream>
 #include <pwd.h>
 #include <random>
 #include <set>
@@ -37,6 +41,9 @@
 #include <thread>
 #include <unistd.h>
 #include <zlib.h>
+#include <nlohmann/json.hpp>
+#include "database_job_processor.hpp"
+using json = nlohmann::json;
 
 auto Utils::dir_exists(const fs::path& path) -> bool {
         return fs::is_directory(path);
@@ -201,15 +208,15 @@ auto Utils::get_log_path(std::string_view name) -> fs::path {
 }
 
 auto Utils::get_logger_command_queue_buf_name() -> std::string {
-        return "log_command_queue";
+        return "/log_command_queue";
 }
 
 auto Utils::get_database_command_queue_buf_name() -> std::string {
-        return "db_command_queue";
+        return "/db_command_queue";
 }
 
 auto Utils::get_value_heap_buf_name() -> std::string {
-        return "value_heap";
+        return "/value_heap";
 }
 
 auto Utils::get_device_gid(const fs::path& device) -> gid_t {
@@ -348,19 +355,28 @@ auto Utils::spawn_new_consumer() -> pid_t {
         }
 
         auto handler{[](int signum) -> void {
-                        job_processor_running.store(false, std::memory_order_release);
+                job_processor_running.store(false, std::memory_order_release);
         }};
         std::signal(SIGTERM, handler);
         std::signal(SIGINT, handler);
+        std::ofstream job_processor_log{get_log_path("log_processor"), std::ios::app};
         auto& log_job_processor{LogJobProcessor::get_instance()};
-        log_job_processor.init();
+        auto& database_job_processor{DatabaseJobProcessor::get_instance()};
+        try {
+                log_job_processor.init();
+                database_job_processor.init();
+        }
+        catch (const std::exception& e) {
+                job_processor_log << e.what() << '\n' << std::flush;
+        }
         pid_t my_pid{getpid()};
+        log_job_processor.process_job();
+        database_job_processor.process_job();
         if (write(sync_pipe[1], &my_pid, sizeof(my_pid)) != static_cast<ssize_t>(sizeof(my_pid))) {
                 close(sync_pipe[1]);
                 _exit(EXIT_FAILURE);
         }
         close(sync_pipe[1]);
-        log_job_processor.process_job();
 
         while (job_processor_running.load(std::memory_order_acquire)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -444,7 +460,7 @@ auto Utils::resolve_user_group(const std::vector<std::string>& lower_dirs, const
                         gid_set = true;
                 }
         }
-        
+
         if (!group.empty() && is_number(group)) {
                 gid = static_cast<gid_t>(std::stoul(group));
                 gid_set = true;
@@ -454,8 +470,9 @@ auto Utils::resolve_user_group(const std::vector<std::string>& lower_dirs, const
                 // Find /etc/passwd and /etc/group from lower_dirs (top to bottom)
                 fs::path passwd_file;
                 fs::path group_file;
-                
-                for (const auto& dir : lower_dirs) {
+
+                for (auto it = lower_dirs.rbegin(); it != lower_dirs.rend(); ++it) {
+                        const auto& dir = *it;
                         if (passwd_file.empty() && fs::exists(fs::path(dir) / "etc" / "passwd")) {
                                 passwd_file = fs::path(dir) / "etc" / "passwd";
                         }
@@ -543,7 +560,7 @@ auto Utils::build_gid_map_payload(pid_t pid) -> std::string {
         return payload.str();
 }
 
-auto Utils::write_all(int fd, const char* buf, ssize_t len) -> bool {
+auto Utils::write_all(int fd, const char* buf, size_t len) -> bool {
         ssize_t off{0};
         while (off < len) {
                 ssize_t w = write(fd, buf + off, len - off);
@@ -558,8 +575,7 @@ auto Utils::write_all(int fd, const char* buf, ssize_t len) -> bool {
         return true;
 }
 
-
-auto Utils::create_tar_gz(const fs::path& path, const fs::path& output_file) -> void {
+auto Utils::create_tar_gz(const std::string& path, const std::string& output_file) -> void {
         struct archive* archive{archive_write_new()};
         if (!archive) [[unlikely]]
                 throw std::runtime_error("Failed to create archive write object");
@@ -618,9 +634,10 @@ auto Utils::extract_tarball(const std::string& tarball_path, const std::string& 
         struct archive* ext;
         struct archive_entry* entry;
 
-        // Standard extraction flags: preserve time, permissions, ACLs, flags, and security checks
-        int flags{ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL | ARCHIVE_EXTRACT_FFLAGS |
-                  ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS | ARCHIVE_EXTRACT_SECURE_SYMLINKS};
+        // FIX: Removed ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS since we are manually
+        // sanitizing and providing safe absolute paths to libarchive.
+        int flags{ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
+                  ARCHIVE_EXTRACT_FFLAGS | ARCHIVE_EXTRACT_SECURE_SYMLINKS};
         int r;
 
         a = archive_read_new();
@@ -689,6 +706,7 @@ auto Utils::extract_tarball(const std::string& tarball_path, const std::string& 
                         fs::path full_hardlink_path = canonical_dest / hl_path;
                         archive_entry_set_hardlink(entry, full_hardlink_path.c_str());
                 }
+
                 r = archive_write_header(ext, entry);
                 if (r < ARCHIVE_OK) [[unlikely]] {
                         std::cerr << std::format("Tar Error: failed to write header for {} - {}\n",
@@ -726,7 +744,7 @@ auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string
 
         // Standard extraction flags: preserve time, permissions, ACLs, flags, and security checks
         int flags{ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL | ARCHIVE_EXTRACT_FFLAGS |
-                  ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS | ARCHIVE_EXTRACT_SECURE_SYMLINKS};
+                  ARCHIVE_EXTRACT_SECURE_SYMLINKS};
         int r;
 
         a = archive_read_new();
@@ -1378,4 +1396,304 @@ auto Utils::create_oci_layer(
         info.blob_size = ctx.compressed_size;
 
         return info;
+}
+
+auto PrintUtils::print_section(std::string_view name) -> void {
+        std::cout << "\n";
+        std::cout << name << '\n';
+        std::cout << std::string(name.size(), '=') << '\n';
+}
+
+auto PrintUtils::print_container_config(const ContainerConfig& c) -> void {
+        print_section("General");
+
+        print_field("Container ID", c.container_id);
+        print_field("Hostname", c.hostname);
+        print_field("Domain Name", c.domain_name);
+        print_field("PID", c.pid);
+        print_field("Network PID", c.net_pid);
+        print_field("VFS", c.vfs);
+        print_field("Cgroup Path", c.cgroups_path.string());
+
+        print_section("Root Filesystem");
+
+        print_field("Path", c.rootfs.path.string());
+        print_field("Read Only", c.rootfs.read_only);
+        print_field("Propagation", c.rootfs_propagation.type);
+
+        print_section("Terminal");
+
+        print_field("Enabled", c.terminal.value);
+        print_field("Detach", c.detach.value);
+        print_field("PTY", c.pty_slave_name);
+        print_field("PTY FD", c.pty_slave_fd);
+        print_field("Control Socket", c.control_sock);
+        print_field(
+                        "Console Size",
+                        std::format("{}x{}", c.console_size.width, c.console_size.height));
+
+        print_section("User");
+
+        print_field("UID", c.user.uid);
+        print_field("GID", c.user.gid);
+        print_field("Umask", c.user.umask);
+
+        print_vector("Additional GIDs", c.user.additional_gids);
+
+        print_field("UID Mapping",
+                        std::format("{} -> {} ({})",
+                                c.uid_mapping.container_id,
+                                c.uid_mapping.host_id,
+                                c.uid_mapping.size));
+
+        print_field("GID Mapping",
+                        std::format("{} -> {} ({})",
+                                c.gid_mapping.container_id,
+                                c.gid_mapping.host_id,
+                                c.gid_mapping.size));
+
+        print_section("Process");
+
+        print_field("Working Directory", c.cwd.value);
+        print_field("OOM Score", c.oom_score.value);
+        print_field("No New Privileges", c.no_new_privileges.value);
+
+        print_vector("Arguments", c.args.value);
+        print_vector("Environment", c.env.value);
+
+        print_section("Scheduler");
+
+        print_field("Policy", c.schedular_opts.policy);
+        print_field("Priority", c.schedular_opts.priority);
+        print_field("Nice", c.schedular_opts.nice);
+        print_field("Runtime", c.schedular_opts.runtime);
+        print_field("Deadline", c.schedular_opts.deadline);
+        print_field("Period", c.schedular_opts.period);
+
+        print_vector("Flags", c.schedular_opts.flags);
+
+        print_section("Capabilities");
+
+        print_vector("Bounding", c.capabilities.bounding);
+        print_vector("Effective", c.capabilities.effective);
+        print_vector("Permitted", c.capabilities.permitted);
+        print_vector("Ambient", c.capabilities.ambient);
+        print_vector("Inheritable", c.capabilities.inheritable);
+
+        print_section("Resource Limits");
+
+        for (const auto& r : c.rlimits) {
+                std::cout << std::format(
+                                "  {:<16} soft={} hard={}\n",
+                                r.name,
+                                r.soft_limit,
+                                r.hard_limit);
+        }
+
+        print_section("Namespaces");
+
+        for (const auto& ns : c.namespaces) {
+                std::cout << std::format(
+                                "  {:<10} {}\n",
+                                ns.type,
+                                ns.path.string());
+        }
+
+        print_section("Devices");
+
+        for (const auto& dev : c.devices) {
+                std::cout << std::format(
+                                "  {} -> {}\n",
+                                dev.host_path.string(),
+                                dev.container_path.string());
+        }
+
+        print_section("Mounts");
+
+        for (const auto& m : c.mounts) {
+                std::cout << std::format(
+                                "  {} -> {} ({})\n",
+                                m.source,
+                                m.destination,
+                                m.type);
+
+                if (!m.options.empty())
+                        print_vector("    Options", m.options);
+
+                if (!m.flags.empty())
+                        print_vector("    Flags", m.flags);
+
+                if (!m.attrs.empty())
+                        print_vector("    Attrs", m.attrs);
+        }
+
+        print_section("Network");
+
+        print_field("Auto TCP", c.networks.auto_tcp);
+        print_field("Auto UDP", c.networks.auto_udp);
+
+        print_vector("TCP Ports", c.networks.tcp_ports);
+        print_vector("UDP Ports", c.networks.udp_ports);
+
+        print_section("Time Offsets");
+
+        for (const auto& t : c.timeoffsets) {
+                std::cout << std::format(
+                                "  {:<10} {}s {}ns\n",
+                                t.type,
+                                t.secs,
+                                t.nanosecs);
+        }
+
+        print_section("Masked Paths");
+
+        for (const auto& p : c.masked_paths.paths)
+                std::cout << std::format("  {}\n", p.string());
+
+        print_section("Read Only Paths");
+
+        for (const auto& p : c.read_only_paths.paths)
+                std::cout << std::format("  {}\n", p.string());
+
+        print_section("Seccomp");
+
+        print_field("Default Action", c.seccomp.default_action);
+        print_field("Default Errno", c.seccomp.default_errno);
+
+        print_vector("Architectures", c.seccomp.archs);
+        print_vector("Flags", c.seccomp.flags);
+
+        std::cout << std::format("Syscall Rules : {}\n",
+                        c.seccomp.syscalls.size());
+}
+
+auto Utils::load_seccomp_profile(const fs::path& path) -> OCIRuntime::Seccomp {
+        std::ifstream file(path);
+        if (!file.is_open()) {
+                throw std::runtime_error(
+                                std::format("Failed to open seccomp profile '{}'",
+                                        path.string()));
+        }
+        json j;
+        file >> j;
+        OCIRuntime::Seccomp seccomp{};
+        seccomp.default_action = j.at("defaultAction").get<std::string>();
+        if (j.contains("defaultErrnoRet")) {
+                seccomp.default_errno = j["defaultErrnoRet"].get<std::uint32_t>();
+        }
+        if (j.contains("architectures")) {
+                seccomp.archs = j["architectures"].get<std::vector<std::string>>();
+        }
+        if (j.contains("flags")) {
+                seccomp.flags = j["flags"].get<std::vector<std::string>>();
+        }
+        if (j.contains("syscalls")) {
+                for (const auto& syscall_json : j["syscalls"]) {
+                        OCIRuntime::Seccomp::SyscallRule rule{};
+                        rule.names = syscall_json.at("names").get<std::vector<std::string>>();
+                        rule.action = syscall_json.at("action").get<std::string>();
+
+                        if (syscall_json.contains("errnoRet")) {
+                                rule.errno_ret = syscall_json["errnoRet"].get<std::uint32_t>();
+                        }
+
+                        if (syscall_json.contains("args")) {
+                                for (const auto& arg_json : syscall_json["args"]) {
+                                        OCIRuntime::Seccomp::Arg arg{};
+                                        arg.index = arg_json.at("index").get<std::uint32_t>();
+                                        arg.value = arg_json.at("value").get<std::uint64_t>();
+                                        if (arg_json.contains("valueTwo")) {
+                                                arg.value_two = arg_json["valueTwo"].get<std::uint64_t>();
+                                        }
+                                        arg.op = arg_json.at("op").get<std::string>();
+                                        rule.args.emplace_back(std::move(arg));
+                                }
+                        }
+                        seccomp.syscalls.emplace_back(std::move(rule));
+                }
+        }
+        return seccomp;
+}
+
+auto Utils::send_all(int fd, const void* data, size_t size) -> bool {
+        const char* ptr{static_cast<const char*>(data)};
+
+        while (size > 0) {
+                ssize_t n{send(fd, ptr, size, 0)};
+                if (n <= 0) return false;
+                ptr += n;
+                size -= n;
+        }
+        return true;
+}
+auto Utils::recv_all(int fd, void* data, size_t size) -> bool {
+        char* ptr{static_cast<char*>(data)};
+        while (size > 0) {
+                ssize_t n{recv(fd, ptr, size, 0)};
+                if (n <= 0) return false;
+                ptr += n;
+                size -= n;
+        }
+        return true;
+}
+
+auto Utils::is_process_alive(pid_t pid, const std::string& container_id) -> bool {
+        auto check_cgroups{[](pid_t pid, const std::string& expected_container_id) -> bool {
+                        std::string cgroup_path{"/proc/" + std::to_string(pid) + "/cgroup"};
+                        std::string expected_scope{"quiver-" + expected_container_id + ".scope"};
+
+                        int fd{open(cgroup_path.c_str(), O_RDONLY | O_CLOEXEC)};
+                        if (fd == -1) {
+                                return false;
+                        }
+                        char buffer[4096];
+                        ssize_t bytes_read{read(fd, buffer, sizeof(buffer) - 1)};
+                        close(fd);
+                        if (bytes_read <= 0) {
+                                return false;
+                        }
+                        buffer[bytes_read] = '\0';
+                        if (strstr(buffer, expected_scope.c_str()) != nullptr) {
+                                return true;
+                        }
+
+                        return false;
+                }
+        };
+        if (kill(pid, 0) == 0) {
+                return true;
+        }
+        if (errno == ESRCH) {
+                return false;
+        }
+        if (errno == EPERM) {
+                return true;
+        }
+        return check_cgroups(pid, container_id);
+}
+
+auto Utils::get_boot_time() -> long {
+        int fd{open("/proc/stat", O_RDONLY)};
+        if (fd < 0) return 0;
+
+        char buf[32768];
+        ssize_t bytes_read{read(fd, buf, sizeof(buf))};
+        close(fd);
+
+        if (bytes_read <= 0) return 0;
+
+        std::string_view sv(buf, static_cast<size_t>(bytes_read));
+
+        size_t pos{sv.find("\nbtime ")};
+        if (pos == std::string_view::npos) {
+                if (sv.starts_with("btime ")) pos = 0;
+                else return 0;
+        } else {
+                pos += 1;
+        }
+        pos += 6;
+        long btime{0};
+        std::from_chars(sv.data() + pos, sv.data() + sv.size(), btime);
+
+        return btime;
 }

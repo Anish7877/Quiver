@@ -340,7 +340,10 @@ auto ImageManager::download_layer(const std::string& repo, const std::string& di
 
         cpr::Response r{cpr::Get(
                         cpr::Url{url},
-                        cpr::Header{{"Authorization", "Bearer " + token}},
+                        cpr::Header{
+                        {"Authorization", "Bearer " + token},
+                        {"Accept-Encoding", "identity"} // <--- ADD THIS to prevent auto-decompression
+                        },
                         cpr::Redirect{true},
                         cpr::Timeout{TIMEOUT_LAYER_MS},
                         cpr::WriteCallback([&ofs](std::string_view data, intptr_t) -> bool {
@@ -367,7 +370,7 @@ auto ImageManager::download_layer(const std::string& repo, const std::string& di
         }
 
         std::string actual_digest{Utils::sha256_file(file_path)};
-        if (actual_digest.empty() || (std::format("sha256:{}", actual_digest) != digest)) [[unlikely]] {
+        if (actual_digest.empty() || actual_digest != digest) [[unlikely]] {
                 std::cerr << std::format("Digest Mismatch: expected {} got sha256:{}\n", digest, actual_digest);
                 fs::remove(file_path);
                 return "";

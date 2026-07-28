@@ -102,6 +102,18 @@ auto Tests::test_utils() -> void {
                 auto [uid3, gid3] = Utils::resolve_user_group(lower_dirs, "testuser");
                 if (uid3 != 1001 || gid3 != 1002) throw std::runtime_error("named user failed");
                 
+                fs::path top_dir{"/tmp/quiver_test_resolve_user_top"};
+                Utils::remove_directory(top_dir);
+                Utils::ensure_dir(top_dir / "etc");
+                Utils::write_file(top_dir / "etc" / "passwd", "testuser:x:2001:2002::/home/testuser:/bin/sh\n", false);
+                Utils::write_file(top_dir / "etc" / "group", "testgroup:x:2002:\n", false);
+
+                lower_dirs.push_back(top_dir.string());
+
+                auto [uid4, gid4] = Utils::resolve_user_group(lower_dirs, "testuser:testgroup");
+                if (uid4 != 2001 || gid4 != 2002) throw std::runtime_error("top layer user override failed");
+                
+                Utils::remove_directory(top_dir);
                 Utils::remove_directory(temp_dir);
         }};
         test(test_resolve_user_group);

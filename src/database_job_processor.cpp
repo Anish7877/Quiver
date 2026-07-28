@@ -4,14 +4,20 @@
 #include "types.hpp"
 #include "utils.hpp"
 #include "value_heap.hpp"
+#include <asm-generic/errno.h>
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <memory>
+#include <fcntl.h>
+#include <sys/un.h>
+#include <unistd.h>
 #include <rocksdb/db.h>
 #include <rocksdb/options.h>
 #include <rocksdb/slice.h>
 #include <rocksdb/status.h>
 #include <thread>
+#include <sys/socket.h>
 namespace chrono = std::chrono;
 
 auto DatabaseJobProcessor::init() -> void {
@@ -31,6 +37,9 @@ auto DatabaseJobProcessor::init() -> void {
                 throw std::runtime_error(m_log_command_queue->get_error());
         }
         m_current_db = nullptr;
+        Utils::ensure_dir(Utils::get_db_path("container"));
+        Utils::ensure_dir(Utils::get_db_path("image"));
+        Utils::ensure_dir(Utils::get_db_path("layer_cache"));
         rocksdb::Options opts{};
         opts.create_if_missing = true;
         rocksdb::Status status{};
@@ -48,6 +57,22 @@ auto DatabaseJobProcessor::init() -> void {
         if (!status.ok()) [[unlikely]] {
                 throw std::runtime_error(std::format("Database Job Error: Could not open layer cache database -> '{}'.",
                                         status.ToString()));
+        }
+        m_socket_path = "/tmp/quiver_db.sock";
+        if (unlink(m_socket_path.c_str()) == -1 && errno != ENOENT) [[unlikely]] {
+                throw std::runtime_error("Database Job Error: Unable to unlink stale socket");
+        }
+        m_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (m_socket_fd == -1) [[unlikely]] {
+                throw std::runtime_error("Database Job Error: Unable to create socket for data streaming");
+        }
+        m_addr.sun_family = AF_UNIX;
+        strncpy(m_addr.sun_path, m_socket_path.c_str(), sizeof(m_addr.sun_path)-1);
+        if (bind(m_socket_fd, reinterpret_cast<sockaddr*>(&m_addr), sizeof(m_addr)) == -1) [[unlikely]] {
+                throw std::runtime_error("Database Job Error: Unable to bind socket");
+        }
+        if (listen(m_socket_fd, 1) == -1) [[unlikely]] {
+                throw std::runtime_error("Database Job Error: Unable to start listen for socket");
         }
 }
 
@@ -78,7 +103,6 @@ auto DatabaseJobProcessor::process_job() -> void {
 }
 
 auto DatabaseJobProcessor::route_job(const DatabaseJobData& job_data) -> void {
-        job_data.status->m_ok = false;
         switch (job_data.target) {
                 case TargetDB::CONTAINER:
                         m_current_db = &m_container_db; break;
@@ -112,24 +136,42 @@ auto DatabaseJobProcessor::route_job(const DatabaseJobData& job_data) -> void {
 }
 
 auto DatabaseJobProcessor::process_get_job(const DatabaseJobData& job_data) -> void {
-        rocksdb::Slice key{job_data.key};
+        rocksdb::Slice key{job_data.key, 32};
         std::string raw_bytes{};
         rocksdb::Status status{(*m_current_db)->Get(rocksdb::ReadOptions(), key, &raw_bytes)};
-        if (status.IsNotFound()) [[unlikely]] {
-                log_event(std::format("[{}] Database Job Processor Error: Key not found.",
-                                        chrono::system_clock::now()));
-                job_data.status->m_error = "Key Not Found.";
+
+        int client_fd{accept(m_socket_fd, nullptr, nullptr)};
+        if (client_fd == -1) {
+                log_event("Database Job Error: Unable to connect to client");
+                return;
         }
-        else if (!status.ok()) [[unlikely]] {
-                log_event(std::format("[{}] Database Job Processor Error: Unable to process get job -> '{}'.",
-                                        chrono::system_clock::now(), status.ToString()));
-                job_data.status->m_error = status.ToString();
+
+        if (status.IsNotFound() || !status.ok()) [[unlikely]] {
+                if (status.IsNotFound()) {
+                        log_event(std::format("[{}] Database Job Processor Error: Key not found\n", chrono::system_clock::now()));
+                } else {
+                        log_event(std::format("[{}] Database Job Processor Error: Get failed -> '{}'\n", chrono::system_clock::now(), status.ToString()));
+                }
+
+                size_t buf_size{0};
+                send(client_fd, &buf_size, sizeof(buf_size), 0);
         }
         else {
-                job_data.status->m_results.emplace_back(raw_bytes);
+                size_t buf_size{raw_bytes.size()};
+                if (send(client_fd, &buf_size, sizeof(buf_size), 0) == -1) {
+                        log_event("Failed to send buffer size.");
+                        close(client_fd);
+                        return;
+                }
+
+                size_t total_sent{0};
+                while (total_sent < buf_size) {
+                        ssize_t n{send(client_fd, raw_bytes.data() + total_sent, buf_size - total_sent, 0)};
+                        if (n <= 0) break;
+                        total_sent += n;
+                }
         }
-        job_data.status->processed.store(true, std::memory_order_release);
-        job_data.status->processed.notify_all();
+        close(client_fd);
 }
 
 auto DatabaseJobProcessor::process_put_job(const DatabaseJobData& job_data) -> void {
@@ -139,7 +181,7 @@ auto DatabaseJobProcessor::process_put_job(const DatabaseJobData& job_data) -> v
                                         chrono::system_clock::now()));
                 return;
         }
-        rocksdb::Slice key{job_data.key};
+        rocksdb::Slice key{job_data.key, 32};
         std::string value(data_ptr, job_data.value_length);
         rocksdb::Status status{(*m_current_db)->Put(rocksdb::WriteOptions(), key, value)};
         if (!status.ok()) [[unlikely]] {
@@ -156,31 +198,51 @@ auto DatabaseJobProcessor::process_update_job(const DatabaseJobData& job_data) -
 }
 
 auto DatabaseJobProcessor::process_delete_job(const DatabaseJobData& job_data) -> void {
-        rocksdb::Slice key{job_data.key};
+        rocksdb::Slice key{job_data.key, 32};
         rocksdb::Status status{(*m_current_db)->Delete(rocksdb::WriteOptions(), key)};
         if (!status.ok()) [[unlikely]] {
                 log_event(std::format("[{}] Database Job Processor Error: Unable to process delete job -> '{}'.",
                                         chrono::system_clock::now(), status.ToString()));
         }
-        else {
-                job_data.status->m_ok = true;
-        }
 }
 
 auto DatabaseJobProcessor::process_get_all_job(const DatabaseJobData& job_data) -> void {
-        auto it{(*m_current_db)->NewIterator(rocksdb::ReadOptions())};
-        for (it->SeekToFirst(); it->Valid(); it->Next()) {
-               job_data.status->m_results.emplace_back(std::move(it->key().ToString()), std::move(it->value().ToString()));
+        auto it1{(*m_current_db)->NewIterator(rocksdb::ReadOptions())};
+        size_t count{0};
+        for (it1->SeekToFirst(); it1->Valid(); it1->Next()) {
+                ++count;
         }
-        if (!it->status().ok()) [[unlikely]] {
+        delete it1;
+        int client_fd{accept(m_socket_fd, nullptr, nullptr)};
+        if (client_fd == -1) {
+                log_event("Database Job Error: Unable to connect to client");
+                return;
+        }
+        if (!Utils::send_all(client_fd, &count, sizeof(count))) [[unlikely]] {
+                log_event("Database Job Error: Unable to send number of entries");
+                return;
+        }
+        auto it2{(*m_current_db)->NewIterator(rocksdb::ReadOptions())};
+        for (it2->SeekToFirst(); it2->Valid(); it2->Next()) {
+                size_t key_size = it2->key().size();
+                size_t value_size = it2->value().size();
+                if (!Utils::send_all(client_fd, &key_size, sizeof(key_size)))
+                        return;
+
+                if (!Utils::send_all(client_fd, it2->key().data(), key_size))
+                        return;
+
+                if (!Utils::send_all(client_fd, &value_size, sizeof(value_size)))
+                        return;
+
+                if (!Utils::send_all(client_fd, it2->value().data(), value_size))
+                        return;
+        }
+        if (!it2->status().ok()) [[unlikely]] {
                log_event(std::format("[{}] Database Job Processor Error: Read Error -> '{}'.",
-                                        chrono::system_clock::now(), it->status().ToString()));
+                                        chrono::system_clock::now(), it2->status().ToString()));
         }
-        else {
-               job_data.status->m_ok = true;
-        }
-        job_data.status->processed.store(true, std::memory_order_release);
-        job_data.status->processed.notify_all();
+        delete it2;
 }
 
 auto DatabaseJobProcessor::log_event(const std::string& log_data) -> void {

@@ -2,11 +2,13 @@
 #include "types.hpp"
 #include <atomic>
 #include <cstring>
+#include <emmintrin.h>
 #include <iostream>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <immintrin.h>
 
 auto LoggerCommandQueue::map_buffer(const std::string& buf_name, bool is_consumer) -> void {
         int fd{-1};
@@ -92,6 +94,7 @@ auto LoggerCommandQueue::atomic_push(const LogJobData& data) -> bool {
                 if (m_header->tail.compare_exchange_weak(current_tail, current_tail + 1, std::memory_order_relaxed)) {
                         break;
                 }
+                _mm_pause();
         }
 
         std::size_t index{current_tail % QUEUE_SIZE};

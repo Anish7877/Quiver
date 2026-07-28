@@ -1,4 +1,4 @@
-CXX ?= g+
+CXX ?= g++
 MIN_CXX_VER = 15
 STD = -std=c++20
 OPTFLAGS = -O3
@@ -6,11 +6,13 @@ CXXFLAGS = -Wall -Wextra -Wpedantic -Wno-interference-size -march=native
 LDFLAGS = -lcpr -lcurl -lz -lpthread -lutil -lrocksdb -lblake3 -lsdbus-c++ -lseccomp -lcap -lrt -lflatbuffers -larchive -lssl -lcrypto
 DEBUG_FLAGS = -g
 DEPFLAGS = -MMD -MP
+LIBS_TO_CHECK = $(patsubst -l%,%,$(LDFLAGS))
 
 FLATC_CC = flatc
 FLATC_CCFLAGS = --cpp
 
 INCLUDE_DIRS = ./include
+THIRD_PARTY_DIR = ./third_party
 SRCDIR = ./src
 TEST_DIR = ./tests
 
@@ -25,8 +27,8 @@ TEST_OUT = ./test_out
 FLATBUFFERS_SCHEMAS_DIR = ./flatbuffer_schemas
 GENERATED_SCHEMAS_DIR = ./gen_schemas
 
-DEBUG_CPPFLAGS = $(STD) $(CXXFLAGS) $(DEBUG_FLAGS) -I$(INCLUDE_DIRS) -I$(GENERATED_SCHEMAS_DIR) $(DEPFLAGS)
-CPPFLAGS = $(STD) $(CXXFLAGS) -I$(INCLUDE_DIRS) -I$(GENERATED_SCHEMAS_DIR) $(OPTFLAGS) $(DEPFLAGS)
+DEBUG_CPPFLAGS = $(STD) $(CXXFLAGS) $(DEBUG_FLAGS) -I$(INCLUDE_DIRS) -I$(THIRD_PARTY_DIR) -I$(GENERATED_SCHEMAS_DIR) $(DEPFLAGS)
+CPPFLAGS = $(STD) $(CXXFLAGS) -I$(INCLUDE_DIRS) -I$(THIRD_PARTY_DIR) -I$(GENERATED_SCHEMAS_DIR) $(OPTFLAGS) $(DEPFLAGS)
 
 FLATBUFFERS_SCHEMAS = $(wildcard $(FLATBUFFERS_SCHEMAS_DIR)/*.fbs)
 
@@ -58,9 +60,9 @@ ifeq ($(FLATC_CC_PATH),false)
 	$(error "Error: '$(FLATC_CC)' not found.")
 endif
 
-all: generate_schemas build-release
+all: check-deps generate-schemas release
 
-build-release: $(OBJECTS)
+release: $(OBJECTS)
 	@mkdir -p $(BUILDDIR)
 	$(CXX) -o $(BUILDDIR)/quiver $^ $(LDFLAGS)
 
@@ -68,7 +70,7 @@ $(BINARIES)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(BINARIES)
 	$(CXX) $(CPPFLAGS) -c $< -o $@
 
-build-debug: $(DEBUG_OBJECTS)
+debug: $(DEBUG_OBJECTS)
 	@mkdir -p $(DEBUG_BUILDDIR)
 	$(CXX) -o $(DEBUG_BUILDDIR)/quiver $^ $(LDFLAGS)
 
@@ -76,9 +78,20 @@ $(DEBUG_BINARIES)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(DEBUG_BINARIES)
 	$(CXX) $(DEBUG_CPPFLAGS) -c $< -o $@
 
-generate_schemas: $(FLATBUFFERS_SCHEMAS)
+generate-schemas: $(FLATBUFFERS_SCHEMAS)
 	@mkdir -p $(GENERATED_SCHEMAS_DIR)
 	$(FLATC_CC) $(FLATC_CCFLAGS) -o $(GENERATED_SCHEMAS_DIR) $^
+
+check-deps:
+	@for lib in $(LIBS_TO_CHECK); do \
+		if ld -l$$lib 2>&1 | grep -q "cannot find -l$$lib"; then \
+			echo "missing -l$$lib. Halting." && exit 1; \
+		else \
+			echo "found $$lib."; \
+		fi; \
+	done
+	@echo "All dependencies resolved. Starting build..."
+	@echo "-------------------------------------------"
 
 test: $(TEST_EXEC)
 	@./$(TEST_EXEC)
@@ -94,7 +107,7 @@ $(TEST_BINARIES)/%.o: $(TEST_DIR)/%.cpp
 clean:
 	rm -rf ./bin ./build $(TEST_OUT) $(GENERATED_SCHEMAS_DIR)
 
-.PHONY: all build-release build-debug generate_schemas test clean
+.PHONY: all check-deps release debug generate-schemas test clean
 
 -include $(OBJECTS:.o=.d)
 -include $(DEBUG_OBJECTS:.o=.d)

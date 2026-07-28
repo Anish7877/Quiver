@@ -515,19 +515,19 @@ static constexpr std::size_t HOSTNAME_MAX_LEN{12};
         // 0xFFFFFFFF = PER_QUERY        (query current personality, no change)
         rules.emplace_back(make_conditional_allow(
                 "personality",
-                {arg("SCMP_CMP_EQ", 0x00000000, 0)}));
+                {arg("eq", 0x00000000, 0)}));
         rules.emplace_back(make_conditional_allow(
                 "personality",
-                {arg("SCMP_CMP_EQ", 0x00000008, 0)}));
+                {arg("eq", 0x00000008, 0)}));
         rules.emplace_back(make_conditional_allow(
                 "personality",
-                {arg("SCMP_CMP_EQ", 0x00020000, 0)}));   // PER_LINUX32
+                {arg("eq", 0x00020000, 0)}));   // PER_LINUX32
         rules.emplace_back(make_conditional_allow(
                 "personality",
-                {arg("SCMP_CMP_EQ", 0x00020008, 0)}));   // PER_LINUX32 | PER_ADDR_COMPAT_LAYOUT
+                {arg("eq", 0x00020008, 0)}));   // PER_LINUX32 | PER_ADDR_COMPAT_LAYOUT
         rules.emplace_back(make_conditional_allow(
                 "personality",
-                {arg("SCMP_CMP_EQ", 0xFFFFFFFF, 0)}));   // PER_QUERY
+                {arg("eq", 0xFFFFFFFF, 0)}));   // PER_QUERY
 
         // ── Rule 4: arch_prctl — x86_64 specific, always allow ───────────────
         // Required for thread-local storage setup (FS/GS base registers).
@@ -611,7 +611,7 @@ static constexpr std::size_t HOSTNAME_MAX_LEN{12};
         // AF_BLUETOOTH (31) — deny entirely: Bluetooth sockets bypass network ns
         rules.emplace_back(make_conditional_deny(
                 "socket",
-                {arg("SCMP_CMP_EQ", 31, 0)},   // domain == AF_BLUETOOTH
+                {arg("eq", 31, 0)},   // domain == AF_BLUETOOTH
                 1));
 
         // AF_NETLINK (16) + NETLINK_ROUTE (9) — deny: raw netlink routing socket
@@ -619,8 +619,8 @@ static constexpr std::size_t HOSTNAME_MAX_LEN{12};
         rules.emplace_back(make_conditional_deny(
                 "socket",
                 {
-                        arg("SCMP_CMP_EQ", 16, 0),   // domain == AF_NETLINK
-                        arg("SCMP_CMP_EQ",  9, 2)    // protocol == NETLINK_ROUTE
+                        arg("eq", 16, 0),   // domain == AF_NETLINK
+                        arg("eq",  9, 2)    // protocol == NETLINK_ROUTE
                 },
                 22));   // EINVAL — matches Podman behaviour
 
@@ -628,14 +628,14 @@ static constexpr std::size_t HOSTNAME_MAX_LEN{12};
         rules.emplace_back(make_conditional_allow(
                 "socket",
                 {
-                        arg("SCMP_CMP_EQ", 16, 0),   // domain == AF_NETLINK
-                        arg("SCMP_CMP_NE",  9, 2)    // protocol != NETLINK_ROUTE
+                        arg("eq", 16, 0),   // domain == AF_NETLINK
+                        arg("ne",  9, 2)    // protocol != NETLINK_ROUTE
                 }));
 
         // All other address families — allow
         rules.emplace_back(make_conditional_allow(
                 "socket",
-                {arg("SCMP_CMP_NE", 16, 0)}));   // domain != AF_NETLINK
+                {arg("ne", 16, 0)}));   // domain != AF_NETLINK
 
         // ── Rule 16: bpf — deny ───────────────────────────────────────────────
         // BPF program loading can be used to probe kernel memory and bypass
@@ -853,27 +853,27 @@ static constexpr std::size_t HOSTNAME_MAX_LEN{12};
         //
         // "nosuid", "noexec", "nodev" are mount flags, NOT data options.
         // They belong in the flags field.
-        spec.mounts = {
-                // POSIX message queue filesystem — needed by some IPC libraries.
-                OCIRuntime::Mount{
-                        {},                                   // options (data)
-                        {"nosuid", "noexec", "nodev"},        // flags → MS_NOSUID|MS_NOEXEC|MS_NODEV
-                        {},                                   // attrs
-                        "/dev/mqueue",                        // destination
-                        "mqueue",                             // type
-                        "mqueue"                              // source
-                },
-                // cgroup2 filesystem: mounted read-only so the container can
-                // read its own resource limits but cannot modify host cgroups.
-                OCIRuntime::Mount{
-                        {},
-                        {"nosuid", "noexec", "nodev", "relatime", "ro"},
-                        {},
-                        "/sys/fs/cgroup",
-                        "cgroup2",
-                        "cgroup2"
-                }
-        };
+        //spec.mounts = {
+        //        // POSIX message queue filesystem — needed by some IPC libraries.
+        //        OCIRuntime::Mount{
+        //                {},                                   // options (data)
+        //                {"nosuid", "noexec", "nodev"},        // flags → MS_NOSUID|MS_NOEXEC|MS_NODEV
+        //                {},                                   // attrs
+        //                "/dev/mqueue",                        // destination
+        //                "mqueue",                             // type
+        //                "mqueue"                              // source
+        //        },
+        //        // cgroup2 filesystem: mounted read-only so the container can
+        //        // read its own resource limits but cannot modify host cgroups.
+        //        OCIRuntime::Mount{
+        //                {},
+        //                {"nosuid", "noexec", "nodev", "relatime", "ro"},
+        //                {},
+        //                "/sys/fs/cgroup",
+        //                "cgroup2",
+        //                "cgroup2"
+        //        }
+        //};
 
         // ── Devices ───────────────────────────────────────────────────────────
         // No extra device bind-mounts beyond what mount_necessary_dirs() provides

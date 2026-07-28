@@ -6,6 +6,7 @@ struct ContainerConfig {
         std::string hostname{};
         std::string domain_name{};
         std::string pty_slave_name{};
+        std::string final_filesystem{};
         int pty_slave_fd{};
         int control_sock{};
         pid_t pid{};

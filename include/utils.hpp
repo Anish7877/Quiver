@@ -1,10 +1,13 @@
 #pragma once
+#include "container_config.hpp"
 #include "oci_runtime.hpp"
 #include "types.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <iostream>
+#include <format>
 #include <openssl/evp.h>
 namespace fs = std::filesystem;
 
@@ -49,7 +52,7 @@ namespace Utils {
         auto get_username() -> std::string;
         auto resolve_user_group(const std::vector<std::string>&, const std::string&) -> std::pair<uid_t, gid_t>;
         auto build_gid_map_payload(pid_t) -> std::string;
-        auto write_all(int, const void*, size_t) -> ssize_t;
+        auto write_all(int, const char*, size_t) -> bool;
         auto create_tar_gz(const std::string&, const std::string&) -> void;
         auto extract_tarball(const std::string&, const std::string&) -> void;
         auto extract_oci_layer(const std::string&, const std::string&) -> void;
@@ -58,9 +61,44 @@ namespace Utils {
         auto sha256_file(const fs::path&) -> std::string;
         auto print_usage() -> void;
 
-        // OCI layer export utilities
         auto sha256_final(EVP_MD_CTX*) -> std::string;
         auto is_overlay_whiteout(const fs::path&) -> bool;
         auto is_opaque_directory(const fs::path&) -> bool;
         auto create_oci_layer(const fs::path& upper_dir, const fs::path& output_path) -> LayerInfo;
+
+        [[nodiscard]] auto load_seccomp_profile(const fs::path&) -> OCIRuntime::Seccomp;
+        auto send_all(int fd, const void* data, size_t size) -> bool;
+        auto recv_all(int fd, void* data, size_t size) -> bool;
+
+        auto is_process_alive(pid_t, const std::string&) -> bool;
+        [[nodiscard]] auto get_boot_time() -> long;
+}
+
+namespace PrintUtils {
+        constexpr int KEY_WIDTH{24};
+
+        template<typename T>
+        auto print_field(std::string_view key, const T& value) -> void {
+                std::cout << std::format("{:<{}} : {}\n", key, KEY_WIDTH, value);
+        }
+
+        inline auto print_field(std::string_view key, bool value) -> void {
+                std::cout << std::format("{:<{}} : {}\n",
+                                key,
+                                KEY_WIDTH,
+                                value ? "true" : "false");
+        }
+
+        template<typename T>
+        auto print_vector(std::string_view key, const std::vector<T>& values) -> void {
+                if (values.empty())
+                        return;
+                std::cout << std::format("{:<{}} :\n", key, KEY_WIDTH);
+
+                for (const auto& value : values)
+                        std::cout << std::format("  • {}\n", value);
+        }
+
+        auto print_section(std::string_view name) -> void;
+        auto print_container_config(const ContainerConfig&) -> void;
 }

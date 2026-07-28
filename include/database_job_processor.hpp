@@ -4,8 +4,10 @@
 #include "types.hpp"
 #include <memory>
 #include <rocksdb/db.h>
+#include <sys/un.h>
 #include <thread>
 #include <atomic>
+#include <sys/socket.h>
 
 class DatabaseCommandQueue;
 class LoggerCommandQueue;
@@ -42,4 +44,7 @@ class DatabaseJobProcessor : public JobProcessor<DatabaseJobData>, public Single
                 LogJobData m_log_data{};
                 std::atomic<bool> m_running{};
                 std::jthread m_worker{};
+                fs::path m_socket_path{};
+                sockaddr_un m_addr{};
+                int m_socket_fd{};
 };

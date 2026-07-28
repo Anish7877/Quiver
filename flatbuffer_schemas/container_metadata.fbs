@@ -194,11 +194,13 @@ table ContainerConfig {
 }
 
 table ContainerMetadata {
-        config     : ContainerConfig;
-        name       : string;
-        image      : string;
-        status     : string;
-        created_at : string;
+        config           : ContainerConfig;
+        name             : string;
+        image            : string;
+        status           : string;
+        created_at       : string;
+        final_filesystem : string;
+        boot_time        : int32;
 }
 
 root_type ContainerMetadata;

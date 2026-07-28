@@ -19,8 +19,8 @@ namespace Serialization {
         auto serialize  (flatbuffers::FlatBufferBuilder&, const ImageMetadata&) -> flatbuffers::Offset<FB::ImageMetadata>;
         auto deserialize(const FB::ImageMetadata*) -> ImageMetadata;
 
-        auto serialize (flatbuffers::FlatBufferBuilder&, const LayerCache&) -> flatbuffers::Offset<FB::LayerCache>;
-        auto deserialize(const FB::LayerCache*) -> LayerCache;
+        //auto serialize (flatbuffers::FlatBufferBuilder&, const LayerCache&) -> flatbuffers::Offset<FB::LayerCache>;
+        //auto deserialize(const FB::LayerCache*) -> LayerCache;
 }
 
 template<typename T>
