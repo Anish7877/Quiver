@@ -5,6 +5,7 @@
 *.txt
 *.sh
 Quiverfile
+!conanfile.txt
 
 .vscode/**
 *.code-workspace

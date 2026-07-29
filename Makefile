@@ -1,63 +1,100 @@
 CXX ?= g++
-MIN_CXX_VER = 15
-STD = -std=c++20
-OPTFLAGS = -O3
-CXXFLAGS = -Wall -Wextra -Wpedantic -Wno-interference-size -march=native
-LDFLAGS = -lcpr -lcurl -lz -lpthread -lutil -lrocksdb -lblake3 -lsdbus-c++ -lseccomp -lcap -lrt -lflatbuffers -larchive -lssl -lcrypto
-DEBUG_FLAGS = -g
-DEPFLAGS = -MMD -MP
-LIBS_TO_CHECK = $(patsubst -l%,%,$(LDFLAGS))
 
-FLATC_CC = flatc
-FLATC_CCFLAGS = --cpp
+MIN_CXX_VER := 15
 
-INCLUDE_DIRS = ./include
-THIRD_PARTY_DIR = ./third_party
-SRCDIR = ./src
-TEST_DIR = ./tests
+STD := -std=c++20
+OPTFLAGS := -O3
+DEBUG_FLAGS := -g
 
-BINARIES = ./bin/release
-DEBUG_BINARIES = ./bin/debug
-TEST_BINARIES = ./bin/test
+CXXFLAGS := -Wall -Wextra -Wpedantic -Wno-interference-size -march=native
+DEPFLAGS := -MMD -MP
 
-BUILDDIR = ./build/release
-DEBUG_BUILDDIR = ./build/debug
-TEST_OUT = ./test_out
+PKG_CONFIG_PATH := $(CURDIR)/build
+export PKG_CONFIG_PATH
 
-FLATBUFFERS_SCHEMAS_DIR = ./flatbuffer_schemas
-GENERATED_SCHEMAS_DIR = ./gen_schemas
+CONAN_PACKAGES := \
+	cpr \
+	rocksdb \
+	libblake3 \
+	libcap \
+	flatbuffers \
+	libarchive
 
-DEBUG_CPPFLAGS = $(STD) $(CXXFLAGS) $(DEBUG_FLAGS) -I$(INCLUDE_DIRS) -I$(THIRD_PARTY_DIR) -I$(GENERATED_SCHEMAS_DIR) $(DEPFLAGS)
-CPPFLAGS = $(STD) $(CXXFLAGS) -I$(INCLUDE_DIRS) -I$(THIRD_PARTY_DIR) -I$(GENERATED_SCHEMAS_DIR) $(OPTFLAGS) $(DEPFLAGS)
+CPPFLAGS := \
+	$(STD) \
+	$(CXXFLAGS) \
+	$(OPTFLAGS) \
+	$(DEPFLAGS) \
+	-I./include \
+	-I./third_party \
+	-I./gen_schemas \
+	$(shell pkg-config --cflags $(CONAN_PACKAGES))
 
-FLATBUFFERS_SCHEMAS = $(wildcard $(FLATBUFFERS_SCHEMAS_DIR)/*.fbs)
+DEBUG_CPPFLAGS := \
+	$(STD) \
+	$(CXXFLAGS) \
+	$(DEBUG_FLAGS) \
+	$(DEPFLAGS) \
+	-I./include \
+	-I./third_party \
+	-I./gen_schemas \
+	$(shell pkg-config --cflags $(CONAN_PACKAGES))
 
-CPPFILES = $(wildcard $(SRCDIR)/*.cpp)
-OBJECTS = $(CPPFILES:$(SRCDIR)/%.cpp=$(BINARIES)/%.o)
-DEBUG_OBJECTS = $(CPPFILES:$(SRCDIR)/%.cpp=$(DEBUG_BINARIES)/%.o)
+LDFLAGS := \
+	$(shell pkg-config --libs $(CONAN_PACKAGES)) \
+	-lsdbus-c++ \
+	-lseccomp \
+	-lutil \
+	-lacl
 
-MAIN_OBJ = $(BINARIES)/main.o
-TESTABLE_OBJS = $(filter-out $(MAIN_OBJ), $(OBJECTS))
+FLATC_CC := flatc
+FLATC_CCFLAGS := --cpp
 
-TEST_FILES = $(wildcard $(TEST_DIR)/*.cpp)
-TEST_OBJS = $(TEST_FILES:$(TEST_DIR)/%.cpp=$(TEST_BINARIES)/%.o)
-TEST_EXEC = $(TEST_OUT)/run_tests
+INCLUDE_DIRS := ./include
+THIRD_PARTY_DIR := ./third_party
+SRCDIR := ./src
+TEST_DIR := ./tests
 
-CXX_PATH = $(shell command -v $(CXX) 2> /dev/null)
+BINARIES := ./bin/release
+DEBUG_BINARIES := ./bin/debug
+TEST_BINARIES := ./bin/test
+
+BUILDDIR := ./build/release
+DEBUG_BUILDDIR := ./build/debug
+TEST_OUT := ./test_out
+
+FLATBUFFERS_SCHEMAS_DIR := ./flatbuffer_schemas
+GENERATED_SCHEMAS_DIR := ./gen_schemas
+
+FLATBUFFERS_SCHEMAS := $(wildcard $(FLATBUFFERS_SCHEMAS_DIR)/*.fbs)
+
+CPPFILES := $(wildcard $(SRCDIR)/*.cpp)
+OBJECTS := $(CPPFILES:$(SRCDIR)/%.cpp=$(BINARIES)/%.o)
+DEBUG_OBJECTS := $(CPPFILES:$(SRCDIR)/%.cpp=$(DEBUG_BINARIES)/%.o)
+
+MAIN_OBJ := $(BINARIES)/main.o
+TESTABLE_OBJS := $(filter-out $(MAIN_OBJ),$(OBJECTS))
+
+TEST_FILES := $(wildcard $(TEST_DIR)/*.cpp)
+TEST_OBJS := $(TEST_FILES:$(TEST_DIR)/%.cpp=$(TEST_BINARIES)/%.o)
+TEST_EXEC := $(TEST_OUT)/run_tests
+
+CXX_PATH := $(shell command -v $(CXX) 2>/dev/null)
 CXX_VERSION := $(shell $(CXX) -dumpversion | cut -f1 -d.)
 IS_SUPPORTED := $(shell [ "$(CXX_VERSION)" -ge "$(MIN_CXX_VER)" ] && echo true || echo false)
-FLATC_CC_PATH = $(shell command -v $(FLATC_CC) 2> /dev/null)
 
-ifeq ($(CXX_PATH),false)
-	$(error "Error: '$(CXX)' not found.")
+FLATC_CC_PATH := $(shell command -v $(FLATC_CC) 2>/dev/null)
+
+ifeq ($(CXX_PATH),)
+$(error "$(CXX) not found")
 endif
 
 ifeq ($(IS_SUPPORTED),false)
-	$(error "Error: '$(CXX)' >= $(MIN_CXX_VER)")
+$(error GCC/G++ >= $(MIN_CXX_VER) required)
 endif
 
-ifeq ($(FLATC_CC_PATH),false)
-	$(error "Error: '$(FLATC_CC)' not found.")
+ifeq ($(FLATC_CC_PATH),)
+$(error flatc not found)
 endif
 
 all: check-deps generate-schemas release
@@ -66,13 +103,13 @@ release: $(OBJECTS)
 	@mkdir -p $(BUILDDIR)
 	$(CXX) -o $(BUILDDIR)/quiver $^ $(LDFLAGS)
 
-$(BINARIES)/%.o: $(SRCDIR)/%.cpp
-	@mkdir -p $(BINARIES)
-	$(CXX) $(CPPFLAGS) -c $< -o $@
-
 debug: $(DEBUG_OBJECTS)
 	@mkdir -p $(DEBUG_BUILDDIR)
 	$(CXX) -o $(DEBUG_BUILDDIR)/quiver $^ $(LDFLAGS)
+
+$(BINARIES)/%.o: $(SRCDIR)/%.cpp
+	@mkdir -p $(BINARIES)
+	$(CXX) $(CPPFLAGS) -c $< -o $@
 
 $(DEBUG_BINARIES)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(DEBUG_BINARIES)
@@ -83,31 +120,51 @@ generate-schemas: $(FLATBUFFERS_SCHEMAS)
 	$(FLATC_CC) $(FLATC_CCFLAGS) -o $(GENERATED_SCHEMAS_DIR) $^
 
 check-deps:
-	@for lib in $(LIBS_TO_CHECK); do \
-		if ld -l$$lib 2>&1 | grep -q "cannot find -l$$lib"; then \
-			echo "missing -l$$lib. Halting." && exit 1; \
-		else \
-			echo "found $$lib."; \
-		fi; \
-	done
-	@echo "All dependencies resolved. Starting build..."
-	@echo "-------------------------------------------"
+	@pkg-config --exists $(CONAN_PACKAGES) || { \
+		echo "Run: conan install . --output-folder build --build=missing"; \
+		exit 1; \
+	}
+	@pkg-config --exists sdbus-c++ || { \
+		echo "Missing sdbus-c++"; \
+		exit 1; \
+	}
+	@ld -lseccomp -o /dev/null >/dev/null 2>&1 || { \
+		echo "Missing libseccomp"; \
+		exit 1; \
+	}
+	@command -v flatc >/dev/null || { \
+		echo "flatc not found"; \
+		exit 1; \
+	}
+	@echo "Dependencies OK"
 
 test: $(TEST_EXEC)
-	@./$(TEST_EXEC)
+	./$(TEST_EXEC)
 
 $(TEST_EXEC): $(TEST_OBJS) $(TESTABLE_OBJS)
 	@mkdir -p $(TEST_OUT)
-	$(CXX) $(CPPFLAGS) $^ -o $@ $(LDFLAGS)
+	$(CXX) $^ -o $@ $(LDFLAGS)
 
 $(TEST_BINARIES)/%.o: $(TEST_DIR)/%.cpp
 	@mkdir -p $(TEST_BINARIES)
 	$(CXX) $(CPPFLAGS) -c $< -o $@
 
 clean:
-	rm -rf ./bin ./build $(TEST_OUT) $(GENERATED_SCHEMAS_DIR)
+	rm -rf \
+		./bin \
+		./build/release \
+		./build/debug \
+		$(TEST_OUT) \
+		$(GENERATED_SCHEMAS_DIR)
 
-.PHONY: all check-deps release debug generate-schemas test clean
+.PHONY: \
+	all \
+	release \
+	debug \
+	test \
+	clean \
+	check-deps \
+	generate-schemas
 
 -include $(OBJECTS:.o=.d)
 -include $(DEBUG_OBJECTS:.o=.d)
