@@ -2,10 +2,13 @@
 /bin/**
 /test_out/*
 /gen_schemas/*
+/third_party/*
 *.txt
 *.sh
 Quiverfile
 !conanfile.txt
+!setup.sh
+!third_party/CLI11.hpp
 
 .vscode/**
 *.code-workspace
