@@ -4,6 +4,7 @@
 #include "container_db_manager.hpp"
 #include "image_manager.hpp"
 #include "container_monitor.hpp"
+#include "utils.hpp"
 #include <format>
 #include <stdexcept>
 #include <vector>
@@ -331,10 +332,26 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
         }
 }
 
-auto CommandLineHandler::ps() -> void {
+auto CommandLineHandler::ps(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         container_db_manager.init();
-        container_db_manager.list_all_container();
+        if (args.empty()) {
+                container_db_manager.list_all_running_container();
+        }
+        else {
+                if (args.size() != 1) [[unlikely]] {
+                        std::cerr << "Error: more than one argument provided\n";
+                        Utils::print_usage();
+                        return;
+                }
+                if (args[0] == "-a") {
+                        container_db_manager.list_all_container();
+                }
+                else {
+                        std::cerr << std::format("Error: Unknown argument '{}'\n", args[0]);
+                        Utils::print_usage();
+                }
+        }
 }
 
 auto CommandLineHandler::remove(const std::string& key) -> void {

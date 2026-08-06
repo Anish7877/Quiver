@@ -47,8 +47,8 @@ DEBUG_CPPFLAGS := \
 LDFLAGS := \
 	   -L$(LOCAL_INSTALL)/lib -L$(LOCAL_INSTALL)/lib64 \
 	   $(shell pkg-config --libs $(CONAN_PACKAGES)) \
-	   -lsystemd \
 	   -lsdbus-c++ \
+	   -lsystemd \
 	   -lseccomp \
 	   -lutil \
 	   -lacl
@@ -92,15 +92,15 @@ IS_SUPPORTED := $(shell [ "$(CXX_VERSION)" -ge "$(MIN_CXX_VER)" ] && echo true |
 FLATC_CC_PATH := $(shell command -v $(FLATC_CC) 2>/dev/null)
 
 ifeq ($(CXX_PATH),)
-	$(error "$(CXX) not found")
+$(error "$(CXX) not found")
 endif
 
 ifeq ($(IS_SUPPORTED),false)
-	$(error GCC/G++ >= $(MIN_CXX_VER) required)
+$(error GCC/G++ >= $(MIN_CXX_VER) required)
 endif
 
 ifeq ($(FLATC_CC_PATH),)
-	$(error flatc not found)
+$(error flatc not found)
 endif
 
 all: check-deps generate-schemas release

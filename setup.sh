@@ -21,11 +21,31 @@ LOCAL_INSTALL="$BUILD_ROOT/third_party/install"
 CONAN_VENV="$BUILD_ROOT/.conan_venv"
 
 echo "=== Step 1: Checking Host Build Tools ==="
-REQUIRED_TOOLS="autoconf automake libtool cmake python3 git"
+REQUIRED_TOOLS="autoconf automake libtool cmake python3 git newuidmap newgidmap fuse-overlayfs passt"
+
 for tool in $REQUIRED_TOOLS; do
-    if ! command -v $tool >/dev/null 2>&1; then
-        echo "Error: '$tool' is not installed. Please install it via your package manager."
-        exit 1
+if ! command -v $tool >/dev/null 2>&1; then
+        echo "Warning: '$tool' is not installed. Attempting to install automatically..."
+
+        PKG_NAME=$tool
+
+        # Detect package manager and adjust package names if necessary
+        if command -v apt-get >/dev/null 2>&1; then
+            if [ "$tool" = "newuidmap" ] || [ "$tool" = "newgidmap" ]; then PKG_NAME="uidmap"; fi
+            sudo apt-get update && sudo apt-get install -y $PKG_NAME
+
+        elif command -v dnf >/dev/null 2>&1; then
+            if [ "$tool" = "newuidmap" ] || [ "$tool" = "newgidmap" ]; then PKG_NAME="shadow-utils"; fi
+            sudo dnf install -y $PKG_NAME
+
+        elif command -v pacman >/dev/null 2>&1; then
+            if [ "$tool" = "newuidmap" ] || [ "$tool" = "newgidmap" ]; then PKG_NAME="shadow"; fi
+            sudo pacman -S --noconfirm $PKG_NAME
+
+        else
+            echo "Error: '$tool' is not installed and package manager is not supported."
+            exit 1
+        fi
     fi
 done
 
@@ -41,7 +61,7 @@ conan profile detect --force
 
 echo "=== Step 3: Fetching Conan Dependencies ==="
 mkdir -p "$BUILD_DIR"
-conan install "$BUILD_ROOT" --output-folder="$BUILD_DIR" --build=missing
+conan install "$BUILD_ROOT" --output-folder="$BUILD_DIR" --build=missing -s compiler.cppstd=gnu20
 
 echo "=== Step 4: Building Local System Dependencies ==="
 mkdir -p "$BUILD_ROOT/third_party/src" "$LOCAL_INSTALL/lib/pkgconfig"
@@ -58,7 +78,19 @@ git checkout v2.5.5
 make -j$(nproc)
 make install
 
-# 2. Build libacl
+# 2. Build libattr (Added automatically before libacl)
+echo "--- Building libattr ---"
+if [ ! -d "$BUILD_ROOT/third_party/src/attr" ]; then
+    git clone https://git.savannah.nongnu.org/git/attr.git "$BUILD_ROOT/third_party/src/attr"
+fi
+cd "$BUILD_ROOT/third_party/src/attr"
+git checkout v2.5.1
+./autogen.sh
+./configure --prefix="$LOCAL_INSTALL" --enable-static --disable-shared
+make -j$(nproc)
+make install
+
+# 3. Build libacl
 echo "--- Building libacl ---"
 if [ ! -d "$BUILD_ROOT/third_party/src/acl" ]; then
     git clone https://git.savannah.nongnu.org/git/acl.git "$BUILD_ROOT/third_party/src/acl"
@@ -70,15 +102,31 @@ git checkout v2.3.2
 make -j$(nproc)
 make install
 
-# 3. Build sdbus-c++
+# 4. Build sdbus-c++
 echo "--- Building sdbus-c++ ---"
 if [ ! -d "$BUILD_ROOT/third_party/src/sdbus-cpp" ]; then
     git clone https://github.com/Kistler-Group/sdbus-cpp.git "$BUILD_ROOT/third_party/src/sdbus-cpp"
 fi
 cd "$BUILD_ROOT/third_party/src/sdbus-cpp"
 git checkout v2.3.1
+rm -rf build
+
+cmake -S . -B build -DBUILD_SHARED_LIBS=OFF -DSDBUSCPP_BUILD_DOCS=OFF -DCMAKE_INSTALL_PREFIX="$LOCAL_INSTALL"
+
+cmake --build build -j$(nproc)
+cmake --install build
+
+# 5. Build nlohmann-json
+echo "--- Building nlohmann-json ---"
+if [ ! -d "$BUILD_ROOT/third_party/src/nlohmann-json" ]; then
+    git clone https://github.com/nlohmann/json.git "$BUILD_ROOT/third_party/src/nlohmann-json"
+fi
+cd "$BUILD_ROOT/third_party/src/nlohmann-json"
+# Checkout the latest stable release (3.11.3)
+git checkout v3.11.3
 mkdir -p build && cd build
-cmake .. -DBUILD_SHARED_LIBS=OFF -DSDBUSCPP_BUILD_DOCS=OFF -DCMAKE_INSTALL_PREFIX="$LOCAL_INSTALL"
+# Disable tests to speed up installation
+cmake .. -DJSON_BuildTests=OFF -DCMAKE_INSTALL_PREFIX="$LOCAL_INSTALL"
 make -j$(nproc)
 make install
 

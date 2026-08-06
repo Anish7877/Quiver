@@ -44,11 +44,15 @@ int main(int argc, char* argv[]) {
             }
 
             // Convert vector to std::span and execute
-            CommandLineHandler::run(std::span<std::string>(args));
+            CommandLineHandler::run(args);
 
         } else if (command == "ps") {
-                CommandLineHandler::ps();
+            std::vector<std::string> args;
 
+            for (int i = 2; i < argc; ++i) {
+                args.push_back(argv[i]);
+            }
+                CommandLineHandler::ps(args);
         } else if (command == "rm") {
                 CommandLineHandler::remove(argv[2]);
         } else if (command == "inspect") {
