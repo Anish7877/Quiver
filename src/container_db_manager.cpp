@@ -54,7 +54,7 @@ auto ContainerDbManager::add_container(const ContainerDbObject& db_object) -> vo
 auto ContainerDbManager::remove_container(const std::string& key) -> void {
         auto metadata{get_container(key)};
         if (!metadata) {
-                std::cerr << std::format("Error: Container '{}' not found.\n", key);
+                std::cerr << std::format("Error: Container '{}' not found\n", key);
                 return;
         }
         if (metadata->status == "running") {
@@ -89,149 +89,33 @@ auto ContainerDbManager::update_container(const std::string& key, const Containe
 }
 
 auto ContainerDbManager::list_all_container() -> void {
-        DatabaseJobData job_data{};
-        job_data.target = TargetDB::CONTAINER;
-        job_data.type = JobType::GETALL;
-        while (!m_db_command_queue->atomic_push(job_data)) {
-                std::this_thread::yield();
-        }
-
-        int connection_fd{socket(AF_UNIX, SOCK_STREAM, 0)};
-        if (connection_fd == -1) {
-                std::cerr << "Error: Unable to create socket: " << std::strerror(errno) << '\n';
-                return;
-        }
-        while (connect(connection_fd, reinterpret_cast<sockaddr*>(&m_addr), sizeof(m_addr)) == -1) {
-                if (errno != ENOENT && errno != ECONNREFUSED) {
-                        std::cerr << "Error: Unable to connect: " << std::strerror(errno) << '\n';
-                        close(connection_fd);
-                        return;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
+        auto containers{get_all_container()};
         constexpr int id_width{32};
         constexpr int image_width{20};
         constexpr int name_width{20};
         constexpr int status_width{10};
         std::cout << std::format( "{:<{}}  {:<{}}  {:<{}}  {:<{}}  {}\n", "CONTAINER ID", id_width, "IMAGE", image_width,
                         "NAME", name_width, "STATUS", status_width, "CREATED");
-
-        size_t n_entries{0};
-        if (!Utils::recv_all(connection_fd, &n_entries, sizeof(n_entries))) {
-                std::cerr << "Error: Unable to get number of entries\n";
-                return;
+        for (const auto& container : containers) {
+                std::cout << std::format("{:<{}}  {:<{}}  {:<{}}  {:<{}}  {}\n", container.config.container_id, id_width, container.image, image_width,
+                                container.name, name_width, container.status, status_width, container.created_at);
         }
-        auto boot_time{Utils::get_boot_time()};
-        for (size_t i{0}; i<n_entries; ++i) {
-                size_t key_size{};
-                if (!Utils::recv_all(connection_fd, &key_size, sizeof(key_size))) {
-                        std::cerr << "Error reading key size.\n";
-                        break;
-                }
-                std::string key(key_size, '\0');
-                if (!Utils::recv_all(connection_fd, key.data(), key_size)) {
-                        std::cerr << "Error reading key.\n";
-                        break;
-                }
-                size_t value_size{};
-                if (!Utils::recv_all(connection_fd, &value_size, sizeof(value_size))) {
-                        std::cerr << "Error reading value size.\n";
-                        break;
-                }
-                std::string value(value_size, '\0');
-                if (!Utils::recv_all(connection_fd, value.data(), value_size)) {
-                        std::cerr << "Error reading value.\n";
-                        break;
-                }
-                auto metadata{extract_metadata(value)};
-                if (!metadata) continue;
-                if (metadata->status == "running" && !Utils::is_process_alive(metadata->config.pid, key)) {
-                        if (metadata->boot_time < boot_time) {
-                                metadata->status = "interrupted by reboot";
-                        }
-                        else {
-                                metadata->status = "killed";
-                        }
-                        update_container(key, metadata.value());
-                }
-                std::cout << std::format("{:<{}}  {:<{}}  {:<{}}  {:<{}}  {}\n", key, id_width, metadata->image, image_width,
-                                metadata->name, name_width, metadata->status, status_width, metadata->created_at);
-        }
-        close(connection_fd);
 }
 
 auto ContainerDbManager::list_all_running_container() -> void {
-        DatabaseJobData job_data{};
-        job_data.target = TargetDB::CONTAINER;
-        job_data.type = JobType::GETALL;
-        while (!m_db_command_queue->atomic_push(job_data)) {
-                std::this_thread::yield();
-        }
-
-        int connection_fd{socket(AF_UNIX, SOCK_STREAM, 0)};
-        if (connection_fd == -1) {
-                std::cerr << "Error: Unable to create socket: " << std::strerror(errno) << '\n';
-                return;
-        }
-        while (connect(connection_fd, reinterpret_cast<sockaddr*>(&m_addr), sizeof(m_addr)) == -1) {
-                if (errno != ENOENT && errno != ECONNREFUSED) {
-                        std::cerr << "Error: Unable to connect: " << std::strerror(errno) << '\n';
-                        close(connection_fd);
-                        return;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
+        auto containers{get_all_container()};
         constexpr int id_width{32};
         constexpr int image_width{20};
         constexpr int name_width{20};
         constexpr int status_width{10};
         std::cout << std::format( "{:<{}}  {:<{}}  {:<{}}  {:<{}}  {}\n", "CONTAINER ID", id_width, "IMAGE", image_width,
                         "NAME", name_width, "STATUS", status_width, "CREATED");
-        size_t n_entries{0};
-        if (!Utils::recv_all(connection_fd, &n_entries, sizeof(n_entries))) {
-                std::cerr << "Error: Unable to get number of entries\n";
-                return;
-        }
 
-        auto boot_time{Utils::get_boot_time()};
-
-        for (size_t i{0}; i<n_entries; ++i) {
-                size_t key_size{};
-                if (!Utils::recv_all(connection_fd, &key_size, sizeof(key_size))) {
-                        std::cerr << "Error reading key size.\n";
-                        break;
-                }
-                std::string key(key_size, '\0');
-                if (!Utils::recv_all(connection_fd, key.data(), key_size)) {
-                        std::cerr << "Error reading key.\n";
-                        break;
-                }
-                size_t value_size{};
-                if (!Utils::recv_all(connection_fd, &value_size, sizeof(value_size))) {
-                        std::cerr << "Error reading value size.\n";
-                        break;
-                }
-                std::string value(value_size, '\0');
-                if (!Utils::recv_all(connection_fd, value.data(), value_size)) {
-                        std::cerr << "Error reading value.\n";
-                        break;
-                }
-                auto metadata{extract_metadata(value)};
-                if (!metadata) continue;
-                if (metadata->status == "running" && !Utils::is_process_alive(metadata->config.pid, key)) {
-                        if (metadata->boot_time < boot_time) {
-                                metadata->status = "interrupted by reboot";
-                        }
-                        else {
-                                metadata->status = "killed";
-                        }
-                        update_container(key, metadata.value());
-                }
-                if (metadata->status != "running") continue;
-                std::cout << std::format("{:<{}}  {:<{}}  {:<{}}  {:<{}}  {}\n", key, id_width, metadata->image, image_width,
-                                metadata->name, name_width, metadata->status, status_width, metadata->created_at);
+        for (const auto& container : containers) {
+                if (container.status != "running") continue;
+                std::cout << std::format("{:<{}}  {:<{}}  {:<{}}  {:<{}}  {}\n", container.config.container_id, id_width, container.image, image_width,
+                                container.name, name_width, container.status, status_width, container.created_at);
         }
-        close(connection_fd);
 }
 
 auto ContainerDbManager::get_container(const std::string& key) -> std::optional<ContainerDbObject> {
@@ -292,6 +176,75 @@ auto ContainerDbManager::get_container(const std::string& key) -> std::optional<
         return metadata;
 }
 
+auto ContainerDbManager::get_all_container() -> std::vector<ContainerDbObject> {
+        DatabaseJobData job_data{};
+        job_data.target = TargetDB::CONTAINER;
+        job_data.type = JobType::GETALL;
+        while (!m_db_command_queue->atomic_push(job_data)) {
+                std::this_thread::yield();
+        }
+        std::vector<ContainerDbObject> containers{};
+        int connection_fd{socket(AF_UNIX, SOCK_STREAM, 0)};
+        if (connection_fd == -1) {
+                std::cerr << "Error: Unable to create socket: " << std::strerror(errno) << '\n';
+                return containers;
+        }
+        while (connect(connection_fd, reinterpret_cast<sockaddr*>(&m_addr), sizeof(m_addr)) == -1) {
+                if (errno != ENOENT && errno != ECONNREFUSED) {
+                        std::cerr << "Error: Unable to connect: " << std::strerror(errno) << '\n';
+                        close(connection_fd);
+                        return containers;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        size_t n_entries{0};
+        if (!Utils::recv_all(connection_fd, &n_entries, sizeof(n_entries))) {
+                std::cerr << "Error: Unable to get number of entries\n";
+                return containers;
+        }
+
+        containers.reserve(n_entries);
+
+        auto boot_time{Utils::get_boot_time()};
+
+        for (size_t i{0}; i<n_entries; ++i) {
+                size_t key_size{};
+                if (!Utils::recv_all(connection_fd, &key_size, sizeof(key_size))) {
+                        std::cerr << "Error reading key size.\n";
+                        break;
+                }
+                std::string key(key_size, '\0');
+                if (!Utils::recv_all(connection_fd, key.data(), key_size)) {
+                        std::cerr << "Error reading key.\n";
+                        break;
+                }
+                size_t value_size{};
+                if (!Utils::recv_all(connection_fd, &value_size, sizeof(value_size))) {
+                        std::cerr << "Error reading value size.\n";
+                        break;
+                }
+                std::string value(value_size, '\0');
+                if (!Utils::recv_all(connection_fd, value.data(), value_size)) {
+                        std::cerr << "Error reading value.\n";
+                        break;
+                }
+                auto metadata{extract_metadata(value)};
+                if (!metadata) continue;
+                if (metadata->status == "running" && !Utils::is_process_alive(metadata->config.pid, key)) {
+                        if (metadata->boot_time < boot_time) {
+                                metadata->status = "interrupted by reboot";
+                        }
+                        else {
+                                metadata->status = "killed";
+                        }
+                        update_container(key, metadata.value());
+                }
+                containers.emplace_back(metadata.value());
+        }
+        close(connection_fd);
+        return containers;
+}
+
 auto ContainerDbManager::inspect_container(const std::string& key) -> void {
         auto metadata{get_container(key)};
         if (metadata) {
@@ -300,6 +253,9 @@ auto ContainerDbManager::inspect_container(const std::string& key) -> void {
                         update_container(key, metadata.value());
                 }
                 PrintUtils::print_container_config(metadata->config);
+        }
+        else {
+                std::cerr << std::format("Error: Container '{}' not found\n", key);
         }
 }
 

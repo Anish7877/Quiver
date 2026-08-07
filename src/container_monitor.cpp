@@ -491,13 +491,6 @@ auto ContainerMonitor::run_monitor_parent() -> void {
         } else if (WIFSIGNALED(status)) {
                 int sig{WTERMSIG(status)};
                 final_exit_code = 128 + WTERMSIG(status);
-
-                if (sig == SIGKILL) {
-                        db_status = "killed";
-                }
-                else if (sig == SIGTERM) {
-                        db_status = "powered off";
-                }
         }
 
         container_teardown_guard.dismiss();
@@ -695,7 +688,7 @@ auto ContainerMonitor::attach_to_container(const std::string& container_id) -> v
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
-        int master_fd = m_pty_session_manager->recv_master_fd(m_connection_fd);
+        int master_fd{m_pty_session_manager->recv_master_fd(m_connection_fd)};
         close(m_connection_fd);
         m_connection_fd = -1;
 

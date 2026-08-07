@@ -1,4 +1,5 @@
 #include "command_line_handler.hpp"
+#include "cgroups_manager_creator.hpp"
 #include "spec_generator.hpp"
 #include "utils.hpp"
 #include "container_db_manager.hpp"
@@ -354,14 +355,99 @@ auto CommandLineHandler::ps(std::span<std::string> args) -> void {
         }
 }
 
-auto CommandLineHandler::remove(const std::string& key) -> void {
+auto CommandLineHandler::remove(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         container_db_manager.init();
-        container_db_manager.remove_container(key);
+        if (args.empty()) {
+                std::cerr << "Error: No arguments provided\n";
+                Utils::print_usage();
+                return;
+        }
+        for (const auto& arg : args) {
+                container_db_manager.remove_container(arg);
+        }
 }
 
-auto CommandLineHandler::inspect(const std::string& key) -> void {
+auto CommandLineHandler::inspect(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         container_db_manager.init();
-        container_db_manager.inspect_container(key);
+        if (args.empty()) {
+                std::cerr << "Error: No arguments provided\n";
+                Utils::print_usage();
+                return;
+        }
+        if (args.size() != 1) {
+                std::cerr << "Error: More than one argument provided\n";
+                Utils::print_usage();
+                return;
+        }
+        container_db_manager.inspect_container(args.front());
+}
+
+auto CommandLineHandler::pause(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+        if (args.empty()) {
+                std::cerr << "Error: No arguments provided\n";
+                Utils::print_usage();
+                return;
+        }
+        for (const auto& arg : args) {
+                auto container{container_db_manager.get_container(args.front())};
+                if (container && container->status == "running") {
+                        auto cgroup_manager{CGroupsManagerCreator::create_cgourps_manager(arg, container->config.cgroups_path)};
+                        cgroup_manager->set_freeze("1");
+                        container->status = "paused";
+                        container_db_manager.update_container(container->config.container_id, container.value());
+                }
+                else {
+                        std::cerr << std::format("Error: Container '{}' not found or Container not running\n", arg);
+                }
+        }
+}
+
+auto CommandLineHandler::unpause(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+        if (args.empty()) {
+                std::cerr << "Error: No arguments provided\n";
+                Utils::print_usage();
+                return;
+        }
+        for (const auto& arg : args) {
+                auto container{container_db_manager.get_container(args.front())};
+                if (container && container->status == "paused") {
+                        auto cgroup_manager{CGroupsManagerCreator::create_cgourps_manager(arg, container->config.cgroups_path)};
+                        cgroup_manager->set_freeze("0");
+                        container->status = "running";
+                        container_db_manager.update_container(container->config.container_id, container.value());
+                }
+                else {
+                        std::cerr << std::format("Error: Container '{}' not found or Container is not paused\n", arg);
+                }
+        }
+}
+
+auto CommandLineHandler::attach(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+        if (args.empty()) {
+                std::cerr << "Error: No arguments provided\n";
+                Utils::print_usage();
+                return;
+        }
+        if (args.size() != 1) {
+                std::cerr << "Error: More than one argument provided\n";
+                Utils::print_usage();
+                return;
+        }
+        auto container{container_db_manager.get_container(args.front())};
+        if (container) {
+                auto& container_monitor{ContainerMonitor::get_instance()};
+                container_monitor.init(container->config, container->image, container->name, false);
+                container_monitor.attach_to_container(args.front());
+        }
+        else {
+                std::cerr << std::format("Error: Container '{}' not found\n", args.front());
+        }
 }

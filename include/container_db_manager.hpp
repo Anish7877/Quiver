@@ -25,7 +25,8 @@ class ContainerDbManager : public Singleton<ContainerDbManager> {
                 auto update_container(const std::string&, const ContainerDbObject&) -> void;
                 auto list_all_container() -> void;
                 auto list_all_running_container() -> void;
-                auto get_container(const std::string&) -> std::optional<ContainerDbObject>;
+                [[nodiscard]] auto get_container(const std::string&) -> std::optional<ContainerDbObject>;
+                [[nodiscard]] auto get_all_container() -> std::vector<ContainerDbObject>;
                 auto inspect_container(const std::string&) -> void;
         private:
                 auto extract_metadata(const std::string&) -> std::optional<ContainerDbObject>;
