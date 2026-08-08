@@ -456,3 +456,48 @@ auto CommandLineHandler::attach(std::span<std::string> args) -> void {
                 std::cerr << std::format("Error: Container '{}' not found\n", args.front());
         }
 }
+
+auto CommandLineHandler::ports(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+        if (!args.empty()) {
+                std::cerr << "Error: Arguments Provided\n";
+                Utils::print_usage();
+                return;
+        }
+        auto containers{container_db_manager.get_all_container()};
+        auto chunk_ports = [](const std::vector<std::string>& ports, size_t chunk_size = 3) {
+                std::vector<std::string> lines;
+                if (ports.empty()) {
+                        lines.push_back("-");
+                        return lines;
+                }
+
+                for (size_t i = 0; i < ports.size(); i += chunk_size) {
+                        std::string line = "";
+                        for (size_t j = 0; j < chunk_size && (i + j) < ports.size(); ++j) {
+                                line += ports[i + j];
+                                if (j < chunk_size - 1 && (i + j) < ports.size() - 1) {
+                                        line += ", ";
+                                }
+                        }
+                        lines.push_back(line);
+                }
+                return lines;
+        };
+        std::cout << std::format("{:<70} {:<45} {}\n", "Container ID", "tcp_port", "udp_port");
+        for (const auto& container : containers) {
+                auto tcp_lines{chunk_ports(container.config.networks.tcp_ports, 3)};
+                auto udp_lines{chunk_ports(container.config.networks.udp_ports, 3)};
+                size_t max_lines{std::max(tcp_lines.size(), udp_lines.size())};
+
+                for (size_t i{0}; i < max_lines; ++i) {
+                        std::string current_id = (i == 0) ? container.config.container_id : "";
+
+                        std::string t_port{(i < tcp_lines.size()) ? tcp_lines[i] : ""};
+                        std::string u_port{(i < udp_lines.size()) ? udp_lines[i] : ""};
+
+                        std::cout << std::format("{:<70} {:<45} {}\n", current_id, t_port, u_port);
+                }
+        }
+}
