@@ -4,10 +4,20 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QFile>
+#include <QTextStream>
+#include <QDateTime>
 
 #include <QRegularExpression>
 
 namespace Quiver {
+
+static void log_debug(const QString& msg) {
+    QFile file("/tmp/quiver_gui_debug.txt");
+    if (file.open(QIODevice::WriteOnly | QIODevice::Append)) {
+        QTextStream out(&file);
+        out << QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz ") << msg << "\n";
+    }
+}
 
 static QString resolve_cli_path() {
     QDir dir(QCoreApplication::applicationDirPath());
@@ -36,12 +46,7 @@ struct Backend::BackendImpl {
         {"app-logs",      "local",   "/var/lib/docker/volumes/app-logs/_data",  "64 MB",  "unmounted"}
     };
 
-    std::vector<PortMapping> ports_ {
-        {"p001", "nginx-proxy",  "80",   "80",   "TCP",  "active"},
-        {"p002", "nginx-proxy",  "443",  "443",  "TCP",  "active"},
-        {"p003", "redis-cache",  "6379", "6379", "TCP",  "inactive"},
-        {"p004", "postgres-db",  "5432", "5432", "TCP",  "active"}
-    };
+    std::vector<PortMapping> ports_ {};
 
     std::vector<Device> devices_ {
         {"/dev/video0",     "Camera",  "nginx-proxy",  "rwm",  "assigned"},
@@ -59,37 +64,50 @@ auto Backend::get_instance() -> Backend& {
     return instance;
 }
 
+auto Backend::get_cli_path() const -> QString {
+    return resolve_cli_path();
+}
+
 auto Backend::get_containers() const -> std::vector<Container> {
     std::vector<Container> result;
     QString cli_path = resolve_cli_path();
-    if (!QFile::exists(cli_path)) return result;
+    log_debug("get_containers called, cli_path: " + cli_path);
+    if (!QFile::exists(cli_path)) {
+        log_debug("cli_path does not exist");
+        return result;
+    }
 
     QProcess process;
     process.start(cli_path, QStringList() << "ps" << "-a");
-    if (!process.waitForFinished(2000)) {
+    log_debug("Started quiver ps -a");
+    if (!process.waitForFinished(10000)) {
+        log_debug("waitForFinished TIMEOUT!");
         process.kill();
         process.waitForFinished(500);
         return result;
     }
 
     QString output = process.readAllStandardOutput();
-    qDebug() << "quiver ps output:" << output;
+    QString err = process.readAllStandardError();
+    log_debug("Process finished. Stdout length: " + QString::number(output.length()) + ", Stderr: " + err);
+    
     QStringList lines = output.split('\n', Qt::SkipEmptyParts);
+    log_debug("Lines count: " + QString::number(lines.size()));
     
     // Skip header line
     for (int i = 1; i < lines.size(); ++i) {
         QString line = lines[i];
         QStringList parts = line.split(QRegularExpression("\\s{2,}"), Qt::SkipEmptyParts);
-        qDebug() << "Parsed parts for line" << i << ":" << parts;
-        if (parts.size() >= 4) {
+        if (parts.size() >= 1) {
             Container c;
             c.id = parts[0];
-            c.image = parts[1];
-            c.name = parts[2];
-            c.status = parts[3];
+            c.image = parts.size() > 1 ? parts[1] : "";
+            c.name = parts.size() > 2 ? parts[2] : "";
+            c.status = parts.size() > 3 ? parts[3] : "";
             result.push_back(c);
         }
     }
+    log_debug("Parsed containers count: " + QString::number(result.size()));
     return result;
 }
 auto Backend::add_container(const Container& container) -> void { 
@@ -209,7 +227,59 @@ auto Backend::delete_volume(const QString& volume_name) -> void {
         [&volume_name](const Volume& x){ return x.name == volume_name; }), v.end());
 }
 
-auto Backend::get_ports() const -> std::vector<PortMapping> { return pimpl_->ports_; }
+auto Backend::get_ports() const -> std::vector<PortMapping> {
+    std::vector<PortMapping> result;
+    QString cli_path = resolve_cli_path();
+    log_debug("get_ports called, cli_path: " + cli_path);
+    if (!QFile::exists(cli_path)) {
+        log_debug("cli_path does not exist for ports");
+        return result;
+    }
+
+    QProcess process;
+    process.start(cli_path, QStringList() << "ports");
+    log_debug("Started quiver ports");
+    if (!process.waitForFinished(10000)) {
+        log_debug("waitForFinished TIMEOUT for quiver ports!");
+        process.kill();
+        process.waitForFinished(500);
+        return result;
+    }
+
+    QString output = process.readAllStandardOutput();
+    QString err = process.readAllStandardError();
+    log_debug("Ports process finished. Stdout length: " + QString::number(output.length()) + ", Stderr: " + err);
+    
+    QStringList lines = output.split('\n', Qt::SkipEmptyParts);
+    log_debug("Ports lines count: " + QString::number(lines.size()));
+    
+    QString current_id = "";
+    
+    // Skip header line
+    for (int i = 1; i < lines.size(); ++i) {
+        QString line = lines[i];
+        
+        // Output format from CLI: "{:<70} {:<45} {}"
+        QString id_part = line.mid(0, 70).trimmed();
+        if (!id_part.isEmpty()) {
+            current_id = id_part;
+        }
+        
+        QString tcp_part = line.mid(71, 45).trimmed();
+        QString udp_part = line.mid(117).trimmed();
+        
+        if (tcp_part == "-") tcp_part = "";
+        if (udp_part == "-") udp_part = "";
+        
+        PortMapping pm;
+        pm.id = current_id;
+        pm.tcp = tcp_part;
+        pm.udp = udp_part;
+        result.push_back(pm);
+    }
+    log_debug("Parsed ports count: " + QString::number(result.size()));
+    return result;
+}
 auto Backend::add_port(const PortMapping& port) -> void { pimpl_->ports_.push_back(port); }
 auto Backend::delete_port(const QString& port_id) -> void {
     auto& v { pimpl_->ports_ };

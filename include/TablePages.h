@@ -71,6 +71,8 @@ class PortsPage : public QWidget {
 public:
     explicit PortsPage(QWidget* parent = nullptr);
     ~PortsPage() override;
+    
+    auto refresh() -> void;
 private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_ {};

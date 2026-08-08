@@ -20,9 +20,11 @@
 #include <QSizePolicy>
 #include <QButtonGroup>
 #include <QToolButton>
-#include<QLayout>
-#include<QFileDialog>
+#include <QLayout>
+#include <QFileDialog>
 #include <QTimer>
+#include <QProcess>
+#include <QFileInfo>
 #include "include/AuthManager.h"
 #include <QScrollArea>
 #include <QPainter>
@@ -144,7 +146,7 @@ TablePage::TablePage(const QString& title,
     pimpl_->table_->horizontalHeader()->setSectionResizeMode(
         action_col, QHeaderView::Fixed);
 
-    pimpl_->table_->setColumnWidth(action_col, 130);
+    pimpl_->table_->setColumnWidth(action_col, 180);
     pimpl_->table_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
     
     pimpl_->table_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
@@ -247,6 +249,7 @@ struct ContainersPage::Impl {
     Quiver::StatCard* stat_total_ {};
     Quiver::StatCard* stat_running_ {};
     Quiver::StatCard* stat_stopped_ {};
+    Quiver::StatCard* stat_paused_ {};
     
     QStringList get_selected_ids() {
         QStringList ids;
@@ -282,10 +285,11 @@ ContainersPage::ContainersPage(QWidget* parent)
     pimpl_->stat_total_ = new Quiver::StatCard("TOTAL", "0", "#ffffff");
     pimpl_->stat_running_ = new Quiver::StatCard("RUNNING", "0", "#4ade80");
     pimpl_->stat_stopped_ = new Quiver::StatCard("STOPPED", "0", "#fb7185");
+    pimpl_->stat_paused_ = new Quiver::StatCard("PAUSED", "0", "#eab308");
     stats_row->addWidget(pimpl_->stat_total_);
     stats_row->addWidget(pimpl_->stat_running_);
     stats_row->addWidget(pimpl_->stat_stopped_);
-    stats_row->addWidget(new Quiver::StatCard("SYSTEM LOAD", "0%", "#ffffff"));
+    stats_row->addWidget(pimpl_->stat_paused_);
     root->addLayout(stats_row);
 
     pimpl_->page_ = new TablePage(
@@ -405,9 +409,11 @@ auto ContainersPage::refresh() -> void {
     int total = containers.size();
     int running = 0;
     int stopped = 0;
+    int paused = 0;
     
     for (const auto& c : containers) {
         if (c.status == "running") running++;
+        else if (c.status == "paused") paused++;
         else stopped++;
         
         int row = pimpl_->page_->table()->rowCount();
@@ -476,12 +482,26 @@ auto ContainersPage::refresh() -> void {
         h->addWidget(create_btn("⏸", "#f97316", [](const QStringList& ids){ Backend::get_instance().pause_container(ids); }));
         h->addWidget(create_btn("🗑", "#ef4444", [](const QStringList& ids){ Backend::get_instance().delete_container(ids); }));
 
+        auto* attach_btn = new QPushButton("🔗");
+        attach_btn->setCursor(Qt::PointingHandCursor);
+        attach_btn->setFixedSize(30, 28);
+        attach_btn->setStyleSheet("QPushButton { border: 1px solid #3b82f6; color: #3b82f6; border-radius: 4px; background: transparent; } QPushButton:hover { background: #3b82f6; color: white; }");
+        connect(attach_btn, &QPushButton::clicked, this, [c]() {
+            QString binPath = Backend::get_instance().get_cli_path();
+            QString workDir = QFileInfo(binPath).absolutePath();
+            QString cmd = QString("alacritty -e sh -c 'cd %1 && ./quiver attach %2; echo \"\n[Process Exited]\"; read -p \"Press Enter to close...\"'")
+                            .arg(workDir, c.id);
+            QProcess::startDetached("sh", QStringList() << "-c" << cmd);
+        });
+        h->addWidget(attach_btn);
+
         pimpl_->page_->table()->setCellWidget(row, 5, cell);
     }
     
     pimpl_->stat_total_->set_value(QString::number(total));
     pimpl_->stat_running_->set_value(QString::number(running));
     pimpl_->stat_stopped_->set_value(QString::number(stopped));
+    pimpl_->stat_paused_->set_value(QString::number(paused));
     
     pimpl_->page_->table()->verticalScrollBar()->setValue(v_scroll);
     pimpl_->update_bulk_actions_visibility();
@@ -621,7 +641,12 @@ VolumesPage::VolumesPage(QWidget* parent)
 VolumesPage::~VolumesPage() = default;
 
 
-struct PortsPage::Impl { TablePage* page_ {}; };
+struct PortsPage::Impl { 
+    TablePage* page_ {}; 
+    Quiver::StatCard* stat_total_ {};
+    Quiver::StatCard* stat_open_ {};
+    Quiver::StatCard* stat_closed_ {};
+};
 
 PortsPage::PortsPage(QWidget* parent)
     : QWidget(parent), pimpl_{ std::make_unique<Impl>() }
@@ -630,25 +655,21 @@ PortsPage::PortsPage(QWidget* parent)
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
 
-    make_stat_row(
-        "TOTAL PORTS", "5",
-        "OPEN",        "4", "#4ade80",
-        "CLOSED",      "1", "#fb7185",
-        root);
+    auto* stats_row { new QHBoxLayout };
+    stats_row->setSpacing(20);
+    stats_row->setContentsMargins(0, 0, 0, 24);
+    pimpl_->stat_total_ = new Quiver::StatCard("TOTAL PORTS", "0", "#F97316");
+    pimpl_->stat_open_ = new Quiver::StatCard("OPEN", "0", "#4ade80");
+    pimpl_->stat_closed_ = new Quiver::StatCard("CLOSED", "0", "#fb7185");
+    stats_row->addWidget(pimpl_->stat_total_);
+    stats_row->addWidget(pimpl_->stat_open_);
+    stats_row->addWidget(pimpl_->stat_closed_);
+    root->addLayout(stats_row);
 
     pimpl_->page_ = new TablePage(
         "Ports",
-        { "CONTAINER", "STATUS", "HOST PORT", "CONTAINER PORT", "PROTOCOL", "BOUND TO" },
+        { "CONTAINER ID", "TCP PORTS", "UDP PORTS" },
         this);
-
-    auto add = [&](const QStringList& d) {
-        pimpl_->page_->add_row(d, "Delete", "TableDangerBtn");
-    };
-    add({ "nginx-proxy", "open",   "80",   "80",   "TCP", "0.0.0.0"   });
-    add({ "nginx-proxy", "open",   "443",  "443",  "TCP", "0.0.0.0"   });
-    add({ "postgres-db", "open",   "5432", "5432", "TCP", "127.0.0.1" });
-    add({ "redis-cache", "closed", "6379", "6379", "TCP", "127.0.0.1" });
-    add({ "app-server",  "open",   "8080", "3000", "TCP", "0.0.0.0"   });
 
     connect(pimpl_->page_, &TablePage::add_clicked, this, [this]() {
         QDialog d(this);
@@ -685,9 +706,41 @@ PortsPage::PortsPage(QWidget* parent)
     });
 
     root->addWidget(pimpl_->page_, 1);
+    
+    QTimer::singleShot(100, this, &PortsPage::refresh);
 }
 PortsPage::~PortsPage() = default;
 
+auto PortsPage::refresh() -> void {
+    while (pimpl_->page_->table()->rowCount() > 0) {
+        pimpl_->page_->table()->removeRow(0);
+    }
+    
+    auto ports = Backend::get_instance().get_ports();
+    
+    int total = ports.size();
+    int open = 0;
+    int closed = 0;
+    
+    for (const auto& p : ports) {
+        if (!p.tcp.isEmpty() || !p.udp.isEmpty()) open++;
+        else closed++;
+        
+        int row = pimpl_->page_->table()->rowCount();
+        pimpl_->page_->table()->insertRow(row);
+        
+        pimpl_->page_->table()->setItem(row, 0, make_item(p.id, true));
+        pimpl_->page_->table()->setItem(row, 1, make_item(p.tcp));
+        pimpl_->page_->table()->setItem(row, 2, make_item(p.udp));
+        
+        auto* cell = new QWidget;
+        pimpl_->page_->table()->setCellWidget(row, 3, cell);
+    }
+    
+    pimpl_->stat_total_->set_value(QString::number(total));
+    pimpl_->stat_open_->set_value(QString::number(open));
+    pimpl_->stat_closed_->set_value(QString::number(closed));
+}
 
 struct DevicesPage::Impl { TablePage* page_ {}; };
 

@@ -36,11 +36,8 @@ struct Volume {
 
 struct PortMapping {
     QString id {};
-    QString container_name {};
-    QString host_port {};
-    QString container_port {};
-    QString protocol {};
-    QString status {};
+    QString tcp {};
+    QString udp {};
 };
 
 struct Device {
@@ -79,6 +76,8 @@ public:
     auto get_ports() const -> std::vector<PortMapping>;
     auto add_port(const PortMapping& port) -> void;
     auto delete_port(const QString& port_id) -> void;
+    
+    auto get_cli_path() const -> QString;
 
     auto get_devices() const -> std::vector<Device>;
     auto add_device(const Device& device) -> void;

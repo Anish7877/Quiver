@@ -141,9 +141,12 @@ MainWindow::MainWindow(QWidget* parent)
         if (pimpl_->main_stack_ && pimpl_->containers_page_ && 
             pimpl_->main_stack_->currentWidget() == pimpl_->containers_page_) {
             refresh_container_grid();
+        } else if (pimpl_->main_stack_ && pimpl_->ports_page_ && 
+                   pimpl_->main_stack_->currentWidget() == pimpl_->ports_page_) {
+            pimpl_->ports_page_->refresh();
         }
     });
-    refresh_timer->start(3000);
+    refresh_timer->start(10000);
 }
 
 MainWindow::~MainWindow() {
