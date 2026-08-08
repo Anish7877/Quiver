@@ -5,29 +5,29 @@
 #include <QLabel>
 #include <QFrame>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QtCharts/QChartView>
 #include <QtCharts/QChart>
-#include <QtCharts/QSplineSeries>
-#include <QtCharts/QAreaSeries>
-#include <QtCharts/QValueAxis>
-#include <QtCharts/QPieSeries>
-#include <QtCharts/QPieSlice>
 #include <QtCharts/QBarSeries>
 #include <QtCharts/QBarSet>
 #include <QtCharts/QBarCategoryAxis>
-#include <QLinearGradient>
-#include <QGraphicsLayout>
+#include <QtCharts/QValueAxis>
+#include <QtCharts/QPieSeries>
+#include <QtCharts/QPieSlice>
 #include <QtCharts/QHorizontalBarSeries>
+#include <QEasingCurve>
+#include <QGraphicsLayout>
 
 namespace Quiver {
 
 struct DashboardPage::Impl {
+    QScrollArea* scroll_area_{};
+    QWidget* scroll_content_{};
 };
 
 static auto create_cpu_cores_panel(const QString& title) -> QFrame* {
     auto* panel = new QFrame;
     panel->setObjectName("DashPanel");
-    panel->setMinimumHeight(240);
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(20, 15, 20, 10);
 
@@ -39,11 +39,19 @@ static auto create_cpu_cores_panel(const QString& title) -> QFrame* {
     auto* set = new QBarSet("Core Load");
     *set << 35 << 82 << 45 << 60; 
     set->setBrush(QColor("#F97316")); 
-    set->setBorderColor(QColor("#F97316"));
+    set->setPen(Qt::NoPen);
+    
     series->append(set);
-    series->setBarWidth(0.5);
+    series->setBarWidth(0.4);
 
     auto* chart = new QChart();
+    
+  
+    chart->setAnimationOptions(QChart::SeriesAnimations);
+    chart->setAnimationEasingCurve(QEasingCurve::OutQuart);
+    chart->setAnimationDuration(1200); 
+   
+
     chart->addSeries(series);
     chart->legend()->hide();
     chart->setBackgroundVisible(false);
@@ -69,6 +77,7 @@ static auto create_cpu_cores_panel(const QString& title) -> QFrame* {
     auto* chartView = new QChartView(chart);
     chartView->setRenderHint(QPainter::Antialiasing);
     chartView->setStyleSheet("background: transparent;");
+    chartView->setMinimumHeight(160); // Allows scaling
     layout->addWidget(chartView);
     return panel;
 }
@@ -76,7 +85,6 @@ static auto create_cpu_cores_panel(const QString& title) -> QFrame* {
 static auto create_donut_chart_panel(const QString& title) -> QFrame* {
     auto* panel = new QFrame;
     panel->setObjectName("DashPanel");
-    panel->setMinimumHeight(240);
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(20, 15, 20, 10);
 
@@ -85,17 +93,32 @@ static auto create_donut_chart_panel(const QString& title) -> QFrame* {
     layout->addWidget(titleLbl);
 
     auto* series = new QPieSeries();
-    series->setHoleSize(0.45); 
+    series->setHoleSize(0.50); 
 
 
-    auto* s1 = series->append("App (4GB)", 4.0); s1->setBrush(QColor("#4ade80")); s1->setBorderColor(QColor("#4ade80"));
-    auto* s2 = series->append("Cache (1.5GB)", 1.5); s2->setBrush(QColor("#3b82f6")); s2->setBorderColor(QColor("#3b82f6"));
-    auto* s3 = series->append("Free (2.5GB)", 2.5); s3->setBrush(QColor("#27272A")); s3->setBorderColor(QColor("#27272A"));
+    
+    auto* s1 = series->append("App", 4.0); 
+    s1->setBrush(QColor("#F97316")); 
+    s1->setPen(Qt::NoPen);
+
+    
+    auto* s2 = series->append("Cache", 1.5); 
+    s2->setBrush(QColor("#71717A")); // Zinc-500
+    s2->setPen(Qt::NoPen);
+
+
+    auto* s3 = series->append("Free", 2.5); 
+    s3->setBrush(QColor(161, 161, 170, 40)); 
+    s3->setPen(Qt::NoPen);
 
     auto* chart = new QChart();
-    chart->addSeries(series);
     
 
+    chart->setAnimationOptions(QChart::SeriesAnimations);
+    chart->setAnimationEasingCurve(QEasingCurve::OutCubic);
+    chart->setAnimationDuration(1500);
+    
+    chart->addSeries(series);
     chart->legend()->show();
     chart->legend()->setAlignment(Qt::AlignRight);
     chart->legend()->setLabelColor(QColor("#A1A1AA"));
@@ -106,15 +129,14 @@ static auto create_donut_chart_panel(const QString& title) -> QFrame* {
     auto* chartView = new QChartView(chart);
     chartView->setRenderHint(QPainter::Antialiasing);
     chartView->setStyleSheet("background: transparent;");
+    chartView->setMinimumHeight(160);
     layout->addWidget(chartView);
     return panel;
 }
 
-
 static auto create_multi_bar_chart_panel(const QString& title, const QStringList& ports, const QList<qreal>& traffic, const QList<QColor>& colors) -> QFrame* {
     auto* panel = new QFrame;
     panel->setObjectName("DashPanel");
-    panel->setMinimumHeight(240);
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(20, 15, 20, 10);
 
@@ -123,28 +145,30 @@ static auto create_multi_bar_chart_panel(const QString& title, const QStringList
     layout->addWidget(titleLbl);
 
     auto* series = new QBarSeries();
-    
-   
     for (int i = 0; i < ports.size(); ++i) {
         auto* set = new QBarSet(ports[i]);
         *set << traffic[i];
         set->setBrush(colors[i]);
-        set->setBorderColor(colors[i]);
-        series->append(set);
+        set->setPen(Qt::NoPen);
+        series->append(set);    
     }
-    series->setBarWidth(0.6);
+    series->setBarWidth(0.5);
 
     auto* chart = new QChart();
-    chart->addSeries(series);
     
+   
+    chart->setAnimationOptions(QChart::SeriesAnimations);
+    chart->setAnimationEasingCurve(QEasingCurve::OutElastic); 
+    chart->setAnimationDuration(1800);
+   
 
+    chart->addSeries(series);
     chart->legend()->show();
     chart->legend()->setAlignment(Qt::AlignBottom);
     chart->legend()->setLabelColor(QColor("#A1A1AA"));
     chart->setBackgroundVisible(false);
     chart->setMargins(QMargins(0, 10, 0, 0));
     chart->layout()->setContentsMargins(0, 0, 0, 0);
-
 
     auto* axisX = new QBarCategoryAxis();
     axisX->append(QStringList{"Connections"});
@@ -164,10 +188,10 @@ static auto create_multi_bar_chart_panel(const QString& title, const QStringList
     auto* chartView = new QChartView(chart);
     chartView->setRenderHint(QPainter::Antialiasing);
     chartView->setStyleSheet("background: transparent;");
+    chartView->setMinimumHeight(160);
     layout->addWidget(chartView);
     return panel;
 }
-
 
 static auto create_image_card(const QString& name, const QString& tag, const QString& time) -> QFrame* {
     auto* card = new QFrame;
@@ -176,7 +200,8 @@ static auto create_image_card(const QString& name, const QString& tag, const QSt
     layout->setContentsMargins(15, 10, 15, 10);
 
     auto* name_lbl = new QLabel(name);
-    name_lbl->setStyleSheet("font-weight: bold; font-size: 14px;");
+    name_lbl->setObjectName("ItemName");
+    
     
     auto* tag_lbl = new QLabel(tag);
     tag_lbl->setStyleSheet("color: #F97316; font-size: 11px; font-weight: bold; background: rgba(249, 115, 22, 0.1); padding: 4px 8px; border-radius: 4px;");
@@ -187,7 +212,7 @@ static auto create_image_card(const QString& name, const QString& tag, const QSt
     auto* run_btn = new QPushButton("▶ Run");
     run_btn->setObjectName("PrimaryButton");
     run_btn->setCursor(Qt::PointingHandCursor);
-    run_btn->setFixedSize(75, 28);
+    run_btn->setFixedSize(75, 28); 
 
     layout->addWidget(name_lbl);
     layout->addWidget(tag_lbl);
@@ -199,7 +224,6 @@ static auto create_image_card(const QString& name, const QString& tag, const QSt
     return card;
 }
 
-
 static auto create_event_item(const QString& type, const QString& message, const QString& theme) -> QFrame* {
     auto* row = new QFrame;
     row->setObjectName("DashEventRow");
@@ -209,30 +233,41 @@ static auto create_event_item(const QString& type, const QString& message, const
     auto* badge = new QLabel(type);
     badge->setProperty("statTheme", theme); 
     badge->setObjectName("EventBadge");
+    badge->setFixedWidth(90);
+    badge->setAlignment(Qt::AlignCenter);
 
     auto* msg = new QLabel(message);
-    msg->setStyleSheet("font-size: 13px;");
+    msg->setObjectName("EventMessage");
+    msg->setWordWrap(true);
 
     layout->addWidget(badge);
     layout->addSpacing(10);
-    layout->addWidget(msg);
-    layout->addStretch();
+    layout->addWidget(msg, 1);
 
     return row;
 }
-
 
 DashboardPage::DashboardPage(QWidget* parent)
     : QWidget(parent), pimpl_{std::make_unique<Impl>()}
 {
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
-    root->setSpacing(24);
+
+    
+    pimpl_->scroll_area_ = new QScrollArea(this);
+    pimpl_->scroll_area_->setWidgetResizable(true);
+    pimpl_->scroll_area_->setStyleSheet("QScrollArea { background: transparent; border: none; }");
+    pimpl_->scroll_area_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    
+    pimpl_->scroll_content_ = new QWidget();
+    pimpl_->scroll_content_->setStyleSheet("background: transparent;");
+    auto* scroll_layout = new QVBoxLayout(pimpl_->scroll_content_);
+    scroll_layout->setContentsMargins(0, 0, 0, 20); 
+    scroll_layout->setSpacing(24);
 
     auto* title = new QLabel("Dashboard");
     title->setObjectName("PageTitle");
-    root->addWidget(title);
-
+    scroll_layout->addWidget(title);
 
     auto* stats_row = new QHBoxLayout;
     stats_row->setSpacing(20);
@@ -240,23 +275,25 @@ DashboardPage::DashboardPage(QWidget* parent)
     stats_row->addWidget(new StatCard("RUNNING", "8", "green"));
     stats_row->addWidget(new StatCard("FAILED / STOPPED", "2", "red"));
     stats_row->addWidget(new StatCard("ACTIVE VOLUMES", "5", "white"));
-    root->addLayout(stats_row);
-
+    scroll_layout->addLayout(stats_row);
 
     auto* charts_row = new QHBoxLayout;
     charts_row->setSpacing(24);
-    
     charts_row->addWidget(create_cpu_cores_panel("CPU Usage by Core (%)"));
-
     charts_row->addWidget(create_donut_chart_panel("Memory Allocation"));
 
     QStringList portLabels = {"Port 80", "Port 443", "Port 5432", "Port 6379"};
     QList<qreal> portTraffic = {120, 250, 45, 80};
-    QList<QColor> portColors = {QColor("#F97316"), QColor("#3b82f6"), QColor("#4ade80"), QColor("#fb7185")};
-    charts_row->addWidget(create_multi_bar_chart_panel("Active Port Connections", portLabels, portTraffic, portColors));
+  
+    QList<QColor> portColors = {
+        QColor("#F97316"), // Brand Orange
+        QColor("#52525B"), // Zinc 600
+        QColor("#A1A1AA"), // Zinc 400
+        QColor("#D4D4D8")  // Zinc 300
+    };
     
-    root->addLayout(charts_row);
-
+    charts_row->addWidget(create_multi_bar_chart_panel("Active Port Connections", portLabels, portTraffic, portColors));
+    scroll_layout->addLayout(charts_row);
 
     auto* split_layout = new QHBoxLayout;
     split_layout->setSpacing(24);
@@ -298,7 +335,10 @@ DashboardPage::DashboardPage(QWidget* parent)
 
     split_layout->addWidget(left_pane, 6);  
     split_layout->addWidget(right_pane, 4); 
-    root->addLayout(split_layout, 1); 
+    scroll_layout->addLayout(split_layout); 
+
+    pimpl_->scroll_area_->setWidget(pimpl_->scroll_content_);
+    root->addWidget(pimpl_->scroll_area_);
 }
 
 DashboardPage::~DashboardPage() = default;

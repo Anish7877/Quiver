@@ -16,6 +16,8 @@
 #include <QTableWidgetItem>
 #include <QRandomGenerator>
 #include <QGraphicsDropShadowEffect>
+#include <QPointer>
+#include <QTimer>
 
 namespace Quiver {
 
@@ -48,124 +50,9 @@ ActivityGraph::ActivityGraph(QWidget* parent)
 ActivityGraph::~ActivityGraph() = default;
 auto ActivityGraph::paintEvent(QPaintEvent*) -> void {}
 
-struct ContainerCard::Impl {
-    Container data_ {};
-    QPushButton* menu_btn_ {};
-    QPushButton* icon_box_ {};
-    QLabel* status_dot_ {};
-    QLabel* status_text_ {};
+struct StatCard::Impl {
+    QLabel* value_label_ {};
 };
-
-ContainerCard::ContainerCard(const Container& container_data, QWidget* parent)
-    : QFrame(parent), pimpl_{std::make_unique<Impl>()}
-{
-    pimpl_->data_ = container_data;
-    setObjectName("ContentCard");
-    setFixedSize(300, 110);
-    setAttribute(Qt::WA_StyledBackground, true);
-
-    auto* layout { new QVBoxLayout(this) };
-    layout->setContentsMargins(15, 15, 15, 15);
-
-    auto* top { new QHBoxLayout };
-    pimpl_->status_dot_  = new QLabel;
-    pimpl_->status_dot_->setFixedSize(8, 8);
-    pimpl_->status_text_ = new QLabel;
-
-    pimpl_->menu_btn_ = new QPushButton("⋮");
-    pimpl_->menu_btn_->setObjectName("CardMenu");
-    pimpl_->menu_btn_->setFixedSize(24, 24);
-    pimpl_->menu_btn_->setCursor(Qt::PointingHandCursor);
-    connect(pimpl_->menu_btn_, &QPushButton::clicked, this, &ContainerCard::show_menu);
-
-    top->addWidget(pimpl_->status_dot_);
-    top->addWidget(pimpl_->status_text_);
-    top->addStretch();
-    top->addWidget(pimpl_->menu_btn_);
-
-    auto* mid { new QHBoxLayout };
-    pimpl_->icon_box_ = new QPushButton;
-    pimpl_->icon_box_->setFixedSize(28, 28);
-    pimpl_->icon_box_->setCursor(Qt::PointingHandCursor);
-    connect(pimpl_->icon_box_, &QPushButton::clicked, this, &ContainerCard::toggle_status);
-
-    auto* name { new QLabel(pimpl_->data_.name) };
-    name->setObjectName("CardName");
-    mid->addWidget(pimpl_->icon_box_);
-    mid->addWidget(name);
-    mid->addStretch();
-
-    auto* bot { new QHBoxLayout };
-    auto* img { new QLabel(pimpl_->data_.image) };
-    img->setStyleSheet("color: #71717a; font-family: monospace; font-size: 11px;");
-    auto* id_hash { new QLabel(pimpl_->data_.id) };
-    id_hash->setStyleSheet("color: #71717a; font-family: monospace; font-size: 11px;");
-    bot->addWidget(img);
-    bot->addStretch();
-    bot->addWidget(id_hash);
-
-    layout->addLayout(top);
-    layout->addLayout(mid);
-    layout->addStretch();
-    layout->addLayout(bot);
-
-    bool is_running { pimpl_->data_.status == "running" };
-    QString color { is_running ? "#4ade80" : "#fb7185" };
-    pimpl_->status_dot_->setStyleSheet(
-        QString("background: %1; border-radius: 4px;").arg(color));
-    pimpl_->status_text_->setText(pimpl_->data_.status.toUpper());
-    pimpl_->status_text_->setStyleSheet(
-        QString("color: %1; font-weight: bold; font-size: 10px; margin-left: 5px;").arg(color));
-
-    pimpl_->icon_box_->setText(is_running ? "■" : "▶");
-    QString icon_style { is_running
-        ? "QPushButton { border: 1px solid #ef4444; color: #ef4444; border-radius: 14px; background: transparent; padding-bottom: 2px; } QPushButton:hover { background: #ef4444; color: white; }"
-        : "QPushButton { border: 1px solid #22c55e; color: #22c55e; border-radius: 14px; background: transparent; padding-left: 2px; } QPushButton:hover { background: #22c55e; color: white; }" };
-    pimpl_->icon_box_->setStyleSheet(icon_style);
-}
-ContainerCard::~ContainerCard() = default;
-
-auto ContainerCard::toggle_status() -> void {
-    bool will_run { pimpl_->data_.status != "running" };
-    pimpl_->data_.status = will_run ? "running" : "stopped";
-    QString color { will_run ? "#4ade80" : "#fb7185" };
-    pimpl_->status_dot_->setStyleSheet(
-        QString("background: %1; border-radius: 4px;").arg(color));
-    pimpl_->status_text_->setText(pimpl_->data_.status.toUpper());
-    pimpl_->status_text_->setStyleSheet(
-        QString("color: %1; font-weight: bold; font-size: 10px; margin-left: 5px;").arg(color));
-    pimpl_->icon_box_->setText(will_run ? "■" : "▶");
-    QString icon_style { will_run
-        ? "QPushButton { border: 1px solid #ef4444; color: #ef4444; border-radius: 14px; background: transparent; padding-bottom: 2px; } QPushButton:hover { background: #ef4444; color: white; }"
-        : "QPushButton { border: 1px solid #22c55e; color: #22c55e; border-radius: 14px; background: transparent; padding-left: 2px; } QPushButton:hover { background: #22c55e; color: white; }" };
-    pimpl_->icon_box_->setStyleSheet(icon_style);
-}
-
-auto ContainerCard::show_menu() -> void {
-    QMenu menu(this);
-    QAction* start_action { menu.addAction("Start") };
-    QAction* stop_action  { menu.addAction("Stop") };
-    menu.addSeparator();
-    QAction* del_action { menu.addAction("Delete Container") };
-    QAction* selected { menu.exec(QCursor::pos()) };
-    if (selected == del_action) {
-        on_delete();
-    } else if (selected == start_action && pimpl_->data_.status != "running") {
-        toggle_status();
-    } else if (selected == stop_action && pimpl_->data_.status == "running") {
-        toggle_status();
-    }
-}
-
-auto ContainerCard::on_delete() -> void {
-    DeleteDialog dialog(pimpl_->data_.name, this);
-    if (dialog.exec() == QDialog::Accepted) {
-        Backend::get_instance().delete_container(pimpl_->data_.id);
-        emit state_changed();
-    }
-}
-
-struct StatCard::Impl {};
 
 StatCard::StatCard(const QString& title, const QString& value,
                    const QString& color, QWidget* parent)
@@ -199,6 +86,7 @@ StatCard::StatCard(const QString& title, const QString& value,
 
     auto* v { new QLabel(value) };
     v->setObjectName("StatValue");
+    pimpl_->value_label_ = v;
 
     layout->addWidget(t);
     layout->addWidget(v);
@@ -206,6 +94,12 @@ StatCard::StatCard(const QString& title, const QString& value,
 }
 
 StatCard::~StatCard() = default;
+
+auto StatCard::set_value(const QString& val) -> void {
+    if (pimpl_->value_label_) {
+        pimpl_->value_label_->setText(val);
+    }
+}
 
 
 struct ResourceTable::Impl {};
@@ -334,12 +228,14 @@ struct CreateDialog::Impl {
     QPushButton*  btn_json_  {};
     QLineEdit*    name_input_{};
     QLineEdit*    image_input_{};
+    QLineEdit*    tag_input_{};
     QLabel*       cpu_val_label_{};
     QLabel*       mem_val_label_{};
     QListWidget*  device_list_ {};
     QListWidget*  volume_list_ {};
     QListWidget*  port_list_   {};
     QTextEdit*    json_editor_ {};
+    QComboBox*    fs_combo_    {};
 };
 
 CreateDialog::CreateDialog(QWidget* parent)
@@ -368,10 +264,12 @@ CreateDialog::CreateDialog(QWidget* parent)
     pimpl_->btn_visual_->setCheckable(true);
     pimpl_->btn_visual_->setChecked(true);
     pimpl_->btn_visual_->setCursor(Qt::PointingHandCursor);
+    pimpl_->btn_visual_->setFixedHeight(32);
     pimpl_->btn_json_ = new QPushButton("JSON");
     pimpl_->btn_json_->setObjectName("TabBtn");
     pimpl_->btn_json_->setCheckable(true);
     pimpl_->btn_json_->setCursor(Qt::PointingHandCursor);
+    pimpl_->btn_json_->setFixedHeight(32);
 
     auto* grp { new QButtonGroup(this) };
     grp->addButton(pimpl_->btn_visual_);
@@ -426,16 +324,16 @@ CreateDialog::CreateDialog(QWidget* parent)
     pimpl_->image_input_ = new QLineEdit;
     pimpl_->image_input_->setPlaceholderText("nginx");
     pimpl_->image_input_->setFixedHeight(36);
-    auto* tag { new QLineEdit };
-    tag->setObjectName("TagInput");
-    tag->setText("latest");
-    tag->setFixedSize(100, 36);
-    tag->setAlignment(Qt::AlignCenter);
+    pimpl_->tag_input_ = new QLineEdit;
+    pimpl_->tag_input_->setObjectName("TagInput");
+    pimpl_->tag_input_->setText("latest");
+    pimpl_->tag_input_->setFixedSize(100, 36);
+    pimpl_->tag_input_->setAlignment(Qt::AlignCenter);
     img_row->addWidget(pimpl_->image_input_);
     auto* colon { new QLabel(":") };
     colon->setObjectName("ColonLabel");
     img_row->addWidget(colon);
-    img_row->addWidget(tag);
+    img_row->addWidget(pimpl_->tag_input_);
     v_layout->addLayout(img_row);
 
     auto* fs_row { new QHBoxLayout };
@@ -443,10 +341,10 @@ CreateDialog::CreateDialog(QWidget* parent)
     auto* fs_lbl { new QLabel("Filesystem Type") };
     fs_lbl->setObjectName("FormLabel");
     v1->addWidget(fs_lbl);
-    auto* cb { new QComboBox };
-    cb->addItems({"OverlayFS", "Btrfs", "VFS"});
-    cb->setFixedHeight(36);
-    v1->addWidget(cb);
+    pimpl_->fs_combo_ = new QComboBox;
+    pimpl_->fs_combo_->addItems({"OverlayFS", "Btrfs", "VFS"});
+    pimpl_->fs_combo_->setFixedHeight(36);
+    v1->addWidget(pimpl_->fs_combo_);
     auto* v2 { new QVBoxLayout };
     auto* persist_lbl { new QLabel("Persistence") };
     persist_lbl->setObjectName("FormLabel");
@@ -615,7 +513,41 @@ CreateDialog::CreateDialog(QWidget* parent)
 CreateDialog::~CreateDialog() = default;
 
 auto CreateDialog::get_container_name()  const -> QString { return pimpl_->name_input_->text(); }
-auto CreateDialog::get_container_image() const -> QString { return pimpl_->image_input_->text(); }
+auto CreateDialog::get_container_image() const -> QString { 
+    QString img = pimpl_->image_input_->text().trimmed();
+    QString tag = pimpl_->tag_input_->text().trimmed();
+    if (tag.isEmpty()) tag = "latest";
+    if (img.isEmpty()) return "";
+    return img + ":" + tag;
+}
+
+auto CreateDialog::get_devices() const -> QStringList {
+    QStringList list;
+    for (int i = 0; i < pimpl_->device_list_->count(); ++i) {
+        list << pimpl_->device_list_->item(i)->text();
+    }
+    return list;
+}
+
+auto CreateDialog::get_volumes() const -> QStringList {
+    QStringList list;
+    for (int i = 0; i < pimpl_->volume_list_->count(); ++i) {
+        list << pimpl_->volume_list_->item(i)->text();
+    }
+    return list;
+}
+
+auto CreateDialog::get_ports() const -> QStringList {
+    QStringList list;
+    for (int i = 0; i < pimpl_->port_list_->count(); ++i) {
+        list << pimpl_->port_list_->item(i)->text();
+    }
+    return list;
+}
+
+auto CreateDialog::get_filesystem() const -> QString {
+    return pimpl_->fs_combo_->currentText();
+}
 auto CreateDialog::update_cpu_label(int val) -> void { pimpl_->cpu_val_label_->setText(QString::number(val)); }
 auto CreateDialog::update_mem_label(int val) -> void { pimpl_->mem_val_label_->setText(QString::number(val)); }
 auto CreateDialog::show_visual() -> void { pimpl_->stack_->setCurrentIndex(0); }
@@ -634,10 +566,29 @@ auto CreateDialog::on_add_device() -> void {
                     "/dev/dri/card0 (GPU)",  "/dev/snd (Audio)",
                     "/dev/sda1 (Drive)"});
     l->addWidget(list);
-    auto* box { new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d) };
-    connect(box, &QDialogButtonBox::accepted, &d, &QDialog::accept);
-    connect(box, &QDialogButtonBox::rejected, &d, &QDialog::reject);
-    l->addWidget(box);
+    // auto* box { new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d) };
+    // connect(box, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    // connect(box, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    // l->addWidget(box);
+
+    auto* btns { new QHBoxLayout };
+    auto* cancel_btn { new QPushButton("Cancel") };
+    cancel_btn->setObjectName("SecondaryBtn");
+    cancel_btn->setCursor(Qt::PointingHandCursor);
+    cancel_btn->setFixedSize(85, 34); // Nice and wide!
+    connect(cancel_btn, &QPushButton::clicked, &d, &QDialog::reject);
+
+    auto* ok_btn { new QPushButton("OK") };
+    ok_btn->setObjectName("PrimaryButton");
+    ok_btn->setCursor(Qt::PointingHandCursor);
+    ok_btn->setFixedSize(85, 34); // Nice and wide!
+    connect(ok_btn, &QPushButton::clicked, &d, &QDialog::accept);
+
+    btns->addStretch();
+    btns->addWidget(cancel_btn);
+    btns->addWidget(ok_btn);
+    l->addLayout(btns);
+
     if (d.exec() == QDialog::Accepted) {
         for (QListWidgetItem* item : list->selectedItems()) {
             if (pimpl_->device_list_->findItems(item->text(), Qt::MatchExactly).isEmpty())
@@ -685,10 +636,12 @@ auto CreateDialog::on_add_port() -> void {
     auto* cancel_btn { new QPushButton("Cancel") };
     cancel_btn->setObjectName("SecondaryBtn");
     cancel_btn->setCursor(Qt::PointingHandCursor);
+    cancel_btn->setFixedSize(85, 34);
     connect(cancel_btn, &QPushButton::clicked, &d, &QDialog::reject);
     auto* add_btn { new QPushButton("Add Port") };
     add_btn->setObjectName("PrimaryButton");
     add_btn->setCursor(Qt::PointingHandCursor);
+    add_btn->setFixedSize(85, 34);
     connect(add_btn, &QPushButton::clicked, &d, &QDialog::accept);
     btns->addStretch();
     btns->addWidget(cancel_btn);

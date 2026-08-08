@@ -46,24 +46,7 @@ private:
 };
 
 
-class ContainerCard : public QFrame {
-    Q_OBJECT
-public:
-    explicit ContainerCard(const Container& container_data, QWidget* parent = nullptr);
-    ~ContainerCard() override;
-
-signals:
-    void state_changed();
-
-private slots:
-    auto show_menu() -> void;
-    auto on_delete() -> void;
-    auto toggle_status() -> void;
-
-private:
-    struct Impl;
-    std::unique_ptr<Impl> pimpl_ {};
-};
+// ContainerCard has been replaced by ContainersPage in TablePages
 
 
 class StatCard : public QFrame {
@@ -72,6 +55,8 @@ public:
     explicit StatCard(const QString& title, const QString& value,
                       const QString& color, QWidget* parent = nullptr);
     ~StatCard() override;
+    
+    auto set_value(const QString& val) -> void;
 private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_ {};
@@ -100,6 +85,10 @@ public:
 
     auto get_container_name() const -> QString;
     auto get_container_image() const -> QString;
+    auto get_devices() const -> QStringList;
+    auto get_volumes() const -> QStringList;
+    auto get_ports() const -> QStringList;
+    auto get_filesystem() const -> QString;
 
 private slots:
     auto update_cpu_label(int val) -> void;

@@ -5,6 +5,7 @@
 #include <QPushButton>
 #include <QString>
 #include <QStringList>
+#include <QHBoxLayout>
 
 namespace Quiver {
 
@@ -21,6 +22,7 @@ public:
                  const QString&     action_obj_name) -> void;
 
     auto table() -> QTableWidget*;
+    auto header_layout() -> QHBoxLayout*;
 
 signals:
     auto add_clicked() -> void;
@@ -35,6 +37,20 @@ class ImagesPage : public QWidget {
 public:
     explicit ImagesPage(QWidget* parent = nullptr);
     ~ImagesPage() override;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pimpl_ {};
+};
+
+class ContainersPage : public QWidget {
+    Q_OBJECT
+public:
+    explicit ContainersPage(QWidget* parent = nullptr);
+    ~ContainersPage() override;
+    
+    auto refresh() -> void;
+protected:
+    void resizeEvent(QResizeEvent* event) override;
 private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_ {};

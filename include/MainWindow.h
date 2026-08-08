@@ -29,6 +29,7 @@ private:
     auto setup_content() -> void;
     auto refresh_container_grid() -> void;
     auto update_sidebar_icons() -> void;
+    auto check_and_start_backend() -> void;
     struct Impl;
     std::unique_ptr<Impl> pimpl_ {};
 };

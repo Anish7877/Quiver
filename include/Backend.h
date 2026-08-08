@@ -11,6 +11,10 @@ struct Container {
     QString name {};
     QString image {};
     QString status {};
+    QString filesystem {};
+    QStringList devices {};
+    QStringList volumes {};
+    QStringList ports {};
 };
 
 struct Image {
@@ -60,7 +64,9 @@ public:
 
     auto get_containers() const -> std::vector<Container>;
     auto add_container(const Container& container) -> void;
-    auto delete_container(const QString& container_id) -> void;
+    auto delete_container(const QStringList& container_ids) -> void;
+    auto pause_container(const QStringList& container_ids) -> void;
+    auto unpause_container(const QStringList& container_ids) -> void;
 
     auto get_images() const -> std::vector<Image>;
     auto add_image(const Image& img) -> void;

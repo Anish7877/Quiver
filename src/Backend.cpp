@@ -1,14 +1,25 @@
 #include "include/Backend.h"
+#include <QProcess>
+#include <QDir>
+#include <QCoreApplication>
+#include <QDebug>
+#include <QFile>
+
+#include <QRegularExpression>
 
 namespace Quiver {
 
+static QString resolve_cli_path() {
+    QDir dir(QCoreApplication::applicationDirPath());
+    while (dir.dirName() != "QuiverGUI" && !dir.isRoot()) {
+        dir.cdUp();
+    }
+    return QDir::cleanPath(dir.absoluteFilePath("Quiver/Quiver/build/release/quiver"));
+}
+
 struct Backend::BackendImpl {
     QNetworkAccessManager network_; 
-    std::vector<Container> containers_ {
-        {"7f8a1b", "nginx-proxy",  "nginx:alpine",  "running"},
-        {"3c4d5e", "redis-cache",  "redis:6.2",     "stopped"},
-        {"9a0b1c", "postgres-db",  "postgres:14",   "running"}
-    };
+    std::vector<Container> containers_ {};
 
     std::vector<Image> images_ {
         {"a1b2c3", "nginx",      "alpine",  "23.4 MB",  "2 days ago",  "available"},
@@ -48,12 +59,138 @@ auto Backend::get_instance() -> Backend& {
     return instance;
 }
 
-auto Backend::get_containers() const -> std::vector<Container> { return pimpl_->containers_; }
-auto Backend::add_container(const Container& container) -> void { pimpl_->containers_.push_back(container); }
-auto Backend::delete_container(const QString& container_id) -> void {
-    auto& c { pimpl_->containers_ };
-    c.erase(std::remove_if(c.begin(), c.end(),
-        [&container_id](const Container& x){ return x.id == container_id; }), c.end());
+auto Backend::get_containers() const -> std::vector<Container> {
+    std::vector<Container> result;
+    QString cli_path = resolve_cli_path();
+    if (!QFile::exists(cli_path)) return result;
+
+    QProcess process;
+    process.start(cli_path, QStringList() << "ps" << "-a");
+    if (!process.waitForFinished(2000)) {
+        process.kill();
+        process.waitForFinished(500);
+        return result;
+    }
+
+    QString output = process.readAllStandardOutput();
+    qDebug() << "quiver ps output:" << output;
+    QStringList lines = output.split('\n', Qt::SkipEmptyParts);
+    
+    // Skip header line
+    for (int i = 1; i < lines.size(); ++i) {
+        QString line = lines[i];
+        QStringList parts = line.split(QRegularExpression("\\s{2,}"), Qt::SkipEmptyParts);
+        qDebug() << "Parsed parts for line" << i << ":" << parts;
+        if (parts.size() >= 4) {
+            Container c;
+            c.id = parts[0];
+            c.image = parts[1];
+            c.name = parts[2];
+            c.status = parts[3];
+            result.push_back(c);
+        }
+    }
+    return result;
+}
+auto Backend::add_container(const Container& container) -> void { 
+    // We do not modify the hardcoded vector anymore, the CLI is the source of truth
+    
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        QProcess* process = new QProcess();
+        QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), 
+                         process, &QObject::deleteLater);
+                         
+        QStringList args;
+        args << "run";
+        if (container.filesystem.toUpper() == "VFS") {
+            args << "--vfs";
+        }
+        args << "--name" << container.name;
+        
+        for (const auto& dev : container.devices) {
+            // Devices are formatted like "/dev/video0 (Camera)"
+            QString path = dev.split(" ").first();
+            if (!path.isEmpty()) args << "--device" << path;
+        }
+        
+        for (const auto& vol : container.volumes) {
+            // Bind mount exactly as is, GUI selects host folder
+            args << "-v" << vol + ":" + vol;
+        }
+        
+        for (const auto& port : container.ports) {
+            // Port comes in as "8080:80"
+            args << "-p" << port;
+        }
+        
+        // Interactive and Detach flags, and Image positional argument
+        args << "-i" << "-d" << container.image;
+        
+        qDebug() << "Executing Quiver CLI:" << cli_path << args;
+        process->start(cli_path, args);
+    } else {
+        qDebug() << "Quiver CLI not found at" << cli_path << ". Cannot start container.";
+    }
+}
+auto Backend::delete_container(const QStringList& container_ids) -> void {
+    if (container_ids.isEmpty()) return;
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        QProcess* process = new QProcess();
+        QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                         process, &QObject::deleteLater);
+        QObject::connect(process, &QProcess::readyReadStandardError, [process]() {
+            qDebug() << "quiver rm stderr:" << process->readAllStandardError();
+        });
+        QObject::connect(process, &QProcess::readyReadStandardOutput, [process]() {
+            qDebug() << "quiver rm stdout:" << process->readAllStandardOutput();
+        });
+        qDebug() << "Executing Quiver CLI for delete:" << cli_path << "rm" << container_ids;
+        process->start(cli_path, QStringList() << "rm" << container_ids);
+    } else {
+        qDebug() << "CLI not found at" << cli_path;
+    }
+}
+
+auto Backend::pause_container(const QStringList& container_ids) -> void {
+    if (container_ids.isEmpty()) return;
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        QProcess* process = new QProcess();
+        QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                         process, &QObject::deleteLater);
+        QObject::connect(process, &QProcess::readyReadStandardError, [process]() {
+            qDebug() << "quiver pause stderr:" << process->readAllStandardError();
+        });
+        QObject::connect(process, &QProcess::readyReadStandardOutput, [process]() {
+            qDebug() << "quiver pause stdout:" << process->readAllStandardOutput();
+        });
+        qDebug() << "Executing Quiver CLI for pause:" << cli_path << "pause" << container_ids;
+        process->start(cli_path, QStringList() << "pause" << container_ids);
+    } else {
+        qDebug() << "CLI not found at" << cli_path;
+    }
+}
+
+auto Backend::unpause_container(const QStringList& container_ids) -> void {
+    if (container_ids.isEmpty()) return;
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        QProcess* process = new QProcess();
+        QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                         process, &QObject::deleteLater);
+        QObject::connect(process, &QProcess::readyReadStandardError, [process]() {
+            qDebug() << "quiver unpause stderr:" << process->readAllStandardError();
+        });
+        QObject::connect(process, &QProcess::readyReadStandardOutput, [process]() {
+            qDebug() << "quiver unpause stdout:" << process->readAllStandardOutput();
+        });
+        qDebug() << "Executing Quiver CLI for unpause:" << cli_path << "unpause" << container_ids;
+        process->start(cli_path, QStringList() << "unpause" << container_ids);
+    } else {
+        qDebug() << "CLI not found at" << cli_path;
+    }
 }
 
 auto Backend::get_images() const -> std::vector<Image> { return pimpl_->images_; }

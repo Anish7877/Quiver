@@ -465,6 +465,24 @@ QLabel#EventBadge[statTheme="orange"] { color: #F97316; background: rgba(249, 11
 QLabel#EventBadge[statTheme="white"]  { color: #FAFAFA; background: rgba(255, 255, 255, 0.1); }
 
 
+/* --- DASHBOARD TEXT COLORS (DARK MODE) --- */
+QLabel#ItemName {
+    font-weight: bold;
+    font-size: 14px;
+    color: #FAFAFA; /* Pure white */
+}
+
+QLabel#DimText {
+    color: #A1A1AA; /* Dimmed light-grey */
+    font-size: 12px;
+}
+
+QLabel#EventMessage {
+    font-size: 13px;
+    color: #FAFAFA; /* Pure white */
+}
+
+
 /* =======================================================
    CREATE / DELETE DIALOGS (DARK MODE)
 ======================================================== */

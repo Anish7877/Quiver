@@ -27,6 +27,16 @@
 #include "include/DashboardPage.h"
 #include "include/AuthManager.h"
 #include <QProcess> 
+#include <QtCharts/QChartView>
+#include <QtCharts/QChart>
+#include <QtCharts/QAbstractAxis>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QMessageBox>
+#include <QDir>
+#include <QCoreApplication>
+#include <QTimer>
 
 namespace Quiver {
 
@@ -37,7 +47,7 @@ struct MainWindow::Impl {
 
     QStackedWidget* main_stack_      {};
     QWidget*        dashboard_page_  {};
-    QWidget*        containers_page_ {};
+    ContainersPage* containers_page_ {};
     ImagesPage*     images_page_     {};
     VolumesPage*    volumes_page_    {};
     PortsPage*      ports_page_      {};
@@ -46,6 +56,10 @@ struct MainWindow::Impl {
     QFrame* top_bar_         {}; 
     QScrollArea*    scroll_area_     {};
     FlowLayout*     container_grid_  {};
+    
+    StatCard* stat_total_ {};
+    StatCard* stat_running_ {};
+    StatCard* stat_stopped_ {};
 
     QPushButton*    create_btn_      {};
     QPushButton*    theme_btn_       {};
@@ -58,7 +72,18 @@ struct MainWindow::Impl {
 
 
     QLabel* logo_label_ {};
+    QProcess* backend_process_ {};
+    QNetworkAccessManager* network_manager_ {};
 };
+
+static QString resolve_path(const QString& relative_path) {
+    QDir dir(QCoreApplication::applicationDirPath());
+    // Try to find the root QuiverGUI directory
+    while (dir.dirName() != "QuiverGUI" && !dir.isRoot()) {
+        dir.cdUp();
+    }
+    return QDir::cleanPath(dir.absoluteFilePath(relative_path));
+}
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent), pimpl_{std::make_unique<Impl>()}
@@ -73,6 +98,9 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* central { new QWidget };
     setCentralWidget(central);
+
+    pimpl_->network_manager_ = new QNetworkAccessManager(this);
+    check_and_start_backend();
 
     auto* root { new QHBoxLayout(central) };
     root->setSpacing(0);
@@ -107,9 +135,56 @@ MainWindow::MainWindow(QWidget* parent)
         pimpl_->top_bar_->hide();
         pimpl_->main_stack_->setCurrentWidget(pimpl_->auth_page_);
     });
+    
+    auto* refresh_timer = new QTimer(this);
+    connect(refresh_timer, &QTimer::timeout, this, [this]() {
+        if (pimpl_->main_stack_ && pimpl_->containers_page_ && 
+            pimpl_->main_stack_->currentWidget() == pimpl_->containers_page_) {
+            refresh_container_grid();
+        }
+    });
+    refresh_timer->start(3000);
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow() {
+    if (pimpl_->backend_process_ && pimpl_->backend_process_->state() == QProcess::Running) {
+        pimpl_->backend_process_->terminate();
+        pimpl_->backend_process_->waitForFinished(1000);
+    }
+}
+
+auto MainWindow::check_and_start_backend() -> void {
+    QNetworkRequest request(QUrl("http://localhost:8080/health"));
+    QNetworkReply* reply = pimpl_->network_manager_->get(request);
+    
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            qDebug() << "Backend not reachable, starting it manually...";
+            pimpl_->backend_process_ = new QProcess(this);
+            QString backend_dir = resolve_path("quiver-backend");
+            pimpl_->backend_process_->setWorkingDirectory(backend_dir);
+            
+            pimpl_->backend_process_->start("sh", QStringList() << "-c" << "/usr/local/go/bin/go run main.go || go run main.go");
+            
+            connect(pimpl_->backend_process_, &QProcess::readyReadStandardOutput, this, [this]() {
+                qDebug() << "Backend (stdout):" << pimpl_->backend_process_->readAllStandardOutput();
+            });
+            connect(pimpl_->backend_process_, &QProcess::readyReadStandardError, this, [this]() {
+                qDebug() << "Backend (stderr):" << pimpl_->backend_process_->readAllStandardError();
+            });
+            connect(pimpl_->backend_process_, &QProcess::errorOccurred, this, [](QProcess::ProcessError error) {
+                if (error == QProcess::Crashed) {
+                    qDebug() << "Go backend shut down successfully (terminated by GUI).";
+                } else {
+                    qDebug() << "Failed to start Go backend. Error code:" << error;
+                }
+            });
+        } else {
+            qDebug() << "Backend is already running.";
+        }
+    });
+}
 
 auto MainWindow::setup_sidebar() -> void {
     pimpl_->sidebar_ = new QFrame;
@@ -173,8 +248,39 @@ auto MainWindow::setup_sidebar() -> void {
 
     pimpl_->sidebar_layout_->addStretch(); 
 
-   
+    auto create_dot_icon = [](const QColor& color) -> QIcon {
+        QPixmap pix(24, 24);
+        pix.fill(Qt::transparent);
+        QPainter p(&pix);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setBrush(color);
+        p.setPen(Qt::NoPen);
+        p.drawEllipse(6, 6, 10, 10); // Center a 10x10 dot in a 24x24 box
+        return QIcon(pix);
+    };
 
+    auto* cli_status_btn { new QPushButton("  CLI: Offline") };
+    cli_status_btn->setObjectName("CliStatusBtn");
+    cli_status_btn->setProperty("expanded", true);
+    cli_status_btn->setStyleSheet("text-align: left; padding: 5px; color: #a1a1aa; background: transparent; border: none; font-size: 13px; font-weight: bold;");
+    
+    QString cli_path = resolve_path("Quiver/Quiver/build/release/quiver");
+    if (QFile::exists(cli_path)) {
+        cli_status_btn->setIcon(create_dot_icon(QColor("#22c55e"))); 
+        cli_status_btn->setText("  CLI: Live");
+        cli_status_btn->setProperty("navText", "  CLI: Live");
+    } else {
+        cli_status_btn->setIcon(create_dot_icon(QColor("#ef4444"))); 
+        cli_status_btn->setText("  CLI: Offline");
+        cli_status_btn->setProperty("navText", "  CLI: Offline");
+        
+        QTimer::singleShot(2000, this, [this, cli_path]() {
+            QMessageBox::warning(this, "Quiver CLI Not Found", 
+                "The Quiver CLI binary was not found at:\n" + cli_path + 
+                "\n\nPlease ensure you have compiled it.");
+        });
+    }
+    pimpl_->sidebar_layout_->addWidget(cli_status_btn);
 
 
     auto* help_btn { new QPushButton("  Help") };
@@ -373,57 +479,7 @@ auto* logo_lbl = new QLabel;
 pimpl_->main_stack_->addWidget(pimpl_->dashboard_page_);
 
 
-    pimpl_->containers_page_ = new QWidget;
-    auto* c_layout { new QVBoxLayout(pimpl_->containers_page_) };
-    c_layout->setContentsMargins(0, 0, 0, 0);
-    c_layout->setSpacing(30);
-
-    auto* stats_row { new QHBoxLayout };
-    stats_row->setSpacing(20);
-    stats_row->addWidget(new StatCard("TOTAL",       "3",  "#ffffff"));
-    stats_row->addWidget(new StatCard("RUNNING",     "2",  "#4ade80"));
-    stats_row->addWidget(new StatCard("STOPPED",     "1",  "#fb7185"));
-    stats_row->addWidget(new StatCard("SYSTEM LOAD", "27%","#ffffff"));
-    c_layout->addLayout(stats_row);
-
-    auto* header { new QHBoxLayout };
-    auto* title { new QLabel("Containers") };
-    title->setObjectName("PageTitle");
-    pimpl_->create_btn_ = new QPushButton("+ CREATE NEW");
-    pimpl_->create_btn_->setObjectName("PrimaryButton");
-    pimpl_->create_btn_->setCursor(Qt::PointingHandCursor);
-
-    connect(pimpl_->create_btn_, &QPushButton::clicked, this, [this](){
-        CreateDialog d(this);
-        if (d.exec() == QDialog::Accepted) {
-            QString name { d.get_container_name() };
-            QString img  { d.get_container_image() };
-            if (name.trimmed().isEmpty()) name = "new-container";
-            if (img.trimmed().isEmpty())  img  = "ubuntu:latest";
-            QString id { QString::number(QRandomGenerator::global()->generate(), 16).right(6) };
-            Backend::get_instance().add_container({id, name, img, "running"});
-            refresh_container_grid();
-        }
-    });
-
-    header->addWidget(title);
-    header->addStretch();
-    header->addWidget(pimpl_->create_btn_);
-    c_layout->addLayout(header);
-
-    pimpl_->scroll_area_ = new QScrollArea;
-    pimpl_->scroll_area_->setWidgetResizable(true);
-    pimpl_->scroll_area_->setStyleSheet(
-        "QScrollArea { background: transparent; border: none; }");
-
-    auto* grid_c { new QWidget };
-    grid_c->setObjectName("GridContainer");
-    grid_c->setStyleSheet("QWidget#GridContainer { background: transparent; }");
-    pimpl_->container_grid_ = new ::FlowLayout(grid_c, 0, 20, 20);
-
-    refresh_container_grid();
-    pimpl_->scroll_area_->setWidget(grid_c);
-    c_layout->addWidget(pimpl_->scroll_area_);
+    pimpl_->containers_page_ = new ContainersPage;
     pimpl_->main_stack_->addWidget(pimpl_->containers_page_);
 
 
@@ -510,6 +566,37 @@ auto MainWindow::toggle_sidebar() -> void {
     pimpl_->is_sidebar_expanded_ = will_expand;
 }
 
+// auto MainWindow::toggle_theme() -> void {
+//     QPixmap pixmap { this->grab() };
+//     auto* overlay { new QLabel(this) };
+//     overlay->setPixmap(pixmap);
+//     overlay->setGeometry(this->rect());
+//     overlay->show();
+//     overlay->raise();
+
+//     pimpl_->is_dark_mode_ = !pimpl_->is_dark_mode_;
+
+//     QString theme_path { pimpl_->is_dark_mode_
+//         ? ":/assets/style.qss" : ":/assets/light_style.qss" };
+//     QFile file(theme_path);
+//     if (file.open(QFile::ReadOnly)) {
+//         qApp->setStyleSheet(file.readAll());
+//         file.close();
+//     }
+
+
+//     update_sidebar_icons();
+
+//     auto* eff { new QGraphicsOpacityEffect(overlay) };
+//     overlay->setGraphicsEffect(eff);
+//     auto* a { new QPropertyAnimation(eff, "opacity") };
+//     a->setDuration(300);
+//     a->setStartValue(1.0);
+//     a->setEndValue(0.0);
+//     connect(a, &QPropertyAnimation::finished, overlay, &QLabel::deleteLater);
+//     a->start(QAbstractAnimation::DeleteWhenStopped);
+// }
+
 auto MainWindow::toggle_theme() -> void {
     QPixmap pixmap { this->grab() };
     auto* overlay { new QLabel(this) };
@@ -528,8 +615,26 @@ auto MainWindow::toggle_theme() -> void {
         file.close();
     }
 
-
     update_sidebar_icons();
+
+    // --- ADD THIS MAGIC BLOCK ---
+    // Dynamically re-color all charts across the entire application
+    QColor text_color = pimpl_->is_dark_mode_ ? QColor("#A1A1AA") : QColor("#52525B");
+    QColor grid_color = pimpl_->is_dark_mode_ ? QColor("#27272A") : QColor("#E4E4E7");
+
+    // Find every QChartView currently loaded in the UI
+    QList<QChartView*> chart_views = this->findChildren<QChartView*>();
+    for (auto* view : chart_views) {
+        QChart* chart = view->chart();
+        if (chart) {
+            chart->legend()->setLabelColor(text_color); // Update Legend Text
+            for (auto* axis : chart->axes()) {
+                axis->setLabelsColor(text_color);       // Update Axis Text
+                axis->setGridLineColor(grid_color);     // Update Axis Gridlines
+            }
+        }
+    }
+    // ----------------------------
 
     auto* eff { new QGraphicsOpacityEffect(overlay) };
     overlay->setGraphicsEffect(eff);
@@ -540,6 +645,7 @@ auto MainWindow::toggle_theme() -> void {
     connect(a, &QPropertyAnimation::finished, overlay, &QLabel::deleteLater);
     a->start(QAbstractAnimation::DeleteWhenStopped);
 }
+
 
 auto MainWindow::switch_tab(int index) -> void {
     if (index >= 0 && index < pimpl_->main_stack_->count()) {
@@ -578,19 +684,9 @@ auto MainWindow::update_sidebar_icons() -> void {
 }
 
 auto MainWindow::refresh_container_grid() -> void {
-    QLayoutItem* child {};
-    while ((child = pimpl_->container_grid_->takeAt(0)) != nullptr) {
-        if (child->widget()) child->widget()->deleteLater();
-        delete child;
-    }
-    auto data { Backend::get_instance().get_containers() };
-    for (const auto& c : data) {
-        auto* card { new ContainerCard(c) };
-        connect(card, &ContainerCard::state_changed,
-                this, &MainWindow::refresh_container_grid);
-        pimpl_->container_grid_->addWidget(card);
+    if (pimpl_->containers_page_) {
+        pimpl_->containers_page_->refresh();
     }
 }
-   
 
 }

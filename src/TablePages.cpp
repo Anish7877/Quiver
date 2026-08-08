@@ -1,5 +1,8 @@
 #include "include/TablePages.h"
 #include "include/Components.h"
+#include "include/Backend.h"
+#include <QRandomGenerator>
+#include <initializer_list>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -8,9 +11,12 @@
 #include <QDialog>
 #include <QLineEdit>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QPushButton>
 #include <QWidget>
 #include <QAbstractItemView>
+#include <QScrollBar>
+#include <QSet>
 #include <QSizePolicy>
 #include <QButtonGroup>
 #include <QToolButton>
@@ -34,16 +40,19 @@ auto make_item(const QString& text, bool bright = false) -> QTableWidgetItem* {
 }
 
 auto make_status_badge(const QString& status) -> QWidget* {
-    bool positive {
-        status.toLower() == "active"   ||
-        status.toLower() == "open"     ||
-        status.toLower() == "mounted"  ||
-        status.toLower() == "running"  ||
-        status.toLower() == "in use"
-    };
-
-    QString bg  { positive ? "rgba(74,222,128,0.12)"  : "rgba(251,113,133,0.12)" };
-    QString fg  { positive ? "#4ade80"                : "#fb7185"                };
+    QString status_lower = status.toLower();
+    QString bg, fg;
+    
+    if (status_lower == "running" || status_lower == "active" || status_lower == "open" || status_lower == "mounted") {
+        bg = "rgba(74,222,128,0.12)";
+        fg = "#4ade80";
+    } else if (status_lower == "paused") {
+        bg = "rgba(234,179,8,0.12)";
+        fg = "#eab308";
+    } else { // stopped, failed, unused
+        bg = "rgba(251,113,133,0.12)";
+        fg = "#fb7185";
+    }
 
     auto* cell { new QWidget };
     auto* h { new QHBoxLayout(cell) };
@@ -90,6 +99,7 @@ auto make_status_badge(const QString& status) -> QWidget* {
 struct TablePage::Impl {
     QTableWidget* table_   {};
     QPushButton*  add_btn_ {};
+    QHBoxLayout*  header_layout_ {};
 };
 
 TablePage::TablePage(const QString& title,
@@ -101,11 +111,13 @@ TablePage::TablePage(const QString& title,
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-
+    pimpl_->header_layout_ = new QHBoxLayout;
     auto* title_lbl { new QLabel(title) };
     title_lbl->setObjectName("PageTitle");
     title_lbl->setContentsMargins(0, 0, 0, 16);
-    layout->addWidget(title_lbl);
+    pimpl_->header_layout_->addWidget(title_lbl);
+    
+    layout->addLayout(pimpl_->header_layout_);
 
 
     QStringList all_cols { columns };
@@ -123,8 +135,8 @@ TablePage::TablePage(const QString& title,
     pimpl_->table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     pimpl_->table_->setAlternatingRowColors(false);
     pimpl_->table_->verticalHeader()->setDefaultSectionSize(52);
-    pimpl_->table_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    pimpl_->table_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    pimpl_->table_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    pimpl_->table_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     pimpl_->table_->horizontalHeader()->setHighlightSections(false);
     pimpl_->table_->horizontalHeader()->setMinimumSectionSize(80);
     pimpl_->table_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
@@ -205,6 +217,7 @@ auto TablePage::add_row(const QStringList& row_data,
 }
 
 auto TablePage::table() -> QTableWidget* { return pimpl_->table_; }
+auto TablePage::header_layout() -> QHBoxLayout* { return pimpl_->header_layout_; }
 
 
 static auto make_stat_row(
@@ -224,6 +237,254 @@ static auto make_stat_row(
     row->addWidget(new Quiver::StatCard(t3, v3, c3));
 
     root->addLayout(row);
+}
+
+struct ContainersPage::Impl {
+    TablePage* page_ {};
+    QWidget* overlay_ {};
+    QLabel* loading_text_ {};
+    QWidget* bulk_widget_ {};
+    Quiver::StatCard* stat_total_ {};
+    Quiver::StatCard* stat_running_ {};
+    Quiver::StatCard* stat_stopped_ {};
+    
+    QStringList get_selected_ids() {
+        QStringList ids;
+        for (int r = 0; r < page_->table()->rowCount(); ++r) {
+            auto* cell = page_->table()->cellWidget(r, 0);
+            if (!cell) continue;
+            auto* cb = cell->findChild<QPushButton*>("SelectCheckbox");
+            if (cb && cb->isChecked()) {
+                auto* item = page_->table()->item(r, 1);
+                if (item) ids << item->text();
+            }
+        }
+        return ids;
+    }
+    
+    void update_bulk_actions_visibility() {
+        if (bulk_widget_) {
+            bulk_widget_->setVisible(!get_selected_ids().isEmpty());
+        }
+    }
+};
+
+ContainersPage::ContainersPage(QWidget* parent)
+    : QWidget(parent), pimpl_{ std::make_unique<Impl>() }
+{
+    auto* root { new QVBoxLayout(this) };
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(0);
+
+    auto* stats_row { new QHBoxLayout };
+    stats_row->setSpacing(20);
+    stats_row->setContentsMargins(0, 0, 0, 24);
+    pimpl_->stat_total_ = new Quiver::StatCard("TOTAL", "0", "#ffffff");
+    pimpl_->stat_running_ = new Quiver::StatCard("RUNNING", "0", "#4ade80");
+    pimpl_->stat_stopped_ = new Quiver::StatCard("STOPPED", "0", "#fb7185");
+    stats_row->addWidget(pimpl_->stat_total_);
+    stats_row->addWidget(pimpl_->stat_running_);
+    stats_row->addWidget(pimpl_->stat_stopped_);
+    stats_row->addWidget(new Quiver::StatCard("SYSTEM LOAD", "0%", "#ffffff"));
+    root->addLayout(stats_row);
+
+    pimpl_->page_ = new TablePage(
+        "Containers",
+        { "SELECT", "ID", "NAME", "IMAGE", "STATUS" },
+        this);
+    
+    // Set SELECT column to be very narrow
+    pimpl_->page_->table()->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
+    pimpl_->page_->table()->setColumnWidth(0, 60);
+
+    pimpl_->bulk_widget_ = new QWidget;
+    auto* bulk_row = new QHBoxLayout(pimpl_->bulk_widget_);
+    bulk_row->setContentsMargins(0, 0, 0, 0);
+    bulk_row->setSpacing(10);
+    
+    auto* bulk_lbl = new QLabel("Bulk Actions:");
+    bulk_lbl->setStyleSheet("color: #a1a1aa; font-weight: bold; font-size: 14px;");
+    bulk_row->addWidget(bulk_lbl);
+    
+    auto create_bulk_btn = [this](const QString& text, const QString& color, auto func) {
+        auto* btn = new QPushButton(text);
+        btn->setCursor(Qt::PointingHandCursor);
+        btn->setStyleSheet(QString("QPushButton { border: 1px solid %1; color: %1; border-radius: 4px; background: transparent; padding: 4px 12px; font-weight: bold; } QPushButton:hover { background: %1; color: white; }").arg(color));
+        connect(btn, &QPushButton::clicked, this, [this, func]() {
+            QStringList ids = pimpl_->get_selected_ids();
+            if (ids.isEmpty()) return;
+            pimpl_->overlay_->show();
+            pimpl_->overlay_->raise();
+            QTimer::singleShot(50, this, [this, ids, func]() {
+                func(ids);
+                QTimer::singleShot(2500, this, [this]() {
+                    refresh();
+                    pimpl_->overlay_->hide();
+                });
+            });
+        });
+        return btn;
+    };
+    
+    bulk_row->addWidget(create_bulk_btn("▶ Unpause", "#4ade80", [](const QStringList& ids){ Backend::get_instance().unpause_container(ids); }));
+    bulk_row->addWidget(create_bulk_btn("⏸ Pause", "#f97316", [](const QStringList& ids){ Backend::get_instance().pause_container(ids); }));
+    bulk_row->addWidget(create_bulk_btn("🗑 Delete", "#ef4444", [](const QStringList& ids){ Backend::get_instance().delete_container(ids); }));
+    
+    pimpl_->bulk_widget_->hide(); // Hidden by default
+    pimpl_->page_->header_layout()->addStretch();
+    pimpl_->page_->header_layout()->addWidget(pimpl_->bulk_widget_);
+
+    connect(pimpl_->page_, &TablePage::add_clicked, this, [this]() {
+        CreateDialog d(this);
+        if (d.exec() == QDialog::Accepted) {
+            QString name { d.get_container_name() };
+            QString img  { d.get_container_image() };
+            if (name.trimmed().isEmpty()) name = "new-container";
+            if (img.trimmed().isEmpty())  img  = "ubuntu:latest";
+            QString id { QString::number(QRandomGenerator::global()->generate(), 16).right(6) };
+            
+            Container c;
+            c.id = id;
+            c.name = name;
+            c.image = img;
+            c.status = "running";
+            c.filesystem = d.get_filesystem();
+            c.devices = d.get_devices();
+            c.volumes = d.get_volumes();
+            c.ports = d.get_ports();
+            
+            Backend::get_instance().add_container(c);
+            refresh();
+        }
+    });
+
+    // Create the overlay for loading
+    pimpl_->overlay_ = new QWidget(this);
+    pimpl_->overlay_->setStyleSheet("background-color: rgba(0, 0, 0, 150); border-radius: 8px;");
+    auto* overlay_layout = new QVBoxLayout(pimpl_->overlay_);
+    pimpl_->loading_text_ = new QLabel("Processing...");
+    pimpl_->loading_text_->setStyleSheet("color: white; font-size: 16px; font-weight: bold;");
+    pimpl_->loading_text_->setAlignment(Qt::AlignCenter);
+    overlay_layout->addWidget(pimpl_->loading_text_);
+    pimpl_->overlay_->hide();
+
+    root->addWidget(pimpl_->page_);
+    
+    QTimer::singleShot(100, this, &ContainersPage::refresh);
+}
+
+ContainersPage::~ContainersPage() = default;
+
+void ContainersPage::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    if (pimpl_->overlay_) {
+        pimpl_->overlay_->resize(this->size());
+    }
+}
+
+auto ContainersPage::refresh() -> void {
+    int v_scroll = pimpl_->page_->table()->verticalScrollBar()->value();
+    QSet<QString> checked_ids;
+    for (int r = 0; r < pimpl_->page_->table()->rowCount(); ++r) {
+        auto* cell = pimpl_->page_->table()->cellWidget(r, 0);
+        if (cell) {
+            auto* cb = cell->findChild<QPushButton*>("SelectCheckbox");
+            if (cb && cb->isChecked()) {
+                auto* item = pimpl_->page_->table()->item(r, 1);
+                if (item) checked_ids.insert(item->text());
+            }
+        }
+    }
+
+    while (pimpl_->page_->table()->rowCount() > 0) {
+        pimpl_->page_->table()->removeRow(0);
+    }
+    
+    auto containers = Backend::get_instance().get_containers();
+    
+    int total = containers.size();
+    int running = 0;
+    int stopped = 0;
+    
+    for (const auto& c : containers) {
+        if (c.status == "running") running++;
+        else stopped++;
+        
+        int row = pimpl_->page_->table()->rowCount();
+        pimpl_->page_->table()->insertRow(row);
+        
+        auto* cb_cell = new QWidget;
+        auto* cb_layout = new QHBoxLayout(cb_cell);
+        cb_layout->setContentsMargins(0, 0, 0, 0);
+        cb_layout->setAlignment(Qt::AlignCenter);
+        
+        auto* cb = new QPushButton;
+        cb->setObjectName("SelectCheckbox");
+        cb->setCheckable(true);
+        cb->setFixedSize(16, 16);
+        cb->setCursor(Qt::PointingHandCursor);
+        cb->setStyleSheet(
+            "QPushButton { border: 1px solid #71717a; border-radius: 4px; background: transparent; color: transparent; font-weight: bold; font-size: 11px; padding-bottom: 2px; } "
+            "QPushButton:checked { background: #f97316; border: 1px solid #f97316; color: black; }"
+        );
+        if (checked_ids.contains(c.id)) {
+            cb->setChecked(true);
+            cb->setText("✓");
+        }
+        connect(cb, &QPushButton::toggled, cb, [cb](bool checked) {
+            cb->setText(checked ? "✓" : "");
+        });
+        connect(cb, &QPushButton::toggled, this, [this]() {
+            pimpl_->update_bulk_actions_visibility();
+        });
+        
+        cb_layout->addWidget(cb);
+        pimpl_->page_->table()->setCellWidget(row, 0, cb_cell);
+        
+        pimpl_->page_->table()->setItem(row, 1, make_item(c.id, true));
+        pimpl_->page_->table()->setItem(row, 2, make_item(c.name));
+        pimpl_->page_->table()->setItem(row, 3, make_item(c.image));
+        pimpl_->page_->table()->setCellWidget(row, 4, make_status_badge(c.status));
+        
+        auto* cell = new QWidget;
+        auto* h = new QHBoxLayout(cell);
+        h->setContentsMargins(5, 0, 5, 0);
+        h->setSpacing(5);
+        h->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+        
+        auto create_btn = [this, c](const QString& text, const QString& color, auto func) {
+            auto* btn = new QPushButton(text);
+            btn->setCursor(Qt::PointingHandCursor);
+            btn->setFixedSize(30, 28);
+            btn->setStyleSheet(QString("QPushButton { border: 1px solid %1; color: %1; border-radius: 4px; background: transparent; } QPushButton:hover { background: %1; color: white; }").arg(color));
+            connect(btn, &QPushButton::clicked, this, [this, c, func]() {
+                pimpl_->overlay_->show();
+                pimpl_->overlay_->raise(); // Ensure overlay is on top
+                QTimer::singleShot(50, this, [this, c, func]() {
+                    func(QStringList() << c.id);
+                    // refresh after command finishes (allow 2.5s for async execution)
+                    QTimer::singleShot(2500, this, [this]() {
+                        refresh();
+                        pimpl_->overlay_->hide();
+                    });
+                });
+            });
+            return btn;
+        };
+
+        h->addWidget(create_btn("▶", "#4ade80", [](const QStringList& ids){ Backend::get_instance().unpause_container(ids); }));
+        h->addWidget(create_btn("⏸", "#f97316", [](const QStringList& ids){ Backend::get_instance().pause_container(ids); }));
+        h->addWidget(create_btn("🗑", "#ef4444", [](const QStringList& ids){ Backend::get_instance().delete_container(ids); }));
+
+        pimpl_->page_->table()->setCellWidget(row, 5, cell);
+    }
+    
+    pimpl_->stat_total_->set_value(QString::number(total));
+    pimpl_->stat_running_->set_value(QString::number(running));
+    pimpl_->stat_stopped_->set_value(QString::number(stopped));
+    
+    pimpl_->page_->table()->verticalScrollBar()->setValue(v_scroll);
+    pimpl_->update_bulk_actions_visibility();
 }
 
 struct ImagesPage::Impl { TablePage* page_ {}; };
@@ -270,9 +531,15 @@ ImagesPage::ImagesPage(QWidget* parent)
         r->addWidget(name_in); r->addWidget(new QLabel(":")); r->addWidget(tag_in);
         l->addLayout(r); l->addStretch();
         auto* btns { new QHBoxLayout };
-        auto* cancel { new QPushButton("Cancel") }; cancel->setObjectName("SecondaryBtn"); cancel->setCursor(Qt::PointingHandCursor);
+        auto* cancel { new QPushButton("Cancel") }; 
+        cancel->setObjectName("SecondaryBtn"); 
+        cancel->setCursor(Qt::PointingHandCursor);
+        cancel->setFixedSize(85, 34);
         connect(cancel, &QPushButton::clicked, &d, &QDialog::reject);
-        auto* pull { new QPushButton("Pull") }; pull->setObjectName("PrimaryButton"); pull->setCursor(Qt::PointingHandCursor);
+        auto* pull { new QPushButton("Pull") };
+         pull->setObjectName("PrimaryButton"); 
+        pull->setCursor(Qt::PointingHandCursor);
+        pull->setFixedSize(85, 34);
         connect(pull, &QPushButton::clicked, &d, &QDialog::accept);
         btns->addStretch(); btns->addWidget(cancel); btns->addWidget(pull);
         l->addLayout(btns);
@@ -330,9 +597,12 @@ VolumesPage::VolumesPage(QWidget* parent)
         auto* driver { new QComboBox }; driver->addItems({"local", "nfs", "tmpfs"}); driver->setFixedHeight(34); l->addWidget(driver);
         l->addStretch();
         auto* btns { new QHBoxLayout };
-        auto* cancel { new QPushButton("Cancel") }; cancel->setObjectName("SecondaryBtn"); cancel->setCursor(Qt::PointingHandCursor);
+        auto* cancel { new QPushButton("Cancel") }; 
+        cancel->setObjectName("SecondaryBtn"); cancel->setCursor(Qt::PointingHandCursor);
+        cancel->setFixedSize(85, 34);
         connect(cancel, &QPushButton::clicked, &d, &QDialog::reject);
         auto* create { new QPushButton("Create") }; create->setObjectName("PrimaryButton"); create->setCursor(Qt::PointingHandCursor);
+        create->setFixedSize(85, 34);
         connect(create, &QPushButton::clicked, &d, &QDialog::accept);
         btns->addStretch(); btns->addWidget(cancel); btns->addWidget(create);
         l->addLayout(btns);
@@ -397,8 +667,10 @@ PortsPage::PortsPage(QWidget* parent)
         l->addStretch();
         auto* btns { new QHBoxLayout };
         auto* cancel { new QPushButton("Cancel") }; cancel->setObjectName("SecondaryBtn"); cancel->setCursor(Qt::PointingHandCursor);
+        cancel->setFixedSize(85, 34);
         connect(cancel, &QPushButton::clicked, &d, &QDialog::reject);
         auto* add_btn { new QPushButton("Add") }; add_btn->setObjectName("PrimaryButton"); add_btn->setCursor(Qt::PointingHandCursor);
+        add_btn->setFixedSize(85, 34);
         connect(add_btn, &QPushButton::clicked, &d, &QDialog::accept);
         btns->addStretch(); btns->addWidget(cancel); btns->addWidget(add_btn);
         l->addLayout(btns);
@@ -461,9 +733,9 @@ DevicesPage::DevicesPage(QWidget* parent)
         r->addWidget(type_cb); r->addWidget(perm_cb);
         l->addLayout(r); l->addStretch();
         auto* btns { new QHBoxLayout };
-        auto* cancel { new QPushButton("Cancel") }; cancel->setObjectName("SecondaryBtn"); cancel->setCursor(Qt::PointingHandCursor);
+        auto* cancel { new QPushButton("Cancel") }; cancel->setObjectName("SecondaryBtn"); cancel->setCursor(Qt::PointingHandCursor); cancel->setFixedSize(85, 34);
         connect(cancel, &QPushButton::clicked, &d, &QDialog::reject);
-        auto* add_btn { new QPushButton("Add") }; add_btn->setObjectName("PrimaryButton"); add_btn->setCursor(Qt::PointingHandCursor);
+        auto* add_btn { new QPushButton("Add") }; add_btn->setObjectName("PrimaryButton"); add_btn->setCursor(Qt::PointingHandCursor); add_btn->setFixedSize(85, 34);
         connect(add_btn, &QPushButton::clicked, &d, &QDialog::accept);
         btns->addStretch(); btns->addWidget(cancel); btns->addWidget(add_btn);
         l->addLayout(btns);
@@ -610,43 +882,26 @@ SettingsPage::SettingsPage(QWidget* parent)
     scroll_area->setWidget(scroll_content);
     main_layout->addWidget(scroll_area);
 
-//     connect(upload_btn, &QPushButton::clicked, this, [avatar_display, get_circular_pixmap, this]() {
-//     QString file_name = QFileDialog::getOpenFileName(
-//         this, "Select Profile Picture", "", "Images (*.png *.jpg *.jpeg *.webp)");
-//     if (file_name.isEmpty()) return;
 
-//     avatar_display->setPixmap(get_circular_pixmap(file_name, 86));
-
-
-//     AuthManager::get_instance().upload_avatar(file_name);
-// });
-// connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this,
-//     [avatar_display, get_circular_pixmap]() {
-//         QSettings settings("QuiverApp", "Quiver");
-//         QString url = settings.value("avatar_url").toString();
-//         if (!url.isEmpty() && !url.startsWith(":/")) {
-           
-//         }
-//     });
 connect(upload_btn, &QPushButton::clicked, this, [avatar_display, get_circular_pixmap, this]() {
         QString file_name = QFileDialog::getOpenFileName(
             this, "Select Profile Picture", "", "Images (*.png *.jpg *.jpeg *.webp)");
         if (file_name.isEmpty()) return;
 
-        // Optimistically update the UI immediately
+       
         avatar_display->setPixmap(get_circular_pixmap(file_name, 86));
 
-        // Send to backend
+      
         AuthManager::get_instance().upload_avatar(file_name);
     });
 
-    // FIX: Properly update the settings avatar when AuthManager says profile changed
+    
     connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this,
         [avatar_display, get_circular_pixmap]() {
-            // Get the latest cached avatar path from AuthManager
+            
             QString latest_avatar = AuthManager::get_instance().get_cached_avatar_path();
             
-            // Check if it exists, otherwise it defaults back to profile.svg
+            
             if (!latest_avatar.isEmpty()) {
                 avatar_display->setPixmap(get_circular_pixmap(latest_avatar, 86));
             } else {
