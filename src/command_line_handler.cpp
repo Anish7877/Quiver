@@ -13,6 +13,11 @@
 #include <string>
 #include <sstream>
 #include <fstream>
+#include <fcntl.h>
+#include <sys/mount.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 static std::vector<std::string> split_string(const std::string& str, char delimiter) {
         std::vector<std::string> tokens;

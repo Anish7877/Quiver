@@ -37,6 +37,8 @@ int main(int argc, char* argv[]) {
                 CommandLineHandler::unpause(args);
         } else if (command == "attach") {
                 CommandLineHandler::attach(args);
+        } else if (command == "mount") {
+                CommandLineHandler::live_mount(args);
         } else {
             std::cerr << "quiver: '" << command << "' is not a quiver command.\n"
                       << "See 'quiver --help'.\n";

@@ -157,4 +157,25 @@ if [ "$HAS_SPACES" = true ]; then
         rm -f "$SAFE_LINK"
 fi
 
+echo "=== Step 6: Setting up Rootless Cgroups (Universal Shell) ==="
+
+mkdir -p ~/.config/systemd
+touch ~/.config/systemd/user.conf
+
+sudo mkdir -p /etc/systemd/system/user@.service.d/
+echo -e "[Service]\nDelegate=cpu cpuset io memory pids" | sudo tee /etc/systemd/system/user@.service.d/delegate.conf > /dev/null
+
+sudo systemctl daemon-reload
+sudo systemctl restart user@$(id -u).service
+
+
+mkdir -p ~/.config/environment.d
+echo "DBUS_SESSION_BUS_ADDRESS=\"unix:path=/run/user/$(id -u)/bus\"" > ~/.config/environment.d/dbus.conf
+
+sudo tee /etc/profile.d/rootless-dbus.sh > /dev/null << 'EOF'
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+EOF
+sudo chmod +x /etc/profile.d/rootless-dbus.sh
+
 echo "=== Setup Complete! ==="
+echo "Note: Because these are system-wide session changes, you need to completely close your terminal and open a new one (or log out and back in) for them to take effect."
