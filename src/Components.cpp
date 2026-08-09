@@ -250,7 +250,7 @@ CreateDialog::CreateDialog(QWidget* parent)
 {
     setObjectName("CreateDialog");
     setWindowTitle("Create Container");
-    setFixedSize(600, 720);
+    setFixedSize(600, 820);
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
 
     auto* main { new QVBoxLayout(this) };
@@ -310,7 +310,7 @@ CreateDialog::CreateDialog(QWidget* parent)
     auto* page_visual { new QWidget };
     auto* v_layout { new QVBoxLayout(page_visual) };
     v_layout->setContentsMargins(0, 10, 0, 0);
-    v_layout->setSpacing(15);
+    v_layout->setSpacing(20);
 
     auto* core_lbl { new QLabel("CORE CONFIGURATION") };
     core_lbl->setObjectName("SectionTitle");

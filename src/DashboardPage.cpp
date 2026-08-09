@@ -18,13 +18,34 @@
 #include <QEasingCurve>
 #include <QGraphicsLayout>
 
+#include <QTimer>
+#include <QPlainTextEdit>
+#include <QFile>
+#include <QDir>
+#include <QTextStream>
+#include <QProcess>
+#include <QScrollBar>
+#include <QRegularExpression>
+#include <QFileSystemWatcher>
+#include "include/Backend.h"
+
 namespace Quiver {
 
 struct DashboardPage::Impl {
     QScrollArea* scroll_area_{};
     QWidget* scroll_content_{};
+    QTimer* stats_timer_{};
+    QPlainTextEdit* log_viewer_{};
+    QChart* cpu_chart_{};
+    QChart* mem_chart_{};
+    QBarSeries* cpu_series_{};
+    QBarSeries* mem_series_{};
+    QBarCategoryAxis* cpu_axisX_{};
+    QBarCategoryAxis* mem_axisX_{};
+    uint64_t last_log_size_{};
+    QFileSystemWatcher* log_watcher_{};
+    QProcess* stats_process_{};
 };
-
 static auto create_cpu_cores_panel(const QString& title) -> QFrame* {
     auto* panel = new QFrame;
     panel->setObjectName("DashPanel");
@@ -193,59 +214,7 @@ static auto create_multi_bar_chart_panel(const QString& title, const QStringList
     return panel;
 }
 
-static auto create_image_card(const QString& name, const QString& tag, const QString& time) -> QFrame* {
-    auto* card = new QFrame;
-    card->setObjectName("DashItemCard");
-    auto* layout = new QHBoxLayout(card);
-    layout->setContentsMargins(15, 10, 15, 10);
 
-    auto* name_lbl = new QLabel(name);
-    name_lbl->setObjectName("ItemName");
-    
-    
-    auto* tag_lbl = new QLabel(tag);
-    tag_lbl->setStyleSheet("color: #F97316; font-size: 11px; font-weight: bold; background: rgba(249, 115, 22, 0.1); padding: 4px 8px; border-radius: 4px;");
-
-    auto* time_lbl = new QLabel(time);
-    time_lbl->setObjectName("DimText");
-
-    auto* run_btn = new QPushButton("▶ Run");
-    run_btn->setObjectName("PrimaryButton");
-    run_btn->setCursor(Qt::PointingHandCursor);
-    run_btn->setFixedSize(75, 28); 
-
-    layout->addWidget(name_lbl);
-    layout->addWidget(tag_lbl);
-    layout->addStretch();
-    layout->addWidget(time_lbl);
-    layout->addSpacing(10);
-    layout->addWidget(run_btn);
-
-    return card;
-}
-
-static auto create_event_item(const QString& type, const QString& message, const QString& theme) -> QFrame* {
-    auto* row = new QFrame;
-    row->setObjectName("DashEventRow");
-    auto* layout = new QHBoxLayout(row);
-    layout->setContentsMargins(10, 8, 10, 8);
-
-    auto* badge = new QLabel(type);
-    badge->setProperty("statTheme", theme); 
-    badge->setObjectName("EventBadge");
-    badge->setFixedWidth(90);
-    badge->setAlignment(Qt::AlignCenter);
-
-    auto* msg = new QLabel(message);
-    msg->setObjectName("EventMessage");
-    msg->setWordWrap(true);
-
-    layout->addWidget(badge);
-    layout->addSpacing(10);
-    layout->addWidget(msg, 1);
-
-    return row;
-}
 
 DashboardPage::DashboardPage(QWidget* parent)
     : QWidget(parent), pimpl_{std::make_unique<Impl>()}
@@ -277,68 +246,230 @@ DashboardPage::DashboardPage(QWidget* parent)
     stats_row->addWidget(new StatCard("ACTIVE VOLUMES", "5", "white"));
     scroll_layout->addLayout(stats_row);
 
-    auto* charts_row = new QHBoxLayout;
-    charts_row->setSpacing(24);
-    charts_row->addWidget(create_cpu_cores_panel("CPU Usage by Core (%)"));
-    charts_row->addWidget(create_donut_chart_panel("Memory Allocation"));
 
-    QStringList portLabels = {"Port 80", "Port 443", "Port 5432", "Port 6379"};
-    QList<qreal> portTraffic = {120, 250, 45, 80};
-  
-    QList<QColor> portColors = {
-        QColor("#F97316"), // Brand Orange
-        QColor("#52525B"), // Zinc 600
-        QColor("#A1A1AA"), // Zinc 400
-        QColor("#D4D4D8")  // Zinc 300
-    };
-    
-    charts_row->addWidget(create_multi_bar_chart_panel("Active Port Connections", portLabels, portTraffic, portColors));
-    scroll_layout->addLayout(charts_row);
 
     auto* split_layout = new QHBoxLayout;
     split_layout->setSpacing(24);
 
     auto* left_pane = new QFrame;
     left_pane->setObjectName("DashPanel");
+    left_pane->setStyleSheet("QFrame#DashPanel { background: transparent; border: none; }");
     auto* left_layout = new QVBoxLayout(left_pane);
-    left_layout->setContentsMargins(20, 20, 20, 20);
-    left_layout->setSpacing(10);
+    left_layout->setContentsMargins(0, 0, 0, 0);
+    left_layout->setSpacing(24);
     
-    auto* left_title = new QLabel("Recent Container (Quick Launch)");
-    left_title->setObjectName("DashPanelTitle");
-    left_layout->addWidget(left_title);
-    left_layout->addSpacing(5);
+    // CPU Chart Panel
+    auto* cpu_panel = new QFrame;
+    cpu_panel->setObjectName("DashPanel");
+    auto* cpu_layout = new QVBoxLayout(cpu_panel);
+    cpu_layout->setContentsMargins(20, 15, 20, 10);
+    auto* cpu_title = new QLabel("CPU Utilization (%)");
+    cpu_title->setObjectName("DashPanelTitle");
+    cpu_layout->addWidget(cpu_title);
 
-    left_layout->addWidget(create_image_card("ubuntu", "22.04", "Pulled 2 hours ago"));
-    left_layout->addWidget(create_image_card("nginx", "latest", "Pulled yesterday"));
-    left_layout->addWidget(create_image_card("postgres", "14-alpine", "Pulled 3 days ago"));
-    left_layout->addWidget(create_image_card("redis", "6.2", "Pulled 1 week ago"));
-    left_layout->addStretch();
+    pimpl_->cpu_chart_ = new QChart();
+    pimpl_->cpu_chart_->legend()->hide();
+    pimpl_->cpu_series_ = new QBarSeries();
+    pimpl_->cpu_chart_->addSeries(pimpl_->cpu_series_);
+    pimpl_->cpu_axisX_ = new QBarCategoryAxis();
+    pimpl_->cpu_axisX_->setLabelsColor(QColor("#A1A1AA"));
+    pimpl_->cpu_axisX_->setGridLineVisible(false);
+    pimpl_->cpu_chart_->addAxis(pimpl_->cpu_axisX_, Qt::AlignBottom);
+    pimpl_->cpu_series_->attachAxis(pimpl_->cpu_axisX_);
+    
+    auto* cpu_axisY = new QValueAxis();
+    cpu_axisY->setRange(0, 100);
+    cpu_axisY->setLabelsColor(QColor("#A1A1AA"));
+    cpu_axisY->setGridLineColor(QColor("#27272A"));
+    pimpl_->cpu_chart_->addAxis(cpu_axisY, Qt::AlignLeft);
+    pimpl_->cpu_series_->attachAxis(cpu_axisY);
+    
+    pimpl_->cpu_chart_->setBackgroundVisible(false);
+    pimpl_->cpu_chart_->setMargins(QMargins(0, 10, 0, 0));
+    pimpl_->cpu_chart_->layout()->setContentsMargins(0, 0, 0, 0);
+    
+    auto* cpu_view = new QChartView(pimpl_->cpu_chart_);
+    cpu_view->setRenderHint(QPainter::Antialiasing);
+    cpu_view->setStyleSheet("background: transparent;");
+    cpu_view->setMinimumHeight(250);
+    cpu_layout->addWidget(cpu_view);
+    left_layout->addWidget(cpu_panel);
 
+    // Memory Chart Panel
+    auto* mem_panel = new QFrame;
+    mem_panel->setObjectName("DashPanel");
+    auto* mem_layout = new QVBoxLayout(mem_panel);
+    mem_layout->setContentsMargins(20, 15, 20, 10);
+    auto* mem_title = new QLabel("Memory Allocation (MB)");
+    mem_title->setObjectName("DashPanelTitle");
+    mem_layout->addWidget(mem_title);
+
+    pimpl_->mem_chart_ = new QChart();
+    pimpl_->mem_chart_->legend()->hide();
+    pimpl_->mem_series_ = new QBarSeries();
+    pimpl_->mem_chart_->addSeries(pimpl_->mem_series_);
+    pimpl_->mem_axisX_ = new QBarCategoryAxis();
+    pimpl_->mem_axisX_->setLabelsColor(QColor("#A1A1AA"));
+    pimpl_->mem_axisX_->setGridLineVisible(false);
+    pimpl_->mem_chart_->addAxis(pimpl_->mem_axisX_, Qt::AlignBottom);
+    pimpl_->mem_series_->attachAxis(pimpl_->mem_axisX_);
+    
+    auto* mem_axisY = new QValueAxis();
+    mem_axisY->setRange(0, 1024);
+    mem_axisY->setLabelsColor(QColor("#A1A1AA"));
+    mem_axisY->setGridLineColor(QColor("#27272A"));
+    pimpl_->mem_chart_->addAxis(mem_axisY, Qt::AlignLeft);
+    pimpl_->mem_series_->attachAxis(mem_axisY);
+    
+    pimpl_->mem_chart_->setBackgroundVisible(false);
+    pimpl_->mem_chart_->setMargins(QMargins(0, 10, 0, 0));
+    pimpl_->mem_chart_->layout()->setContentsMargins(0, 0, 0, 0);
+    
+    auto* mem_view = new QChartView(pimpl_->mem_chart_);
+    mem_view->setRenderHint(QPainter::Antialiasing);
+    mem_view->setStyleSheet("background: transparent;");
+    mem_view->setMinimumHeight(250);
+    mem_layout->addWidget(mem_view);
+    left_layout->addWidget(mem_panel);
+
+    // Right Pane (Logs)
     auto* right_pane = new QFrame;
     right_pane->setObjectName("DashPanel");
     auto* right_layout = new QVBoxLayout(right_pane);
     right_layout->setContentsMargins(20, 20, 20, 20);
     right_layout->setSpacing(10);
+    
+    auto* logs_title = new QLabel("Logs");
+    logs_title->setObjectName("DashPanelTitle");
+    right_layout->addWidget(logs_title);
+    
+    pimpl_->log_viewer_ = new QPlainTextEdit;
+    pimpl_->log_viewer_->setReadOnly(true);
+    pimpl_->log_viewer_->setStyleSheet("QPlainTextEdit { background-color: #0d1117; color: #c9d1d9; font-family: monospace; border: 1px solid #30363d; border-radius: 4px; padding: 10px; }");
+    right_layout->addWidget(pimpl_->log_viewer_);
 
-    auto* right_title = new QLabel("System Activity");
-    right_title->setObjectName("DashPanelTitle");
-    right_layout->addWidget(right_title);
-    right_layout->addSpacing(5);
-
-    right_layout->addWidget(create_event_item("CRASH", "Container 'db-worker' exited with code 137 (OOM)", "red"));
-    right_layout->addWidget(create_event_item("PULLED", "Successfully fetched 'ubuntu:22.04'", "green"));
-    right_layout->addWidget(create_event_item("STARTED", "Container 'nginx-proxy' is now running", "green"));
-    right_layout->addWidget(create_event_item("MOUNTED", "Volume 'pg_data' attached to 'postgres-main'", "white"));
-    right_layout->addWidget(create_event_item("WARNING", "Docker daemon CPU usage exceeded 85%", "orange"));
-    right_layout->addStretch();
-
-    split_layout->addWidget(left_pane, 6);  
-    split_layout->addWidget(right_pane, 4); 
+    split_layout->addWidget(left_pane, 5);  
+    split_layout->addWidget(right_pane, 5); 
     scroll_layout->addLayout(split_layout); 
 
     pimpl_->scroll_area_->setWidget(pimpl_->scroll_content_);
     root->addWidget(pimpl_->scroll_area_);
+
+    // Setup Logs File Watcher
+    QString log_path = QDir::homePath() + "/.quiver/logs/container.log";
+    pimpl_->log_watcher_ = new QFileSystemWatcher(this);
+    
+    // Create directory and dummy file if it doesn't exist
+    QDir().mkpath(QDir::homePath() + "/.quiver/logs");
+    QFile dummy(log_path);
+    if (!dummy.exists()) {
+        dummy.open(QIODevice::WriteOnly);
+        dummy.close();
+    }
+    
+    pimpl_->log_watcher_->addPath(log_path);
+    
+    auto read_logs = [this, log_path]() {
+        QFile file(log_path);
+        if (file.open(QIODevice::ReadOnly)) {
+            qint64 currentSize = file.size();
+            if (currentSize > (qint64)pimpl_->last_log_size_) {
+                if (file.seek(pimpl_->last_log_size_)) {
+                    QByteArray new_logs = file.readAll();
+                    if (!new_logs.isEmpty()) {
+                        QTextCursor cursor = pimpl_->log_viewer_->textCursor();
+                        cursor.movePosition(QTextCursor::End);
+                        pimpl_->log_viewer_->setTextCursor(cursor);
+                        pimpl_->log_viewer_->insertPlainText(QString::fromUtf8(new_logs));
+                        
+                        QScrollBar *bar = pimpl_->log_viewer_->verticalScrollBar();
+                        bar->setValue(bar->maximum());
+                    }
+                    pimpl_->last_log_size_ = currentSize;
+                }
+            } else if (currentSize < (qint64)pimpl_->last_log_size_) {
+                pimpl_->last_log_size_ = 0;
+                pimpl_->log_viewer_->clear();
+            }
+            file.close();
+        }
+    };
+    
+    connect(pimpl_->log_watcher_, &QFileSystemWatcher::fileChanged, this, read_logs);
+    read_logs(); // Initial read
+
+    // Setup Stats Polling Process
+    pimpl_->stats_process_ = new QProcess(this);
+    connect(pimpl_->stats_process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this](int exitCode, QProcess::ExitStatus exitStatus) {
+        if (exitStatus != QProcess::NormalExit || exitCode != 0) return;
+        
+        QString output = pimpl_->stats_process_->readAllStandardOutput();
+        QStringList lines = output.split('\n', Qt::SkipEmptyParts);
+        if (lines.isEmpty()) return;
+
+        QBarSet* cpu_set = new QBarSet("CPU");
+        QBarSet* mem_set = new QBarSet("MEM");
+        cpu_set->setBrush(QColor("#58a6ff")); // Blue
+        cpu_set->setPen(Qt::NoPen);
+        mem_set->setBrush(QColor("#2ea043")); // Green
+        mem_set->setPen(Qt::NoPen);
+
+        QStringList categories;
+        double max_mem = 100;
+        double max_cpu = 100;
+
+        for (int i = 1; i < lines.size(); ++i) { // skip header
+            QString line = lines[i].trimmed();
+            if (line.isEmpty()) continue;
+            QStringList parts = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+            if (parts.size() >= 3) {
+                QString id = parts[0].left(8);
+                QString cpu_str = parts[1]; 
+                cpu_str.remove("%");
+                QString mem_str = parts[2]; 
+                mem_str.remove("MB");
+                
+                double cpu = cpu_str.toDouble();
+                double mem = mem_str.toDouble();
+                
+                *cpu_set << cpu;
+                *mem_set << mem;
+                categories << id;
+                if (mem > max_mem) max_mem = mem;
+                if (cpu > max_cpu) max_cpu = cpu;
+            }
+        }
+
+        if (!categories.isEmpty()) {
+            pimpl_->cpu_series_->clear();
+            pimpl_->cpu_series_->append(cpu_set);
+            pimpl_->cpu_axisX_->clear();
+            pimpl_->cpu_axisX_->append(categories);
+            if (auto axis = qobject_cast<QValueAxis*>(pimpl_->cpu_chart_->axes(Qt::Vertical).first())) {
+                axis->setRange(0, max_cpu * 1.2); 
+            }
+
+            pimpl_->mem_series_->clear();
+            pimpl_->mem_series_->append(mem_set);
+            pimpl_->mem_axisX_->clear();
+            pimpl_->mem_axisX_->append(categories);
+            if (auto axis = qobject_cast<QValueAxis*>(pimpl_->mem_chart_->axes(Qt::Vertical).first())) {
+                axis->setRange(0, max_mem * 1.2); 
+            }
+        } else {
+            delete cpu_set;
+            delete mem_set;
+        }
+    });
+
+    // Timer logic to trigger stats process
+    pimpl_->stats_timer_ = new QTimer(this);
+    connect(pimpl_->stats_timer_, &QTimer::timeout, this, [this]() {
+        if (pimpl_->stats_process_->state() == QProcess::NotRunning) {
+            pimpl_->stats_process_->start(Backend::get_instance().get_cli_path(), {"stats"});
+        }
+    });
+    pimpl_->stats_timer_->start(2000);
 }
 
 DashboardPage::~DashboardPage() = default;
