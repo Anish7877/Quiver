@@ -34,6 +34,7 @@ enum class TargetLog : std::uint8_t {
 struct alignas(std::hardware_destructive_interference_size) JobSlot {
         std::atomic<SlotState> state{};
         char key[32]{};
+        char path[64]{};
         JobType type{};
         TargetDB target{};
         std::uint64_t value_offset{};
@@ -49,6 +50,7 @@ struct alignas(std::hardware_destructive_interference_size) LogSlot {
 
 struct DatabaseJobData {
         char key[32]{};
+        char path[64]{};
         JobType type{};
         TargetDB target{};
         std::uint64_t value_offset{};

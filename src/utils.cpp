@@ -35,6 +35,7 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <sys/xattr.h>
 #include <system_error>
@@ -1635,6 +1636,26 @@ auto Utils::recv_all(int fd, void* data, size_t size) -> bool {
                 size -= n;
         }
         return true;
+}
+
+auto Utils::create_connection(std::string_view path) -> int {
+        if (unlink(path.data()) == -1 && errno != ENOENT) [[unlikely]] {
+                return -1;
+        }
+        int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (sock_fd == -1) [[unlikely]] {
+                return sock_fd;
+        }
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, path.data(), sizeof(addr.sun_path)-1);
+        if (bind(sock_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1) [[unlikely]] {
+                return -1;
+        }
+        if (listen(sock_fd, 1) == -1) [[unlikely]] {
+                return -1;
+        }
+        return sock_fd;
 }
 
 auto Utils::is_process_alive(pid_t pid, const std::string& container_id) -> bool {

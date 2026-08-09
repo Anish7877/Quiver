@@ -11,6 +11,7 @@
 #include <cstring>
 #include <flatbuffers/flatbuffer_builder.h>
 #include <optional>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
@@ -28,9 +29,6 @@ auto ContainerDbManager::init() -> void {
                 std::cerr << "Container Db\n";
                 throw std::runtime_error(m_db_command_queue->get_error());
         }
-        m_socket_path = "/tmp/quiver_db.sock";
-        m_addr.sun_family = AF_UNIX;
-        strncpy(m_addr.sun_path, m_socket_path.data(), sizeof(m_addr.sun_path)-1);
 }
 
 auto ContainerDbManager::add_container(const ContainerDbObject& db_object) -> void {
@@ -90,7 +88,7 @@ auto ContainerDbManager::update_container(const std::string& key, const Containe
 
 auto ContainerDbManager::list_all_container() -> void {
         auto containers{get_all_container()};
-        constexpr int id_width{32};
+        constexpr int id_width{70};
         constexpr int image_width{20};
         constexpr int name_width{20};
         constexpr int status_width{10};
@@ -104,7 +102,7 @@ auto ContainerDbManager::list_all_container() -> void {
 
 auto ContainerDbManager::list_all_running_container() -> void {
         auto containers{get_all_container()};
-        constexpr int id_width{32};
+        constexpr int id_width{70};
         constexpr int image_width{20};
         constexpr int name_width{20};
         constexpr int status_width{10};
@@ -119,45 +117,62 @@ auto ContainerDbManager::list_all_running_container() -> void {
 }
 
 auto ContainerDbManager::get_container(const std::string& key) -> std::optional<ContainerDbObject> {
+        std::string sock_path{std::format("/tmp/quiver_db_{}.sock", Utils::generate_container_id().substr(32))};
+        int socket_fd{Utils::create_connection(sock_path)};
         DatabaseJobData job_data{};
         job_data.target = TargetDB::CONTAINER;
         job_data.type = JobType::GET;
-        std::memcpy(job_data.key, key.data(), 32);
+        std::memcpy(job_data.key, key.data(), sizeof(job_data.key));
+        std::memcpy(job_data.path, sock_path.c_str(), sizeof(job_data.path));
         while (!m_db_command_queue->atomic_push(job_data)) {
                 std::this_thread::yield();
         }
-        int connection_fd{socket(AF_UNIX, SOCK_STREAM, 0)};
-        if (connection_fd == -1) [[unlikely]] {
-                std::cerr << "Error: Unable to create socket: " << std::strerror(errno) << '\n';
+        fd_set readfds{};
+        timeval timeout{};
+        int client_fd{-1};
+        timeout.tv_usec = 0;
+        timeout.tv_sec = 10;
+        FD_ZERO(&readfds);
+        FD_SET(socket_fd, &readfds);
+        int result{select(socket_fd+1, &readfds, nullptr, nullptr, &timeout)};
+        if (result < 0) [[unlikely]] {
+                close(socket_fd);
+                unlink(sock_path.c_str());
                 return std::nullopt;
         }
-        while (connect(connection_fd, reinterpret_cast<sockaddr*>(&m_addr), sizeof(m_addr)) == -1) {
-                if (errno != ENOENT && errno != ECONNREFUSED) {
-                        std::cerr << "Error: Unable to connect: " << std::strerror(errno) << '\n';
-                        close(connection_fd);
+        else if (result == 0) [[unlikely]] {
+                close(socket_fd);
+                unlink(sock_path.c_str());
+                std::cerr << "Error: Connection timeout reached\n";
+                return std::nullopt;
+        }
+        else {
+                client_fd = accept(socket_fd, nullptr, nullptr);
+                if (client_fd == -1) [[unlikely]] {
+                        std::cerr << "Error: Failed to connect to job processor\n";
                         return std::nullopt;
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         size_t result_size{};
-        if (!Utils::recv_all(connection_fd, &result_size, sizeof(result_size))) [[unlikely]] {
+        if (!Utils::recv_all(client_fd, &result_size, sizeof(result_size))) [[unlikely]] {
                 std::cerr << "Error: Unable to read result bytes\n";
-                close(connection_fd);
+                close(client_fd);
                 return std::nullopt;
         }
 
         if (result_size == 0) {
-                close(connection_fd);
+                close(client_fd);
                 return std::nullopt;
         }
         std::string raw_bytes{};
         raw_bytes.resize(result_size);
-        if (!Utils::recv_all(connection_fd, &raw_bytes[0], result_size)) [[unlikely]] {
+        if (!Utils::recv_all(client_fd, &raw_bytes[0], result_size)) [[unlikely]] {
                 std::cerr << "Error: Unable to read raw bytes\n";
-                close(connection_fd);
+                close(client_fd);
                 return std::nullopt;
         }
-        close(connection_fd);
+        close(client_fd);
+        close(socket_fd);
         auto metadata{extract_metadata(raw_bytes)};
         auto boot_time{Utils::get_boot_time()};
         if (!metadata) {
@@ -177,28 +192,44 @@ auto ContainerDbManager::get_container(const std::string& key) -> std::optional<
 }
 
 auto ContainerDbManager::get_all_container() -> std::vector<ContainerDbObject> {
+        std::string sock_path{std::format("/tmp/quiver_db_{}.sock", Utils::generate_container_id().substr(32))};
+        int socket_fd{Utils::create_connection(sock_path)};
         DatabaseJobData job_data{};
         job_data.target = TargetDB::CONTAINER;
         job_data.type = JobType::GETALL;
+        std::memcpy(job_data.path, sock_path.c_str(), sock_path.length() + 1);
         while (!m_db_command_queue->atomic_push(job_data)) {
                 std::this_thread::yield();
         }
         std::vector<ContainerDbObject> containers{};
-        int connection_fd{socket(AF_UNIX, SOCK_STREAM, 0)};
-        if (connection_fd == -1) {
-                std::cerr << "Error: Unable to create socket: " << std::strerror(errno) << '\n';
-                return containers;
+        fd_set readfds{};
+        timeval timeout{};
+        int client_fd{-1};
+        timeout.tv_usec = 0;
+        timeout.tv_sec = 10;
+        FD_ZERO(&readfds);
+        FD_SET(socket_fd, &readfds);
+        int result{select(socket_fd+1, &readfds, nullptr, nullptr, &timeout)};
+        if (result < 0) [[unlikely]] {
+                close(socket_fd);
+                unlink(sock_path.c_str());
+                return {};
         }
-        while (connect(connection_fd, reinterpret_cast<sockaddr*>(&m_addr), sizeof(m_addr)) == -1) {
-                if (errno != ENOENT && errno != ECONNREFUSED) {
-                        std::cerr << "Error: Unable to connect: " << std::strerror(errno) << '\n';
-                        close(connection_fd);
-                        return containers;
+        else if (result == 0) [[unlikely]] {
+                close(socket_fd);
+                unlink(sock_path.c_str());
+                std::cerr << "Error: Connection timeout reached\n";
+                return {};
+        }
+        else {
+                client_fd = accept(socket_fd, nullptr, nullptr);
+                if (client_fd == -1) [[unlikely]] {
+                        std::cerr << "Error: Failed to connect to job processor\n";
+                        return {};
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         size_t n_entries{0};
-        if (!Utils::recv_all(connection_fd, &n_entries, sizeof(n_entries))) {
+        if (!Utils::recv_all(client_fd, &n_entries, sizeof(n_entries))) {
                 std::cerr << "Error: Unable to get number of entries\n";
                 return containers;
         }
@@ -209,22 +240,22 @@ auto ContainerDbManager::get_all_container() -> std::vector<ContainerDbObject> {
 
         for (size_t i{0}; i<n_entries; ++i) {
                 size_t key_size{};
-                if (!Utils::recv_all(connection_fd, &key_size, sizeof(key_size))) {
+                if (!Utils::recv_all(client_fd, &key_size, sizeof(key_size))) {
                         std::cerr << "Error reading key size.\n";
                         break;
                 }
                 std::string key(key_size, '\0');
-                if (!Utils::recv_all(connection_fd, key.data(), key_size)) {
+                if (!Utils::recv_all(client_fd, key.data(), key_size)) {
                         std::cerr << "Error reading key.\n";
                         break;
                 }
                 size_t value_size{};
-                if (!Utils::recv_all(connection_fd, &value_size, sizeof(value_size))) {
+                if (!Utils::recv_all(client_fd, &value_size, sizeof(value_size))) {
                         std::cerr << "Error reading value size.\n";
                         break;
                 }
                 std::string value(value_size, '\0');
-                if (!Utils::recv_all(connection_fd, value.data(), value_size)) {
+                if (!Utils::recv_all(client_fd, value.data(), value_size)) {
                         std::cerr << "Error reading value.\n";
                         break;
                 }
@@ -241,7 +272,8 @@ auto ContainerDbManager::get_all_container() -> std::vector<ContainerDbObject> {
                 }
                 containers.emplace_back(metadata.value());
         }
-        close(connection_fd);
+        close(client_fd);
+        close(socket_fd);
         return containers;
 }
 

@@ -44,7 +44,4 @@ class DatabaseJobProcessor : public JobProcessor<DatabaseJobData>, public Single
                 LogJobData m_log_data{};
                 std::atomic<bool> m_running{};
                 std::jthread m_worker{};
-                fs::path m_socket_path{};
-                sockaddr_un m_addr{};
-                int m_socket_fd{};
 };

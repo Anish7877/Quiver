@@ -32,6 +32,4 @@ class ContainerDbManager : public Singleton<ContainerDbManager> {
                 auto extract_metadata(const std::string&) -> std::optional<ContainerDbObject>;
                 DatabaseCommandQueue* m_db_command_queue{nullptr};
                 ValueHeap* m_value_heap{nullptr};
-                sockaddr_un m_addr{};
-                std::string m_socket_path{};
 };

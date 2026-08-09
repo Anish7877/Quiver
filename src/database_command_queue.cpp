@@ -98,7 +98,8 @@ auto DatabaseCommandQueue::atomic_push(const DatabaseJobData& data) -> bool {
         JobSlot& slot{m_mapped_address[index]};
 
         slot.type = data.type;
-        std::memcpy(slot.key, data.key, 32);
+        std::memcpy(slot.key, data.key, sizeof(slot.key));
+        std::memcpy(slot.path, data.path, sizeof(slot.path));
         slot.value_offset = data.value_offset;
         slot.value_length = data.value_length;
         slot.target = data.target;
@@ -123,9 +124,10 @@ auto DatabaseCommandQueue::atomic_pop() -> std::optional<DatabaseJobData> {
         }
 
         DatabaseJobData local_copy{};
+        std::memcpy(local_copy.key, acquired_slot.key, sizeof(local_copy.key));
+        std::memcpy(local_copy.path, acquired_slot.path, sizeof(local_copy.path));
         local_copy.type = acquired_slot.type;
         local_copy.target = acquired_slot.target;
-        std::memcpy(local_copy.key, acquired_slot.key, 32);
         local_copy.value_offset = acquired_slot.value_offset;
         local_copy.value_length = acquired_slot.value_length;
 

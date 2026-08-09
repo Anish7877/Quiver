@@ -63,7 +63,7 @@ auto ContainerMonitor::init(const ContainerConfig& config, const std::string& im
                 ContainerDbObject db_object{};
                 db_object.config = std::move(config);
                 db_object.image = image;
-                db_object.name = container_name.empty() ? std::format("quiver_{}", config.container_id.substr(0, 6)) : std::move(container_name);
+                db_object.name = container_name.empty() ? std::format("quiver_{}", config.container_id.substr(0, 6)) : container_name;
                 db_object.status = "created";
                 db_object.boot_time = Utils::get_boot_time();
                 db_object.created_at = std::format("{}", chrono::system_clock::now());

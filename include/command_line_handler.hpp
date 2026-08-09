@@ -11,4 +11,7 @@ namespace CommandLineHandler {
         auto unpause(std::span<std::string>) -> void;
         auto attach(std::span<std::string>) -> void;
         auto ports(std::span<std::string>) -> void;
+        auto start(std::span<std::string>) -> void;
+        auto stop(std::span<std::string>) -> void;
+        auto prune(std::span<std::string>) -> void;
 }

@@ -6,8 +6,11 @@
 #include "image_manager.hpp"
 #include "container_monitor.hpp"
 #include "utils.hpp"
+#include <chrono>
+#include <csignal>
 #include <format>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 #include <span>
 #include <string>
@@ -97,10 +100,10 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
 
 
                 if (arg == "--name") {
-                        if (++i < positional_start) { container_name = arg[i]; }
+                        if (++i < positional_start) {
+                                container_name = args[i];
+                        }
                 }
-
-
                 else if (arg == "-i" || arg == "--interactive" || arg == "-t" || arg == "--tty") {
                         container_config.terminal.value = true;
                 } else if (arg == "-d" || arg == "--detach") {
@@ -498,6 +501,79 @@ auto CommandLineHandler::ports(std::span<std::string> args) -> void {
                         std::string u_port{(i < udp_lines.size()) ? udp_lines[i] : ""};
 
                         std::cout << std::format("{:<70} {:<45} {}\n", current_id, t_port, u_port);
+                }
+        }
+}
+
+auto CommandLineHandler::start(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        auto& container_monitor{ContainerMonitor::get_instance()};
+        container_db_manager.init();
+        if (args.empty()) {
+                std::cerr << "Error: No arguments provided\n";
+                Utils::print_usage();
+                return;
+        }
+        for (const auto& arg : args) {
+                auto container{container_db_manager.get_container(arg)};
+                if (container && container->status != "running") {
+                        container_monitor.init(container->config, container->image, container->name, false);
+                        container_monitor.invoke_container();
+                }
+                else {
+                        std::cerr << std::format("Error: Container '{}' not found or Container already running\n", arg);
+                }
+        }
+}
+
+auto CommandLineHandler::stop(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        auto& container_monitor{ContainerMonitor::get_instance()};
+        container_db_manager.init();
+        if (args.empty()) {
+                std::cerr << "Error: No arguments provided\n";
+                Utils::print_usage();
+                return;
+        }
+        for (const auto& arg : args) {
+                auto container{container_db_manager.get_container(arg)};
+                if (container && container->status == "running") {
+                        if (kill(container->config.pid, SIGTERM) == 0) {
+                                bool stopped{false};
+                                for (int i{0}; i<100; ++i) {
+                                        if (!Utils::is_process_alive(container->config.pid, container->config.container_id)) {
+                                                stopped = true;
+                                                break;
+                                        }
+                                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                                }
+                                if (!stopped) {
+                                        std::cerr << std::format("WARN: Container '{}' timed out. Sending SIGKILL...\n", arg);
+                                        kill(container->config.pid, SIGKILL);
+                                }
+                                container->status = "stopped";
+                                container_db_manager.update_container(arg, container.value());
+                                std::cout << std::format("Container '{}' stopped successfully.\n", arg);
+                        }
+                }
+                else {
+                        std::cerr << std::format("Error: Container '{}' not found or Container is not running\n", arg);
+                }
+        }
+}
+
+auto CommandLineHandler::prune(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+        if (!args.empty()) {
+                std::cerr << "Error: Arguments Provided\n";
+                Utils::print_usage();
+                return;
+        }
+        auto containers{container_db_manager.get_all_container()};
+        for (const auto& container : containers) {
+                if (container.status != "running") {
+                        container_db_manager.remove_container(container.config.container_id);
                 }
         }
 }

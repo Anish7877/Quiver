@@ -69,6 +69,7 @@ namespace Utils {
         [[nodiscard]] auto load_seccomp_profile(const fs::path&) -> OCIRuntime::Seccomp;
         auto send_all(int fd, const void* data, size_t size) -> bool;
         auto recv_all(int fd, void* data, size_t size) -> bool;
+        [[nodiscard]] auto create_connection(std::string_view) -> int;
 
         auto is_process_alive(pid_t, const std::string&) -> bool;
         [[nodiscard]] auto get_boot_time() -> long;
