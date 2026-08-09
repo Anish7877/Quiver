@@ -142,8 +142,18 @@ auto Backend::add_container(const Container& container) -> void {
             args << "-p" << port;
         }
         
+        if (!container.options.isEmpty()) {
+            args << container.options.split(" ", Qt::SkipEmptyParts);
+        }
+        
         // Interactive and Detach flags, and Image positional argument
-        args << "-i" << "-d" << container.image;
+        if (!container.prevent_interaction) {
+            args << "-i";
+        }
+        args << "-d" << container.image;
+        if (!container.command.isEmpty()) {
+            args << container.command.split(" ", Qt::SkipEmptyParts);
+        }
         
         qDebug() << "Executing Quiver CLI:" << cli_path << args;
         process->start(cli_path, args);
@@ -206,6 +216,65 @@ auto Backend::unpause_container(const QStringList& container_ids) -> void {
         });
         qDebug() << "Executing Quiver CLI for unpause:" << cli_path << "unpause" << container_ids;
         process->start(cli_path, QStringList() << "unpause" << container_ids);
+    } else {
+        qDebug() << "CLI not found at" << cli_path;
+    }
+}
+
+auto Backend::start_container(const QStringList& container_ids) -> void {
+    if (container_ids.isEmpty()) return;
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        QProcess* process = new QProcess();
+        QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                         process, &QObject::deleteLater);
+        QObject::connect(process, &QProcess::readyReadStandardError, [process]() {
+            qDebug() << "quiver start stderr:" << process->readAllStandardError();
+        });
+        QObject::connect(process, &QProcess::readyReadStandardOutput, [process]() {
+            qDebug() << "quiver start stdout:" << process->readAllStandardOutput();
+        });
+        qDebug() << "Executing Quiver CLI for start:" << cli_path << "start" << container_ids;
+        process->start(cli_path, QStringList() << "start" << container_ids);
+    } else {
+        qDebug() << "CLI not found at" << cli_path;
+    }
+}
+
+auto Backend::stop_container(const QStringList& container_ids) -> void {
+    if (container_ids.isEmpty()) return;
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        QProcess* process = new QProcess();
+        QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                         process, &QObject::deleteLater);
+        QObject::connect(process, &QProcess::readyReadStandardError, [process]() {
+            qDebug() << "quiver stop stderr:" << process->readAllStandardError();
+        });
+        QObject::connect(process, &QProcess::readyReadStandardOutput, [process]() {
+            qDebug() << "quiver stop stdout:" << process->readAllStandardOutput();
+        });
+        qDebug() << "Executing Quiver CLI for stop:" << cli_path << "stop" << container_ids;
+        process->start(cli_path, QStringList() << "stop" << container_ids);
+    } else {
+        qDebug() << "CLI not found at" << cli_path;
+    }
+}
+
+auto Backend::prune_containers() -> void {
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        QProcess* process = new QProcess();
+        QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                         process, &QObject::deleteLater);
+        QObject::connect(process, &QProcess::readyReadStandardError, [process]() {
+            qDebug() << "quiver prune stderr:" << process->readAllStandardError();
+        });
+        QObject::connect(process, &QProcess::readyReadStandardOutput, [process]() {
+            qDebug() << "quiver prune stdout:" << process->readAllStandardOutput();
+        });
+        qDebug() << "Executing Quiver CLI for prune:" << cli_path << "prune";
+        process->start(cli_path, QStringList() << "prune");
     } else {
         qDebug() << "CLI not found at" << cli_path;
     }

@@ -613,3 +613,46 @@ QPushButton#FabButton:hover {
 QPushButton#FabButton:pressed {
     qproperty-iconSize: 80px 80px; /* Shrinks slightly when you click it for tactile feedback */
 }
+
+/* =======================================================
+   TABLE ACTION BUTTONS
+======================================================== */
+QPushButton#BulkActionBtn_play, QPushButton#BulkActionBtn_stop, QPushButton#BulkActionBtn_pause, QPushButton#BulkActionBtn_delete, QPushButton#BulkActionBtn_prune {
+    border-radius: 4px;
+    background: transparent;
+    font-weight: bold;
+    font-size: 13px;
+    text-align: left;
+    padding-left: 10px;
+}
+QPushButton#BulkActionBtn_prune {
+    margin-left: 10px;
+}
+QPushButton#BulkActionBtn_play, QPushButton#BulkActionBtn_pause { color: #09090B; }
+QPushButton#BulkActionBtn_play { border: 1px solid #2ea043; }
+QPushButton#BulkActionBtn_play:hover { background: #2ea043; color: #09090B; }
+
+QPushButton#BulkActionBtn_stop, QPushButton#BulkActionBtn_delete, QPushButton#BulkActionBtn_prune { border: 1px solid #f85149; color: #f85149; }
+QPushButton#BulkActionBtn_stop:hover, QPushButton#BulkActionBtn_delete:hover, QPushButton#BulkActionBtn_prune:hover { background: #f85149; color: #09090B; }
+
+QPushButton#BulkActionBtn_pause { border: 1px solid #f97316; }
+QPushButton#BulkActionBtn_pause:hover { background: #f97316; color: #09090B; }
+
+QPushButton#RowActionBtn_play, QPushButton#RowActionBtn_stop, QPushButton#RowActionBtn_pause, QPushButton#RowActionBtn_delete, QPushButton#RowActionBtn_attach, QPushButton#RowActionBtn_copy {
+    border-radius: 4px;
+    background: transparent;
+}
+QPushButton#RowActionBtn_play { border: 1px solid #2ea043; }
+QPushButton#RowActionBtn_play:hover { background: #2ea043; }
+
+QPushButton#RowActionBtn_pause { border: 1px solid #f97316; }
+QPushButton#RowActionBtn_pause:hover { background: #f97316; }
+
+QPushButton#RowActionBtn_stop, QPushButton#RowActionBtn_delete { border: 1px solid #f85149; }
+QPushButton#RowActionBtn_stop:hover, QPushButton#RowActionBtn_delete:hover { background: #f85149; }
+
+QPushButton#RowActionBtn_attach { border: 1px solid #58a6ff; }
+QPushButton#RowActionBtn_attach:hover { background: #58a6ff; }
+
+QPushButton#RowActionBtn_copy { border: 1px solid #a1a1aa; }
+QPushButton#RowActionBtn_copy:hover { background: #a1a1aa; }

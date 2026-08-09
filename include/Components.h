@@ -89,10 +89,11 @@ public:
     auto get_volumes() const -> QStringList;
     auto get_ports() const -> QStringList;
     auto get_filesystem() const -> QString;
+    auto get_prevent_interaction() const -> bool;
+    auto get_command() const -> QString;
+    auto get_options() const -> QString;
 
 private slots:
-    auto update_cpu_label(int val) -> void;
-    auto update_mem_label(int val) -> void;
     auto show_visual() -> void;
     auto show_json() -> void;
     auto on_add_device() -> void;

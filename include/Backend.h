@@ -15,6 +15,9 @@ struct Container {
     QStringList devices {};
     QStringList volumes {};
     QStringList ports {};
+    bool prevent_interaction {false};
+    QString command {};
+    QString options {};
 };
 
 struct Image {
@@ -64,6 +67,9 @@ public:
     auto delete_container(const QStringList& container_ids) -> void;
     auto pause_container(const QStringList& container_ids) -> void;
     auto unpause_container(const QStringList& container_ids) -> void;
+    auto start_container(const QStringList& container_ids) -> void;
+    auto stop_container(const QStringList& container_ids) -> void;
+    auto prune_containers() -> void;
 
     auto get_images() const -> std::vector<Image>;
     auto add_image(const Image& img) -> void;

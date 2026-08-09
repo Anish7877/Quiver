@@ -16,6 +16,10 @@
 #include <QTableWidgetItem>
 #include <QRandomGenerator>
 #include <QGraphicsDropShadowEffect>
+#include <QPainterPath>
+#include <QSettings>
+#include <QApplication>
+#include <QClipboard>
 #include <QPointer>
 #include <QTimer>
 
@@ -236,6 +240,9 @@ struct CreateDialog::Impl {
     QListWidget*  port_list_   {};
     QTextEdit*    json_editor_ {};
     QComboBox*    fs_combo_    {};
+    ToggleSwitch* interact_toggle_ {};
+    QLineEdit*    options_input_ {};
+    QLineEdit*    command_input_ {};
 };
 
 CreateDialog::CreateDialog(QWidget* parent)
@@ -346,12 +353,13 @@ CreateDialog::CreateDialog(QWidget* parent)
     pimpl_->fs_combo_->setFixedHeight(36);
     v1->addWidget(pimpl_->fs_combo_);
     auto* v2 { new QVBoxLayout };
-    auto* persist_lbl { new QLabel("Persistence") };
+    auto* persist_lbl { new QLabel("Interactions") };
     persist_lbl->setObjectName("FormLabel");
     v2->addWidget(persist_lbl);
     auto* h2 { new QHBoxLayout };
-    h2->addWidget(new ToggleSwitch);
-    auto* pr_lbl { new QLabel("Prevent Removal") };
+    pimpl_->interact_toggle_ = new ToggleSwitch;
+    h2->addWidget(pimpl_->interact_toggle_);
+    auto* pr_lbl { new QLabel("Prevent Interaction") };
     pr_lbl->setObjectName("ToggleText");
     h2->addWidget(pr_lbl);
     h2->addStretch();
@@ -400,31 +408,22 @@ CreateDialog::CreateDialog(QWidget* parent)
     v_layout->addLayout(boxes);
 
 
-    auto add_slider = [&](const QString& label_text, int min, int max, int val, QLabel*& lbl) {
-        auto* r { new QHBoxLayout };
-        auto* s_label { new QLabel(label_text) };
-        s_label->setFixedWidth(90);
-        s_label->setObjectName("FormLabel");
-        r->addWidget(s_label);
-        auto* s { new QSlider(Qt::Horizontal) };
-        s->setRange(min, max);
-        s->setValue(val);
-        s->setCursor(Qt::PointingHandCursor);
-        r->addWidget(s);
-        lbl = new QLabel(QString::number(val));
-        lbl->setObjectName("SliderVal");
-        lbl->setFixedSize(45, 26);
-        lbl->setAlignment(Qt::AlignCenter);
-        r->addWidget(lbl);
-        v_layout->addLayout(r);
-        return s;
-    };
+    auto* opt_lbl { new QLabel("Options") };
+    opt_lbl->setObjectName("FormLabel");
+    v_layout->addWidget(opt_lbl);
+    pimpl_->options_input_ = new QLineEdit;
+    pimpl_->options_input_->setPlaceholderText("e.g. --privileged, --env KEY=value, etc.");
+    pimpl_->options_input_->setFixedHeight(36);
+    v_layout->addWidget(pimpl_->options_input_);
 
-    QSlider* s_cpu { add_slider("CPUs", 1, 24, 1, pimpl_->cpu_val_label_) };
-    connect(s_cpu, &QSlider::valueChanged, this, &CreateDialog::update_cpu_label);
-    update_cpu_label(1);
-    QSlider* s_mem { add_slider("Memory (MB)", 128, 8192, 512, pimpl_->mem_val_label_) };
-    connect(s_mem, &QSlider::valueChanged, this, &CreateDialog::update_mem_label);
+    auto* cmd_lbl { new QLabel("Commands") };
+    cmd_lbl->setObjectName("FormLabel");
+    v_layout->addWidget(cmd_lbl);
+    pimpl_->command_input_ = new QLineEdit;
+    pimpl_->command_input_->setPlaceholderText("e.g. bash, python script.py, etc.");
+    pimpl_->command_input_->setFixedHeight(36);
+    v_layout->addWidget(pimpl_->command_input_);
+
     pimpl_->stack_->addWidget(page_visual);
 
 
@@ -548,8 +547,19 @@ auto CreateDialog::get_ports() const -> QStringList {
 auto CreateDialog::get_filesystem() const -> QString {
     return pimpl_->fs_combo_->currentText();
 }
-auto CreateDialog::update_cpu_label(int val) -> void { pimpl_->cpu_val_label_->setText(QString::number(val)); }
-auto CreateDialog::update_mem_label(int val) -> void { pimpl_->mem_val_label_->setText(QString::number(val)); }
+
+auto CreateDialog::get_prevent_interaction() const -> bool {
+    return pimpl_->interact_toggle_->isChecked();
+}
+
+auto CreateDialog::get_command() const -> QString {
+    return pimpl_->command_input_->text().trimmed();
+}
+
+auto CreateDialog::get_options() const -> QString {
+    return pimpl_->options_input_->text().trimmed();
+}
+
 auto CreateDialog::show_visual() -> void { pimpl_->stack_->setCurrentIndex(0); }
 auto CreateDialog::show_json()   -> void { pimpl_->stack_->setCurrentIndex(1); }
 

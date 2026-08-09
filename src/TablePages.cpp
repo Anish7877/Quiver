@@ -25,14 +25,114 @@
 #include <QTimer>
 #include <QProcess>
 #include <QFileInfo>
+#include <QMessageBox>
 #include "include/AuthManager.h"
 #include <QScrollArea>
 #include <QPainter>
 #include <QPainterPath>
 #include<QSettings>
+#include <QApplication>
+#include <QClipboard>
 
 namespace Quiver {
 namespace {
+
+QIcon createActionIcon(const QString& type, const QColor& color) {
+    QIcon icon;
+    
+    auto drawPixmap = [&type](const QColor& drawColor) {
+        QPixmap pixmap(16, 16);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+        
+        if (type == "play") {
+            p.setBrush(drawColor);
+            p.setPen(Qt::NoPen);
+            QPolygonF poly;
+            poly << QPointF(4, 2) << QPointF(14, 8) << QPointF(4, 14);
+            p.drawPolygon(poly);
+        } else if (type == "stop") {
+            p.setBrush(drawColor);
+            p.setPen(Qt::NoPen);
+            p.drawRoundedRect(3, 3, 10, 10, 2, 2);
+        } else if (type == "pause") {
+            p.setBrush(drawColor);
+            p.setPen(Qt::NoPen);
+            p.drawRoundedRect(3, 3, 4, 10, 1, 1);
+            p.drawRoundedRect(9, 3, 4, 10, 1, 1);
+        } else if (type == "delete") {
+            p.setPen(QPen(drawColor, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(Qt::NoBrush);
+            p.drawLine(3, 4, 13, 4);
+            p.drawLine(6, 4, 6, 2); p.drawLine(6, 2, 10, 2); p.drawLine(10, 2, 10, 4);
+            p.drawRoundedRect(4, 4, 8, 10, 1, 1);
+            p.drawLine(6, 6, 6, 11);
+            p.drawLine(10, 6, 10, 11);
+        } else if (type == "prune") {
+            p.setPen(QPen(drawColor, 1.5, Qt::SolidLine, Qt::RoundCap));
+            p.setBrush(Qt::NoBrush);
+            p.drawLine(4, 12, 12, 4); 
+            p.drawEllipse(3, 3, 10, 10);
+        } else if (type == "attach") {
+            p.setPen(QPen(drawColor, 1.5, Qt::SolidLine, Qt::RoundCap));
+            p.setBrush(Qt::NoBrush);
+            p.drawArc(2, 5, 6, 6, 90 * 16, 180 * 16);
+            p.drawArc(8, 5, 6, 6, -90 * 16, 180 * 16);
+            p.drawLine(6, 8, 10, 8);
+        } else if (type == "copy") {
+            p.setPen(QPen(drawColor, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(Qt::NoBrush);
+            p.drawRoundedRect(6, 6, 7, 8, 1, 1);
+            p.drawPolyline(QPolygonF() << QPointF(9, 3) << QPointF(3, 3) << QPointF(3, 11));
+        }
+        return pixmap;
+    };
+
+    icon.addPixmap(drawPixmap(color), QIcon::Normal, QIcon::On);
+    icon.addPixmap(drawPixmap(color), QIcon::Normal, QIcon::Off);
+    
+    QString theme = QSettings("Quiver", "Settings").value("theme", "dark").toString();
+    QColor hoverColor = (theme == "light") ? QColor("#09090B") : QColor("#FAFAFA");
+    
+    icon.addPixmap(drawPixmap(hoverColor), QIcon::Active, QIcon::On);
+    icon.addPixmap(drawPixmap(hoverColor), QIcon::Active, QIcon::Off);
+    
+    return icon;
+}
+
+class HoverIconButton : public QPushButton {
+public:
+    HoverIconButton(const QString& text, const QString& iconType, const QString& color, QWidget* parent = nullptr)
+        : QPushButton(text, parent), iconType_(iconType), baseColor_(QColor(color)) {
+        
+        QString theme = QSettings("Quiver", "Settings").value("theme", "dark").toString();
+        hoverColor_ = (theme == "light") ? QColor("#09090B") : QColor("#FAFAFA");
+        
+        normalIcon_ = createActionIcon(iconType_, baseColor_);
+        hoverIcon_ = createActionIcon(iconType_, hoverColor_);
+        
+        setIcon(normalIcon_);
+    }
+
+protected:
+    void enterEvent(QEnterEvent* event) override {
+        setIcon(hoverIcon_);
+        QPushButton::enterEvent(event);
+    }
+    
+    void leaveEvent(QEvent* event) override {
+        setIcon(normalIcon_);
+        QPushButton::leaveEvent(event);
+    }
+
+private:
+    QString iconType_;
+    QColor baseColor_;
+    QColor hoverColor_;
+    QIcon normalIcon_;
+    QIcon hoverIcon_;
+};
 
 auto make_item(const QString& text, bool bright = false) -> QTableWidgetItem* {
     auto* item { new QTableWidgetItem(text) };
@@ -146,7 +246,7 @@ TablePage::TablePage(const QString& title,
     pimpl_->table_->horizontalHeader()->setSectionResizeMode(
         action_col, QHeaderView::Fixed);
 
-    pimpl_->table_->setColumnWidth(action_col, 180);
+    pimpl_->table_->setColumnWidth(action_col, 220);
     pimpl_->table_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
     
     pimpl_->table_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
@@ -251,23 +351,23 @@ struct ContainersPage::Impl {
     Quiver::StatCard* stat_stopped_ {};
     Quiver::StatCard* stat_paused_ {};
     
-    QStringList get_selected_ids() {
-        QStringList ids;
+    QList<QPair<QString, QString>> get_selected_containers() {
+        QList<QPair<QString, QString>> res;
         for (int r = 0; r < page_->table()->rowCount(); ++r) {
             auto* cell = page_->table()->cellWidget(r, 0);
             if (!cell) continue;
             auto* cb = cell->findChild<QPushButton*>("SelectCheckbox");
             if (cb && cb->isChecked()) {
                 auto* item = page_->table()->item(r, 1);
-                if (item) ids << item->text();
+                if (item) res.append({item->text(), item->data(Qt::UserRole).toString()});
             }
         }
-        return ids;
+        return res;
     }
     
     void update_bulk_actions_visibility() {
         if (bulk_widget_) {
-            bulk_widget_->setVisible(!get_selected_ids().isEmpty());
+            bulk_widget_->setVisible(!get_selected_containers().isEmpty());
         }
     }
 };
@@ -306,17 +406,32 @@ ContainersPage::ContainersPage(QWidget* parent)
     bulk_row->setContentsMargins(0, 0, 0, 0);
     bulk_row->setSpacing(10);
     
-    auto* bulk_lbl = new QLabel("Bulk Actions:");
-    bulk_lbl->setStyleSheet("color: #a1a1aa; font-weight: bold; font-size: 14px;");
-    bulk_row->addWidget(bulk_lbl);
-    
-    auto create_bulk_btn = [this](const QString& text, const QString& color, auto func) {
-        auto* btn = new QPushButton(text);
+    auto create_bulk_btn = [this](const QString& text, const QString& iconType, const QString& color, auto validate_func, auto func, const QString& confirm_msg = "") {
+        auto* btn = new HoverIconButton(text, iconType, color);
+        btn->setObjectName("BulkActionBtn_" + iconType);
+        btn->setIconSize(QSize(14, 14));
+        btn->setFixedSize(100, 30);
         btn->setCursor(Qt::PointingHandCursor);
-        btn->setStyleSheet(QString("QPushButton { border: 1px solid %1; color: %1; border-radius: 4px; background: transparent; padding: 4px 12px; font-weight: bold; } QPushButton:hover { background: %1; color: white; }").arg(color));
-        connect(btn, &QPushButton::clicked, this, [this, func]() {
-            QStringList ids = pimpl_->get_selected_ids();
-            if (ids.isEmpty()) return;
+        
+        connect(btn, &QPushButton::clicked, this, [this, validate_func, func, confirm_msg]() {
+            auto selected = pimpl_->get_selected_containers();
+            if (selected.isEmpty()) return;
+            
+            QString error_msg = validate_func(selected);
+            if (!error_msg.isEmpty()) {
+                QMessageBox::warning(this, "Action Not Allowed", error_msg);
+                return;
+            }
+
+            if (!confirm_msg.isEmpty()) {
+                if (QMessageBox::question(this, "Confirm", confirm_msg, QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+                    return;
+                }
+            }
+            
+            QStringList ids;
+            for (const auto& s : selected) ids << s.first;
+            
             pimpl_->overlay_->show();
             pimpl_->overlay_->raise();
             QTimer::singleShot(50, this, [this, ids, func]() {
@@ -330,13 +445,65 @@ ContainersPage::ContainersPage(QWidget* parent)
         return btn;
     };
     
-    bulk_row->addWidget(create_bulk_btn("▶ Unpause", "#4ade80", [](const QStringList& ids){ Backend::get_instance().unpause_container(ids); }));
-    bulk_row->addWidget(create_bulk_btn("⏸ Pause", "#f97316", [](const QStringList& ids){ Backend::get_instance().pause_container(ids); }));
-    bulk_row->addWidget(create_bulk_btn("🗑 Delete", "#ef4444", [](const QStringList& ids){ Backend::get_instance().delete_container(ids); }));
+    auto val_start = [](const QList<QPair<QString, QString>>& sel) -> QString {
+        for (const auto& s : sel) {
+            if (s.second == "running" || s.second == "paused") return "Cannot start container " + s.first + " because it is already running or paused.";
+        }
+        return "";
+    };
+    auto val_stop = [](const QList<QPair<QString, QString>>& sel) -> QString {
+        for (const auto& s : sel) {
+            if (s.second != "running" && s.second != "paused") return "Cannot stop container " + s.first + " because it is already stopped.";
+        }
+        return "";
+    };
+    auto val_unpause = [](const QList<QPair<QString, QString>>& sel) -> QString {
+        for (const auto& s : sel) {
+            if (s.second != "paused") return "Cannot unpause container " + s.first + " because it is not paused.";
+        }
+        return "";
+    };
+    auto val_pause = [](const QList<QPair<QString, QString>>& sel) -> QString {
+        for (const auto& s : sel) {
+            if (s.second != "running") return "Cannot pause container " + s.first + " because it is not running.";
+        }
+        return "";
+    };
+    auto val_delete = [](const QList<QPair<QString, QString>>& sel) -> QString {
+        return ""; 
+    };
+
+    bulk_row->addWidget(create_bulk_btn("Start", "play", "#2ea043", val_start, [](const QStringList& ids){ Backend::get_instance().start_container(ids); }));
+    bulk_row->addWidget(create_bulk_btn("Stop", "stop", "#f85149", val_stop, [](const QStringList& ids){ Backend::get_instance().stop_container(ids); }));
+    bulk_row->addWidget(create_bulk_btn("Unpause", "play", "#2ea043", val_unpause, [](const QStringList& ids){ Backend::get_instance().unpause_container(ids); }));
+    bulk_row->addWidget(create_bulk_btn("Pause", "pause", "#f97316", val_pause, [](const QStringList& ids){ Backend::get_instance().pause_container(ids); }));
+    bulk_row->addWidget(create_bulk_btn("Delete", "delete", "#f85149", val_delete, [](const QStringList& ids){ Backend::get_instance().delete_container(ids); }, "Are you sure you want to delete the selected containers?"));
     
     pimpl_->bulk_widget_->hide(); // Hidden by default
     pimpl_->page_->header_layout()->addStretch();
     pimpl_->page_->header_layout()->addWidget(pimpl_->bulk_widget_);
+    
+    auto* prune_btn = new HoverIconButton("Prune", "prune", "#f85149");
+    prune_btn->setObjectName("BulkActionBtn_prune");
+    prune_btn->setIconSize(QSize(14, 14));
+    prune_btn->setFixedSize(100, 30);
+    prune_btn->setCursor(Qt::PointingHandCursor);
+    prune_btn->setToolTip("Delete all exited/stopped containers");
+    connect(prune_btn, &QPushButton::clicked, this, [this]() {
+        if (QMessageBox::question(this, "Confirm Prune", "Are you sure you want to prune all stopped/exited containers?", QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+            return;
+        }
+        pimpl_->overlay_->show();
+        pimpl_->overlay_->raise();
+        QTimer::singleShot(50, this, [this]() {
+            Backend::get_instance().prune_containers();
+            QTimer::singleShot(2500, this, [this]() {
+                refresh();
+                pimpl_->overlay_->hide();
+            });
+        });
+    });
+    pimpl_->page_->header_layout()->addWidget(prune_btn);
 
     connect(pimpl_->page_, &TablePage::add_clicked, this, [this]() {
         CreateDialog d(this);
@@ -356,6 +523,9 @@ ContainersPage::ContainersPage(QWidget* parent)
             c.devices = d.get_devices();
             c.volumes = d.get_volumes();
             c.ports = d.get_ports();
+            c.prevent_interaction = d.get_prevent_interaction();
+            c.options = d.get_options();
+            c.command = d.get_command();
             
             Backend::get_instance().add_container(c);
             refresh();
@@ -447,7 +617,9 @@ auto ContainersPage::refresh() -> void {
         cb_layout->addWidget(cb);
         pimpl_->page_->table()->setCellWidget(row, 0, cb_cell);
         
-        pimpl_->page_->table()->setItem(row, 1, make_item(c.id, true));
+        auto* id_item = make_item(c.id, true);
+        id_item->setData(Qt::UserRole, c.status);
+        pimpl_->page_->table()->setItem(row, 1, id_item);
         pimpl_->page_->table()->setItem(row, 2, make_item(c.name));
         pimpl_->page_->table()->setItem(row, 3, make_item(c.image));
         pimpl_->page_->table()->setCellWidget(row, 4, make_status_badge(c.status));
@@ -458,12 +630,19 @@ auto ContainersPage::refresh() -> void {
         h->setSpacing(5);
         h->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
         
-        auto create_btn = [this, c](const QString& text, const QString& color, auto func) {
-            auto* btn = new QPushButton(text);
+        auto create_btn = [this, c](const QString& iconType, const QString& tooltip, const QString& color, auto func, const QString& confirm_msg = "") {
+            auto* btn = new HoverIconButton("", iconType, color);
+            btn->setObjectName("RowActionBtn_" + iconType);
+            btn->setIconSize(QSize(14, 14));
+            btn->setToolTip(tooltip);
             btn->setCursor(Qt::PointingHandCursor);
             btn->setFixedSize(30, 28);
-            btn->setStyleSheet(QString("QPushButton { border: 1px solid %1; color: %1; border-radius: 4px; background: transparent; } QPushButton:hover { background: %1; color: white; }").arg(color));
-            connect(btn, &QPushButton::clicked, this, [this, c, func]() {
+            connect(btn, &QPushButton::clicked, this, [this, c, func, confirm_msg]() {
+                if (!confirm_msg.isEmpty()) {
+                    if (QMessageBox::question(this, "Confirm", confirm_msg, QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+                        return;
+                    }
+                }
                 pimpl_->overlay_->show();
                 pimpl_->overlay_->raise(); // Ensure overlay is on top
                 QTimer::singleShot(50, this, [this, c, func]() {
@@ -478,14 +657,35 @@ auto ContainersPage::refresh() -> void {
             return btn;
         };
 
-        h->addWidget(create_btn("▶", "#4ade80", [](const QStringList& ids){ Backend::get_instance().unpause_container(ids); }));
-        h->addWidget(create_btn("⏸", "#f97316", [](const QStringList& ids){ Backend::get_instance().pause_container(ids); }));
-        h->addWidget(create_btn("🗑", "#ef4444", [](const QStringList& ids){ Backend::get_instance().delete_container(ids); }));
+        if (c.status == "running") {
+            h->addWidget(create_btn("pause", "Pause", "#f97316", [](const QStringList& ids){ Backend::get_instance().pause_container(ids); }));
+            h->addWidget(create_btn("stop", "Stop", "#f85149", [](const QStringList& ids){ Backend::get_instance().stop_container(ids); }));
+        } else if (c.status == "paused") {
+            h->addWidget(create_btn("play", "Unpause", "#2ea043", [](const QStringList& ids){ Backend::get_instance().unpause_container(ids); }));
+            h->addWidget(create_btn("stop", "Stop", "#f85149", [](const QStringList& ids){ Backend::get_instance().stop_container(ids); }));
+        } else {
+            h->addWidget(create_btn("play", "Start", "#2ea043", [](const QStringList& ids){ Backend::get_instance().start_container(ids); }));
+        }
+        
+        auto* copy_btn = new HoverIconButton("", "copy", "#a1a1aa");
+        copy_btn->setObjectName("RowActionBtn_copy");
+        copy_btn->setIconSize(QSize(14, 14));
+        copy_btn->setToolTip("Copy full ID");
+        copy_btn->setCursor(Qt::PointingHandCursor);
+        copy_btn->setFixedSize(30, 28);
+        connect(copy_btn, &QPushButton::clicked, this, [c]() {
+            QApplication::clipboard()->setText(c.id);
+        });
+        h->addWidget(copy_btn);
+        
+        h->addWidget(create_btn("delete", "Delete", "#f85149", [](const QStringList& ids){ Backend::get_instance().delete_container(ids); }, "Are you sure you want to delete this container?"));
 
-        auto* attach_btn = new QPushButton("🔗");
+        auto* attach_btn = new HoverIconButton("", "attach", "#58a6ff");
+        attach_btn->setObjectName("RowActionBtn_attach");
+        attach_btn->setIconSize(QSize(14, 14));
+        attach_btn->setToolTip("Attach to Terminal");
         attach_btn->setCursor(Qt::PointingHandCursor);
         attach_btn->setFixedSize(30, 28);
-        attach_btn->setStyleSheet("QPushButton { border: 1px solid #3b82f6; color: #3b82f6; border-radius: 4px; background: transparent; } QPushButton:hover { background: #3b82f6; color: white; }");
         connect(attach_btn, &QPushButton::clicked, this, [c]() {
             QString binPath = Backend::get_instance().get_cli_path();
             QString workDir = QFileInfo(binPath).absolutePath();
