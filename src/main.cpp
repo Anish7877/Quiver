@@ -45,6 +45,10 @@ int main(int argc, char* argv[]) {
                         CommandLineHandler::stop(args);
                 } else if (command == "prune") {
                         CommandLineHandler::prune(args);
+                } else if (command == "cp") {
+                        CommandLineHandler::cp(args);
+                } else if (command == "stats") {
+                        CommandLineHandler::stats(args);
                 } else {
                         std::cerr << "quiver: '" << command << "' is not a quiver command.\n"
                                 << "See 'quiver --help'.\n";

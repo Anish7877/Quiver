@@ -8,7 +8,10 @@
 #include "utils.hpp"
 #include <chrono>
 #include <csignal>
+#include <exception>
+#include <filesystem>
 #include <format>
+#include <nlohmann/detail/input/input_adapters.hpp>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -33,7 +36,7 @@ static std::vector<std::string> split_string(const std::string& str, char delimi
 }
 
 auto CommandLineHandler::run(std::span<std::string> args) -> void {
-        if (args.empty()) {
+        if (args.empty()) [[unlikely]] {
                 throw std::runtime_error("Image name not found");
         }
 
@@ -42,7 +45,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
         std::string image_name{};
         std::string container_name{};
         std::vector<std::string> commands{};
-        size_t positional_start = args.size();
+        size_t positional_start{args.size()};
 
         for (size_t i{0}; i < args.size(); ++i) {
                 if (args[i] == "--") {
@@ -294,7 +297,6 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                         if (img_config.contains("config")) {
                                 auto& cfg = img_config["config"];
 
-                                // 1. Extract default Entrypoint and Cmd if user didn't provide any
                                 if (commands.empty()) {
                                         if (cfg.contains("Entrypoint") && !cfg["Entrypoint"].is_null()) {
                                                 for (const auto& item : cfg["Entrypoint"]) {
@@ -308,14 +310,12 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                                         }
                                 }
 
-                                // 2. Extract Environment Variables (crucial for Python, Node, etc.)
                                 if (cfg.contains("Env") && !cfg["Env"].is_null()) {
                                         for (const auto& item : cfg["Env"]) {
                                                 container_config.env.value.push_back(item.get<std::string>());
                                         }
                                 }
 
-                                // 3. Extract Default Working Directory
                                 if (cfg.contains("WorkingDir") && !cfg["WorkingDir"].is_null()) {
                                         std::string wd = cfg["WorkingDir"].get<std::string>();
                                         if (!wd.empty()) {
@@ -344,7 +344,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
 auto CommandLineHandler::ps(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         container_db_manager.init();
-        if (args.empty()) {
+        if (args.empty()) [[unlikely]] {
                 container_db_manager.list_all_running_container();
         }
         else {
@@ -366,7 +366,7 @@ auto CommandLineHandler::ps(std::span<std::string> args) -> void {
 auto CommandLineHandler::remove(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         container_db_manager.init();
-        if (args.empty()) {
+        if (args.empty()) [[unlikely]] {
                 std::cerr << "Error: No arguments provided\n";
                 Utils::print_usage();
                 return;
@@ -379,12 +379,12 @@ auto CommandLineHandler::remove(std::span<std::string> args) -> void {
 auto CommandLineHandler::inspect(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         container_db_manager.init();
-        if (args.empty()) {
+        if (args.empty()) [[unlikely]] {
                 std::cerr << "Error: No arguments provided\n";
                 Utils::print_usage();
                 return;
         }
-        if (args.size() != 1) {
+        if (args.size() != 1) [[unlikely]] {
                 std::cerr << "Error: More than one argument provided\n";
                 Utils::print_usage();
                 return;
@@ -395,7 +395,7 @@ auto CommandLineHandler::inspect(std::span<std::string> args) -> void {
 auto CommandLineHandler::pause(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         container_db_manager.init();
-        if (args.empty()) {
+        if (args.empty()) [[unlikely]] {
                 std::cerr << "Error: No arguments provided\n";
                 Utils::print_usage();
                 return;
@@ -417,7 +417,7 @@ auto CommandLineHandler::pause(std::span<std::string> args) -> void {
 auto CommandLineHandler::unpause(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         container_db_manager.init();
-        if (args.empty()) {
+        if (args.empty()) [[unlikely]] {
                 std::cerr << "Error: No arguments provided\n";
                 Utils::print_usage();
                 return;
@@ -439,12 +439,12 @@ auto CommandLineHandler::unpause(std::span<std::string> args) -> void {
 auto CommandLineHandler::attach(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         container_db_manager.init();
-        if (args.empty()) {
+        if (args.empty()) [[unlikely]] {
                 std::cerr << "Error: No arguments provided\n";
                 Utils::print_usage();
                 return;
         }
-        if (args.size() != 1) {
+        if (args.size() != 1) [[unlikely]] {
                 std::cerr << "Error: More than one argument provided\n";
                 Utils::print_usage();
                 return;
@@ -463,7 +463,7 @@ auto CommandLineHandler::attach(std::span<std::string> args) -> void {
 auto CommandLineHandler::ports(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         container_db_manager.init();
-        if (!args.empty()) {
+        if (!args.empty()) [[unlikely]] {
                 std::cerr << "Error: Arguments Provided\n";
                 Utils::print_usage();
                 return;
@@ -509,7 +509,7 @@ auto CommandLineHandler::start(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         auto& container_monitor{ContainerMonitor::get_instance()};
         container_db_manager.init();
-        if (args.empty()) {
+        if (args.empty()) [[unlikely]] {
                 std::cerr << "Error: No arguments provided\n";
                 Utils::print_usage();
                 return;
@@ -530,7 +530,7 @@ auto CommandLineHandler::stop(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         auto& container_monitor{ContainerMonitor::get_instance()};
         container_db_manager.init();
-        if (args.empty()) {
+        if (args.empty()) [[unlikely]] {
                 std::cerr << "Error: No arguments provided\n";
                 Utils::print_usage();
                 return;
@@ -565,7 +565,7 @@ auto CommandLineHandler::stop(std::span<std::string> args) -> void {
 auto CommandLineHandler::prune(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         container_db_manager.init();
-        if (!args.empty()) {
+        if (!args.empty()) [[unlikely]] {
                 std::cerr << "Error: Arguments Provided\n";
                 Utils::print_usage();
                 return;
@@ -575,5 +575,194 @@ auto CommandLineHandler::prune(std::span<std::string> args) -> void {
                 if (container.status != "running") {
                         container_db_manager.remove_container(container.config.container_id);
                 }
+        }
+}
+
+auto CommandLineHandler::cp(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+
+        if (args.empty()) [[unlikely]] {
+                std::cerr << "Error: No arguments provided.\n";
+                Utils::print_usage();
+                return;
+        }
+
+        bool is_recursive{false};
+        size_t start_idx{0};
+
+        if (args.front() == "-r") {
+                is_recursive = true;
+                start_idx = 1;
+        }
+
+        if (args.size() - start_idx != 3) [[unlikely]] {
+                std::cerr << "Error: Invalid number of arguments provided.\n";
+                Utils::print_usage();
+                return;
+        }
+
+        auto container_id{args[start_idx]};
+        auto host_path{args[start_idx + 1]};
+        std::string container_path{args[start_idx + 2]};
+
+        auto container{container_db_manager.get_container(container_id)};
+        if (!container) {
+                std::cerr << std::format("Error: Container '{}' not found.\n", container_id);
+                return;
+        }
+
+        if (!fs::exists(host_path)) [[unlikely]] {
+                std::cerr << std::format("Error: Host path '{}' doesn't exist.\n", host_path);
+                return;
+        }
+
+        if (!container_path.empty() && container_path.front() == '/') {
+                container_path.erase(0, 1);
+        }
+
+        fs::path base_dir{Utils::get_base_dir()};
+        fs::path final_container_path;
+
+        if (container->config.vfs) {
+                final_container_path = base_dir / "vfs" / std::format("quiver_{}", container->config.container_id) / container_path;
+        } else {
+                final_container_path = base_dir / "filesystems" / std::format("quiver_{}", container->config.container_id) / "upper_dir" / container_path;
+        }
+
+        if (!is_recursive && !fs::is_directory(host_path)) {
+                if (container_path.empty() || container_path.back() == '/' || fs::is_directory(final_container_path)) {
+                        final_container_path /= fs::path(host_path).filename();
+                }
+        }
+
+        try {
+                Utils::ensure_dir(final_container_path.parent_path());
+        }
+        catch (const std::exception& e) {
+                std::cerr << std::format("Error creating container directories: {}\n", e.what());
+                return;
+        }
+
+        if (is_recursive) {
+                try {
+                        Utils::copy_directory(host_path, final_container_path);
+                        std::cout << std::format("Successfully copied directory '{}' to container '{}'.\n", host_path, container_id);
+                }
+                catch (const std::exception& e) {
+                        std::cerr << std::format("Error copying directory: {}\n", e.what());
+                }
+        }
+        else {
+                if (fs::is_directory(host_path)) {
+                        std::cerr << std::format("Error: '{}' is a directory. Use -r to copy directories.\n", host_path);
+                }
+                else {
+                        std::error_code ec{};
+                        fs::copy(host_path, final_container_path, fs::copy_options::overwrite_existing, ec);
+
+                        if (ec) {
+                                std::cerr << std::format("Error: Unable to copy file -> {}\n", ec.message());
+                        } else {
+                                std::cout << std::format("Successfully copied file '{}' to container '{}'.\n", host_path, container_id);
+                        }
+                }
+        }
+}
+
+auto CommandLineHandler::stats(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+
+        if (!args.empty()) [[unlikely]] {
+                std::cerr << "Error: No arguments provided. Please specify a container ID.\n";
+                Utils::print_usage();
+                return;
+        }
+
+        auto read_cgroup_val{[](const fs::path& path) -> uint64_t {
+                std::ifstream file(path);
+                uint64_t val{0};
+                if (file >> val) return val;
+                return 0;
+        }};
+
+        auto get_cpu_usage_usec{[](const fs::path& path) -> uint64_t {
+                std::ifstream file(path);
+                std::string key;
+                uint64_t val{0};
+                while (file >> key >> val) {
+                        if (key == "usage_usec") return val;
+                }
+                return 0;
+        }};
+
+        auto get_cgroup_path{[](pid_t pid) -> std::optional<fs::path> {
+                std::ifstream file(std::format("/proc/{}/cgroup", pid));
+                std::string line;
+
+                while (std::getline(file, line)) {
+                        size_t first_colon = line.find(':');
+                        if (first_colon != std::string::npos) {
+                                size_t second_colon = line.find(':', first_colon + 1);
+                                if (second_colon != std::string::npos) {
+                                        std::string cg_path = line.substr(second_colon + 1);
+
+                                        if (!cg_path.empty() && cg_path.front() == '/') {
+                                                cg_path.erase(0, 1);
+                                        }
+
+                                        return fs::path("/sys/fs/cgroup") / cg_path;
+                                }
+                        }
+                }
+                return std::nullopt;
+        }};
+
+        std::cout << std::format("{:<70} {:<10} {:<15} {:<10}\n", "CONTAINER ID", "CPU %", "MEM USAGE", "PIDS");
+        auto containers{container_db_manager.get_all_container()};
+        for (const auto& container : containers) {
+                if (container.status != "running") {
+                        continue;
+                }
+
+                auto cgroup_base_opt{get_cgroup_path(container.config.pid)};
+                if (!cgroup_base_opt) {
+                        std::cerr << std::format("Error: Could not read /proc/{}/cgroup for container '{}'.\n", container.config.pid, container.config.container_id);
+                        continue;
+                }
+
+                fs::path cgroup_base{cgroup_base_opt.value()};
+
+                if (!fs::exists(cgroup_base)) {
+                        std::cerr << std::format("Error: Resolved Cgroup path '{}' does not exist.\n", cgroup_base.string());
+                        continue;
+                }
+
+                uint64_t mem_bytes{read_cgroup_val(cgroup_base / "memory.current")};
+                uint64_t pids{read_cgroup_val(cgroup_base / "pids.current")};
+
+                double mem_mb{static_cast<double>(mem_bytes) / (1024.0 * 1024.0)};
+
+                fs::path cpu_stat_path{cgroup_base / "cpu.stat"};
+
+                uint64_t cpu_start{get_cpu_usage_usec(cpu_stat_path)};
+                auto time_start{std::chrono::steady_clock::now()};
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+                uint64_t cpu_end{get_cpu_usage_usec(cpu_stat_path)};
+                auto time_end{std::chrono::steady_clock::now()};
+
+                double cpu_percent{0.0};
+                if (cpu_end > cpu_start) {
+                        auto real_time_delta_usec{std::chrono::duration_cast<std::chrono::microseconds>(time_end - time_start).count()};
+                        uint64_t cpu_time_delta_usec{cpu_end - cpu_start};
+                        cpu_percent = (static_cast<double>(cpu_time_delta_usec) / static_cast<double>(real_time_delta_usec)) * 100.0;
+                }
+
+                auto cpu_str{std::format("{:.2f}%", cpu_percent)};
+                auto mem_str{std::format("{:.2f}MB", mem_mb)};
+                std::cout << std::format("{:<70} {:<10} {:<15} {:<10}\n", container.config.container_id, cpu_str, mem_str, pids);
         }
 }

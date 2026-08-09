@@ -14,4 +14,6 @@ namespace CommandLineHandler {
         auto start(std::span<std::string>) -> void;
         auto stop(std::span<std::string>) -> void;
         auto prune(std::span<std::string>) -> void;
+        auto cp(std::span<std::string>) -> void;
+        auto stats(std::span<std::string>) -> void;
 }
