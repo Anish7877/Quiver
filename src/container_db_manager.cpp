@@ -179,7 +179,7 @@ auto ContainerDbManager::get_container(const std::string& key) -> std::optional<
                 std::cerr << std::format("Serialization Error: Unable to deserialize the value for key '{}'\n", key);
                 return std::nullopt;
         }
-        if (metadata->status == "running" && !Utils::is_process_alive(metadata->config.pid, key)) {
+        if (metadata->status == "running" && !Utils::is_process_alive(metadata->config.pid, metadata->config.container_id)) {
                 if (metadata->boot_time < boot_time) {
                         metadata->status = "interrupted by reboot";
                 }
@@ -261,7 +261,7 @@ auto ContainerDbManager::get_all_container() -> std::vector<ContainerDbObject> {
                 }
                 auto metadata{extract_metadata(value)};
                 if (!metadata) continue;
-                if (metadata->status == "running" && !Utils::is_process_alive(metadata->config.pid, key)) {
+                if (metadata->status == "running" && !Utils::is_process_alive(metadata->config.pid, metadata->config.container_id)) {
                         if (metadata->boot_time < boot_time) {
                                 metadata->status = "interrupted by reboot";
                         }
@@ -285,6 +285,7 @@ auto ContainerDbManager::inspect_container(const std::string& key) -> void {
                         update_container(key, metadata.value());
                 }
                 PrintUtils::print_container_config(metadata->config);
+                PrintUtils::print_field("Boot Time", metadata->boot_time);
         }
         else {
                 std::cerr << std::format("Error: Container '{}' not found\n", key);

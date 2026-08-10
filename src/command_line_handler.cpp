@@ -11,7 +11,6 @@
 #include <exception>
 #include <filesystem>
 #include <format>
-#include <nlohmann/detail/input/input_adapters.hpp>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -158,10 +157,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                         container_config.rootfs.read_only = true;
                 } else if (arg == "--rootfs-propagation") {
                         if (++i < positional_start) container_config.rootfs_propagation.type = args[i];
-                }
-
-
-                else if (arg == "-p" || arg == "--publish") {
+                } else if (arg == "-p" || arg == "--publish") {
                         if (++i < positional_start) {
                                 if (args[i].find("/udp") != std::string::npos) {
                                         container_config.networks.udp_ports.push_back(args[i]);
@@ -173,8 +169,6 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                         container_config.networks.auto_tcp = true;
                         container_config.networks.auto_udp = true;
                 }
-
-
                 else if (arg == "--device" || arg == "--cdi") {
                         if (++i < positional_start) {
                                 auto tokens = split_string(args[i], ':');
@@ -183,10 +177,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                                 dev.container_path = (tokens.size() > 1) ? tokens[1] : tokens[0];
                                 container_config.devices.push_back(dev);
                         }
-                }
-
-
-                else if (arg == "--cap-add") {
+                } else if (arg == "--cap-add") {
                         if (++i < positional_start) {
                                 container_config.capabilities.bounding.push_back(args[i]);
                                 container_config.capabilities.effective.push_back(args[i]);
@@ -228,9 +219,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                         }
                 } else if (arg == "--oom-score-adj") {
                         if (++i < positional_start) container_config.oom_score.value = std::stoi(args[i]);
-                }
-
-                else if (arg == "--cpu-policy") {
+                } else if (arg == "--cpu-policy") {
                         if (++i < positional_start) container_config.schedular_opts.policy = args[i];
                 } else if (arg == "--cpu-priority") {
                         if (++i < positional_start) container_config.schedular_opts.priority = std::stoi(args[i]);
@@ -242,9 +231,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                         if (++i < positional_start) container_config.schedular_opts.period = std::stoull(args[i]);
                 } else if (arg == "--cpu-scheduler-flags") {
                         if (++i < positional_start) container_config.schedular_opts.flags.push_back(args[i]);
-                }
-
-                else if (arg == "--pid" || arg == "--net" || arg == "--ipc" || arg == "--uts" ||
+                } else if (arg == "--pid" || arg == "--net" || arg == "--ipc" || arg == "--uts" ||
                                 arg == "--mount-ns" || arg == "--time" || arg == "--cgroup") {
                         if (++i < positional_start) {
                                 OCIRuntime::Namespace ns;
@@ -288,7 +275,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
         }
 
         if (commands.empty()) {
-                fs::path config_path = fs::path(outpath) / "config.json";
+                fs::path config_path{fs::path(outpath) / "config.json"};
                 if (Utils::file_exists(config_path)) {
                         std::ifstream config_file(config_path);
                         nlohmann::json img_config;
@@ -765,4 +752,82 @@ auto CommandLineHandler::stats(std::span<std::string> args) -> void {
                 auto mem_str{std::format("{:.2f}MB", mem_mb)};
                 std::cout << std::format("{:<70} {:<10} {:<15} {:<10}\n", container.config.container_id, cpu_str, mem_str, pids);
         }
+}
+
+auto CommandLineHandler::generate_systemd(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+
+        if (args.empty()) [[unlikely]] {
+                std::cerr << "Error: No arguments provided.\n";
+                std::cerr << "Usage: quiver generate-systemd [options] <container_id>\n";
+                std::cerr << "Options:\n";
+                std::cerr << "  --exe=<path>   Specify a custom path to the quiver executable\n";
+                return;
+        }
+
+        std::string target_id{};
+        std::string custom_bin_path{};
+
+        for (const auto& arg : args) {
+                if (arg.starts_with("--exe=")) {
+                        custom_bin_path = arg.substr(6);
+                } else {
+                        target_id = arg;
+                }
+        }
+
+        if (target_id.empty()) {
+                std::cerr << "Error: Container ID is required.\n";
+                return;
+        }
+
+        auto container{container_db_manager.get_container(target_id)};
+
+        if (!container) {
+                std::cerr << std::format("Error: Container '{}' not found in database.\n", target_id);
+                return;
+        }
+
+        std::string quiver_bin{};
+        if (!custom_bin_path.empty()) {
+                std::error_code ec{};
+                quiver_bin = fs::absolute(custom_bin_path, ec).string();
+                if (ec) {
+                        quiver_bin = custom_bin_path;
+                }
+        } else {
+                char exe_path[PATH_MAX];
+                ssize_t count{readlink("/proc/self/exe", exe_path, sizeof(exe_path))};
+                quiver_bin = (count != -1) ? std::string(exe_path, count) : "/usr/local/bin/quiver";
+        }
+
+        std::string unit_file = std::format(
+                        R"([Unit]
+Description=Quiver Container: {0}
+Documentation=man:quiver(1)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=forking
+Restart=always
+RestartSec=2
+
+# Container Lifecycle Commands
+ExecStart={1} start {2}
+ExecStop={1} stop {2}
+
+# Optional Host-level Sandboxing for the Quiver CLI invocation
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
+)",
+                container->name,
+                quiver_bin,
+                container->config.container_id
+                        );
+
+        std::cout << unit_file;
 }

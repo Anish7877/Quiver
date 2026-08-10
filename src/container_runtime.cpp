@@ -160,6 +160,7 @@ auto ContainerRuntime::execute_container_init() -> void {
 
         setup_root_filesystem();
         mount_necessary_dirs();
+        setup_network_files();
         jail_process();
         setup_standard_symlinks();
         apply_rlimits();
@@ -245,7 +246,7 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
         }
 
         if(!m_container_config.vfs) {
-                fs::path lower_dir{m_container_config.rootfs.path};
+                fs::path lower_dir{fs::absolute(m_container_config.rootfs.path)};
                 fs::path upper_dir{Utils::get_base_dir() / "filesystems"
                         / std::format("quiver_{}", m_container_config.container_id) / "upper_dir"};
                 fs::path work_dir{Utils::get_base_dir() / "filesystems"
@@ -259,6 +260,9 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                 }
                 try {
                         Utils::ensure_dir(upper_dir);
+                        if (fs::exists(work_dir)) {
+                                fs::remove_all(work_dir);
+                        }
                         Utils::ensure_dir(work_dir);
                         Utils::ensure_dir(merged_dir);
                 }
@@ -270,7 +274,7 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                 std::string base_opts{std::format("lowerdir={},upperdir={},workdir={}",
                                         lower_dir.string(), upper_dir.string(), work_dir.string())};
 
-                std::string native_opts{base_opts + ",userxattr,redirect_dir=on"};
+                std::string native_opts{base_opts + ",userxattr"};
 
                 if (mount("overlay", merged_dir.c_str(), "overlay", MS_NODEV, native_opts.c_str()) == 0) {
                         is_overlay_mounted = true;
@@ -352,6 +356,64 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
         }
         Mount::_volumes(m_container_config.mounts, final_filesystem);
         Mount::_devices(m_container_config.devices, final_filesystem);
+}
+
+auto ContainerRuntime::setup_network_files() -> void {
+        Utils::ensure_dir("./etc");
+        unlink("./etc/resolv.conf");
+
+        std::vector<std::string> resolv_lines{};
+        bool is_stub{false};
+
+        auto read_resolv{[&](const std::string& path) -> bool {
+                std::ifstream file(path);
+                if (!file.is_open()) return false;
+
+                std::string line;
+                while (std::getline(file, line)) {
+                        if (line.starts_with("nameserver 127.0.0.53") || line.starts_with("nameserver 127.0.0.1")) {
+                                is_stub = true;
+                                resolv_lines.clear();
+                                return false;
+                        }
+                        if (!line.empty() && !line.starts_with("#")) {
+                                resolv_lines.push_back(line);
+                        }
+                }
+                return !resolv_lines.empty();
+        }};
+
+        if (!read_resolv("/etc/resolv.conf") && is_stub) {
+                read_resolv("/run/systemd/resolve/resolv.conf");
+        }
+
+        std::ofstream cont_resolv("./etc/resolv.conf");
+        bool has_nameserver{false};
+
+        if (cont_resolv.is_open()) {
+                for (const auto& l : resolv_lines) {
+                        cont_resolv << l << '\n';
+                        if (l.starts_with("nameserver")) {
+                                has_nameserver = true;
+                        }
+                }
+
+                if (!has_nameserver) {
+                        cont_resolv << "nameserver 8.8.8.8\n";
+                        cont_resolv << "nameserver 1.1.1.1\n";
+                }
+        }
+
+        unlink("./etc/hosts");
+        std::ofstream cont_hosts("./etc/hosts");
+        if (cont_hosts.is_open()) {
+                cont_hosts << "127.0.0.1\tlocalhost\n";
+                cont_hosts << "::1\t\tlocalhost ip6-localhost ip6-loopback\n";
+
+                if (!m_container_config.hostname.empty()) {
+                        cont_hosts << std::format("127.0.1.1\t{}\n", m_container_config.hostname);
+                }
+        }
 }
 
 auto ContainerRuntime::jail_process() -> void {

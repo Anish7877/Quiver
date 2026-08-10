@@ -22,6 +22,7 @@ class ContainerRuntime {
                 auto exec_commands() -> void;
                 auto execute_container_init() -> void;
                 auto setup_root_filesystem() -> void;
+                auto setup_network_files() -> void;
                 auto jail_process() -> void;
                 auto mount_necessary_dirs() -> void;
                 auto apply_rlimits() -> void;

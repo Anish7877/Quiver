@@ -184,6 +184,7 @@ auto Serialization::deserialize(const FB::ContainerMetadata* fb) -> ContainerDbO
         if (fb->name()) obj.name = fb->name()->str();
         if (fb->image()) obj.image = fb->image()->str();
         if (fb->status()) obj.status = fb->status()->str();
+        if (fb->boot_time()) obj.boot_time = fb->boot_time();
         if (fb->created_at()) obj.created_at = fb->created_at()->str();
 
         auto fb_conf = fb->config();

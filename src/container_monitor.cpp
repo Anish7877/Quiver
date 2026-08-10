@@ -100,7 +100,6 @@ auto ContainerMonitor::start_logging() -> void {
                                                 char buffer[4096];
                                                 ssize_t bytes_read{read(fds[0].fd, buffer, sizeof(buffer))};
                                                 if (bytes_read > 0) {
-                                                        std::cout.write(buffer, bytes_read);
                                                         std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
                                                                         chrono::system_clock::now(), m_container_config.container_id,
                                                                         std::string_view(buffer, bytes_read))};
@@ -115,7 +114,6 @@ auto ContainerMonitor::start_logging() -> void {
                                                 char buffer[4096];
                                                 ssize_t bytes_read{read(fds[1].fd, buffer, sizeof(buffer))};
                                                 if (bytes_read > 0) {
-                                                        std::cout.write(buffer, bytes_read);
                                                         std::string log_data{std::format("[{}] [{}] [STDERR] {}.\n",
                                                                         chrono::system_clock::now(), m_container_config.container_id,
                                                                         std::string_view(buffer, bytes_read))};
@@ -334,9 +332,6 @@ auto ContainerMonitor::run_container_child() -> void {
 auto ContainerMonitor::run_monitor_parent() -> void {
         close(m_monitor_to_container_fd[0]);
         close(m_container_to_monitor_fd[1]);
-
-
-
         try {
                 m_cgroups_manager->attach_process(m_container_pid);
         }
