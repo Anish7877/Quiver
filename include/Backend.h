@@ -15,6 +15,7 @@ struct Container {
     QStringList devices {};
     QStringList volumes {};
     QStringList ports {};
+    QString created_at {};
     bool prevent_interaction {false};
     QString command {};
     QString options {};
@@ -63,6 +64,7 @@ public:
     static auto get_instance() -> Backend&;
 
     auto get_containers() const -> std::vector<Container>;
+    auto get_container_inspect(const QString& id) const -> QString;
     auto add_container(const Container& container) -> void;
     auto delete_container(const QStringList& container_ids) -> void;
     auto pause_container(const QStringList& container_ids) -> void;
@@ -84,6 +86,7 @@ public:
     auto delete_port(const QString& port_id) -> void;
     
     auto get_cli_path() const -> QString;
+    auto get_last_error() const -> QString;
 
     auto get_devices() const -> std::vector<Device>;
     auto add_device(const Device& device) -> void;

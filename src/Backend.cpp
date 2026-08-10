@@ -54,6 +54,7 @@ struct Backend::BackendImpl {
         {"/dev/ttyUSB0",    "Serial",  "",             "rw",   "available"},
         {"/dev/snd",        "Audio",   "",             "rw",   "available"}
     };
+    QString last_error_ {};
 };
 
 Backend::Backend() : pimpl_{std::make_unique<BackendImpl>()} {}
@@ -66,6 +67,10 @@ auto Backend::get_instance() -> Backend& {
 
 auto Backend::get_cli_path() const -> QString {
     return resolve_cli_path();
+}
+
+auto Backend::get_last_error() const -> QString {
+    return pimpl_->last_error_;
 }
 
 auto Backend::get_containers() const -> std::vector<Container> {
@@ -87,10 +92,16 @@ auto Backend::get_containers() const -> std::vector<Container> {
         return result;
     }
 
+    pimpl_->last_error_ = "";
     QString output = process.readAllStandardOutput();
     QString err = process.readAllStandardError();
     log_debug("Process finished. Stdout length: " + QString::number(output.length()) + ", Stderr: " + err);
     
+    if (process.exitCode() != 0 || output.contains("Error:", Qt::CaseInsensitive) || output.contains("DbError", Qt::CaseInsensitive)) {
+        pimpl_->last_error_ = !err.isEmpty() ? err : output;
+        return result;
+    }
+
     QStringList lines = output.split('\n', Qt::SkipEmptyParts);
     log_debug("Lines count: " + QString::number(lines.size()));
     
@@ -101,14 +112,30 @@ auto Backend::get_containers() const -> std::vector<Container> {
         if (parts.size() >= 1) {
             Container c;
             c.id = parts[0];
-            c.image = parts.size() > 1 ? parts[1] : "";
-            c.name = parts.size() > 2 ? parts[2] : "";
-            c.status = parts.size() > 3 ? parts[3] : "";
+            c.image = parts.size() > 1 ? parts[1].trimmed() : "";
+            c.name = parts.size() > 2 ? parts[2].trimmed() : "";
+            c.status = parts.size() > 3 ? parts[3].trimmed() : "";
+            c.created_at = parts.size() > 4 ? parts[4].trimmed() : "";
             result.push_back(c);
         }
     }
     log_debug("Parsed containers count: " + QString::number(result.size()));
     return result;
+}
+
+auto Backend::get_container_inspect(const QString& id) const -> QString {
+    QString cli_path = resolve_cli_path();
+    if (!QFile::exists(cli_path)) return "";
+
+    QProcess process;
+    process.start(cli_path, QStringList() << "inspect" << id);
+    if (!process.waitForFinished(5000)) {
+        process.kill();
+        process.waitForFinished(500);
+        return "";
+    }
+    if (process.exitCode() != 0) return "";
+    return QString::fromUtf8(process.readAllStandardOutput());
 }
 auto Backend::add_container(const Container& container) -> void { 
     // We do not modify the hardcoded vector anymore, the CLI is the source of truth

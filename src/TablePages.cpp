@@ -25,7 +25,7 @@
 #include <QTimer>
 #include <QProcess>
 #include <QFileInfo>
-#include <QMessageBox>
+#include "include/Components.h"
 #include "include/AuthManager.h"
 #include <QScrollArea>
 #include <QPainter>
@@ -85,6 +85,12 @@ QIcon createActionIcon(const QString& type, const QColor& color) {
             p.setBrush(Qt::NoBrush);
             p.drawRoundedRect(6, 6, 7, 8, 1, 1);
             p.drawPolyline(QPolygonF() << QPointF(9, 3) << QPointF(3, 3) << QPointF(3, 11));
+        } else if (type == "info") {
+            p.setPen(QPen(drawColor, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(Qt::NoBrush);
+            p.drawEllipse(2, 2, 12, 12);
+            p.drawLine(8, 5, 8, 6);
+            p.drawLine(8, 8, 8, 11);
         }
         return pixmap;
     };
@@ -246,7 +252,7 @@ TablePage::TablePage(const QString& title,
     pimpl_->table_->horizontalHeader()->setSectionResizeMode(
         action_col, QHeaderView::Fixed);
 
-    pimpl_->table_->setColumnWidth(action_col, 220);
+    pimpl_->table_->setColumnWidth(action_col, 230);
     pimpl_->table_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
     
     pimpl_->table_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
@@ -419,12 +425,14 @@ ContainersPage::ContainersPage(QWidget* parent)
             
             QString error_msg = validate_func(selected);
             if (!error_msg.isEmpty()) {
-                QMessageBox::warning(this, "Action Not Allowed", error_msg);
+                CustomAlert alert(CustomAlert::Warning, "Action Not Allowed", error_msg, this);
+                alert.exec();
                 return;
             }
 
             if (!confirm_msg.isEmpty()) {
-                if (QMessageBox::question(this, "Confirm", confirm_msg, QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+                CustomAlert alert(CustomAlert::Question, "Confirm", confirm_msg, this);
+                if (alert.exec() != QDialog::Accepted) {
                     return;
                 }
             }
@@ -490,7 +498,8 @@ ContainersPage::ContainersPage(QWidget* parent)
     prune_btn->setCursor(Qt::PointingHandCursor);
     prune_btn->setToolTip("Delete all exited/stopped containers");
     connect(prune_btn, &QPushButton::clicked, this, [this]() {
-        if (QMessageBox::question(this, "Confirm Prune", "Are you sure you want to prune all stopped/exited containers?", QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+        CustomAlert alert(CustomAlert::Question, "Confirm Prune", "Are you sure you want to prune all stopped/exited containers?", this);
+        if (alert.exec() != QDialog::Accepted) {
             return;
         }
         pimpl_->overlay_->show();
@@ -570,11 +579,19 @@ auto ContainersPage::refresh() -> void {
         }
     }
 
-    while (pimpl_->page_->table()->rowCount() > 0) {
-        pimpl_->page_->table()->removeRow(0);
-    }
+    pimpl_->page_->table()->setRowCount(0);
     
     auto containers = Backend::get_instance().get_containers();
+    QString error_msg = Backend::get_instance().get_last_error();
+    if (!error_msg.isEmpty()) {
+        static bool showing_error = false;
+        if (!showing_error) {
+            showing_error = true;
+            CustomAlert alert(CustomAlert::Warning, "Backend Error", error_msg, this);
+            alert.exec();
+            showing_error = false;
+        }
+    }
     
     int total = containers.size();
     int running = 0;
@@ -639,7 +656,8 @@ auto ContainersPage::refresh() -> void {
             btn->setFixedSize(30, 28);
             connect(btn, &QPushButton::clicked, this, [this, c, func, confirm_msg]() {
                 if (!confirm_msg.isEmpty()) {
-                    if (QMessageBox::question(this, "Confirm", confirm_msg, QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+                    CustomAlert alert(CustomAlert::Question, "Confirm", confirm_msg, this);
+                    if (alert.exec() != QDialog::Accepted) {
                         return;
                     }
                 }
@@ -666,7 +684,7 @@ auto ContainersPage::refresh() -> void {
         } else {
             h->addWidget(create_btn("play", "Start", "#2ea043", [](const QStringList& ids){ Backend::get_instance().start_container(ids); }));
         }
-        
+
         auto* copy_btn = new HoverIconButton("", "copy", "#a1a1aa");
         copy_btn->setObjectName("RowActionBtn_copy");
         copy_btn->setIconSize(QSize(14, 14));
@@ -694,6 +712,17 @@ auto ContainersPage::refresh() -> void {
             QProcess::startDetached("sh", QStringList() << "-c" << cmd);
         });
         h->addWidget(attach_btn);
+
+        auto* info_btn = new HoverIconButton("", "info", "#a1a1aa");
+        info_btn->setObjectName("RowActionBtn_info");
+        info_btn->setIconSize(QSize(14, 14));
+        info_btn->setToolTip("View Information");
+        info_btn->setCursor(Qt::PointingHandCursor);
+        info_btn->setFixedSize(30, 28);
+        connect(info_btn, &QPushButton::clicked, this, [this, c]() {
+            emit container_info_requested(c.id);
+        });
+        h->addWidget(info_btn);
 
         pimpl_->page_->table()->setCellWidget(row, 5, cell);
     }

@@ -4,7 +4,7 @@ project(QuiverCpp VERSION 1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Charts Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Charts Network Concurrent)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -20,6 +20,7 @@ add_executable(QuiverCpp
     src/Backend.cpp
     src/TablePages.cpp
     src/TopNavBar.cpp
+    src/ContainerDetailsPage.cpp
     include/MainWindow.h
     include/DashboardPage.h
     include/AuthWindow.h
@@ -30,6 +31,7 @@ add_executable(QuiverCpp
     include/common_header.hpp
     include/TablePages.h
     include/TopNavBar.h
+    include/ContainerDetailsPage.h
     src/FlowLayout.cpp
     resources.qrc
     assets/style.qss
@@ -39,5 +41,5 @@ add_executable(QuiverCpp
 if(WIN32)
     target_sources(QuiverCpp PRIVATE quiver.rc)
 endif()
-target_link_libraries(QuiverCpp PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core Qt6::Charts Qt6::Network)
+target_link_libraries(QuiverCpp PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core Qt6::Charts Qt6::Network Qt6::Concurrent)
 target_include_directories(QuiverCpp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -1,5 +1,7 @@
 #include "include/DashboardPage.h"
 #include "include/Components.h"
+#include <QtConcurrent>
+#include <QFutureWatcher>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -45,6 +47,11 @@ struct DashboardPage::Impl {
     uint64_t last_log_size_{};
     QFileSystemWatcher* log_watcher_{};
     QProcess* stats_process_{};
+    QString stats_buffer_{};
+    StatCard* total_containers_card_{};
+    StatCard* running_containers_card_{};
+    StatCard* failed_containers_card_{};
+    StatCard* active_volumes_card_{};
 };
 static auto create_cpu_cores_panel(const QString& title) -> QFrame* {
     auto* panel = new QFrame;
@@ -240,10 +247,14 @@ DashboardPage::DashboardPage(QWidget* parent)
 
     auto* stats_row = new QHBoxLayout;
     stats_row->setSpacing(20);
-    stats_row->addWidget(new StatCard("TOTAL CONTAINERS", "14", "orange"));
-    stats_row->addWidget(new StatCard("RUNNING", "8", "green"));
-    stats_row->addWidget(new StatCard("FAILED / STOPPED", "2", "red"));
-    stats_row->addWidget(new StatCard("ACTIVE VOLUMES", "5", "white"));
+    pimpl_->total_containers_card_ = new StatCard("TOTAL CONTAINERS", "0", "orange");
+    pimpl_->running_containers_card_ = new StatCard("RUNNING", "0", "green");
+    pimpl_->failed_containers_card_ = new StatCard("FAILED / STOPPED", "0", "red");
+    pimpl_->active_volumes_card_ = new StatCard("ACTIVE VOLUMES", "0", "white");
+    stats_row->addWidget(pimpl_->total_containers_card_);
+    stats_row->addWidget(pimpl_->running_containers_card_);
+    stats_row->addWidget(pimpl_->failed_containers_card_);
+    stats_row->addWidget(pimpl_->active_volumes_card_);
     scroll_layout->addLayout(stats_row);
 
 
@@ -400,25 +411,48 @@ DashboardPage::DashboardPage(QWidget* parent)
 
     // Setup Stats Polling Process
     pimpl_->stats_process_ = new QProcess(this);
-    connect(pimpl_->stats_process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this](int exitCode, QProcess::ExitStatus exitStatus) {
-        if (exitStatus != QProcess::NormalExit || exitCode != 0) return;
-        
+    connect(pimpl_->stats_process_, &QProcess::readyReadStandardOutput, this, [this]() {
         QString output = pimpl_->stats_process_->readAllStandardOutput();
-        QStringList lines = output.split('\n', Qt::SkipEmptyParts);
+        // Remove ANSI escape sequences (e.g., clear screen \033[2J\033[H)
+        output.remove(QRegularExpression("\x1B\\[[0-9;]*[a-zA-Z]"));
+        
+        pimpl_->stats_buffer_ += output;
+        
+        QStringList lines = pimpl_->stats_buffer_.split('\n', Qt::SkipEmptyParts);
         if (lines.isEmpty()) return;
 
+        // Find the last frame header
+        int last_header_idx = -1;
+        for (int i = lines.size() - 1; i >= 0; --i) {
+            if (lines[i].contains("CONTAINER", Qt::CaseInsensitive) && lines[i].contains("CPU", Qt::CaseInsensitive)) {
+                last_header_idx = i;
+                break;
+            }
+        }
+        
+        if (last_header_idx == -1) return; // No header yet
+        
+        // Ensure we have at least some lines after the header, or it's just the header
+        // We will process the frame from last_header_idx + 1 to the end
         QBarSet* cpu_set = new QBarSet("CPU");
         QBarSet* mem_set = new QBarSet("MEM");
-        cpu_set->setBrush(QColor("#58a6ff")); // Blue
+        
+        QLinearGradient grad(0, 0, 1000, 0); // Horizontal gradient across bars
+        grad.setColorAt(0.0, QColor("#ef4444")); // Red
+        grad.setColorAt(0.3, QColor("#f97316")); // Orange
+        grad.setColorAt(0.7, QColor("#f87171")); // Light red
+        grad.setColorAt(1.0, QColor("#fb923c")); // Light orange
+        
+        cpu_set->setBrush(QBrush(grad));
         cpu_set->setPen(Qt::NoPen);
-        mem_set->setBrush(QColor("#2ea043")); // Green
+        mem_set->setBrush(QBrush(grad));
         mem_set->setPen(Qt::NoPen);
 
         QStringList categories;
         double max_mem = 100;
         double max_cpu = 100;
 
-        for (int i = 1; i < lines.size(); ++i) { // skip header
+        for (int i = last_header_idx + 1; i < lines.size(); ++i) {
             QString line = lines[i].trimmed();
             if (line.isEmpty()) continue;
             QStringList parts = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
@@ -428,6 +462,7 @@ DashboardPage::DashboardPage(QWidget* parent)
                 cpu_str.remove("%");
                 QString mem_str = parts[2]; 
                 mem_str.remove("MB");
+                mem_str.remove("GB"); // Handle GB just in case
                 
                 double cpu = cpu_str.toDouble();
                 double mem = mem_str.toDouble();
@@ -440,21 +475,30 @@ DashboardPage::DashboardPage(QWidget* parent)
             }
         }
 
+        // Clear the buffer since we processed up to the end
+        pimpl_->stats_buffer_.clear();
+
         if (!categories.isEmpty()) {
             pimpl_->cpu_series_->clear();
             pimpl_->cpu_series_->append(cpu_set);
             pimpl_->cpu_axisX_->clear();
             pimpl_->cpu_axisX_->append(categories);
-            if (auto axis = qobject_cast<QValueAxis*>(pimpl_->cpu_chart_->axes(Qt::Vertical).first())) {
-                axis->setRange(0, max_cpu * 1.2); 
+            auto cpu_axes = pimpl_->cpu_chart_->axes(Qt::Vertical);
+            if (!cpu_axes.isEmpty()) {
+                if (auto axis = qobject_cast<QValueAxis*>(cpu_axes.first())) {
+                    axis->setRange(0, max_cpu * 1.2); 
+                }
             }
 
             pimpl_->mem_series_->clear();
             pimpl_->mem_series_->append(mem_set);
             pimpl_->mem_axisX_->clear();
             pimpl_->mem_axisX_->append(categories);
-            if (auto axis = qobject_cast<QValueAxis*>(pimpl_->mem_chart_->axes(Qt::Vertical).first())) {
-                axis->setRange(0, max_mem * 1.2); 
+            auto mem_axes = pimpl_->mem_chart_->axes(Qt::Vertical);
+            if (!mem_axes.isEmpty()) {
+                if (auto axis = qobject_cast<QValueAxis*>(mem_axes.first())) {
+                    axis->setRange(0, max_mem * 1.2); 
+                }
             }
         } else {
             delete cpu_set;
@@ -468,6 +512,31 @@ DashboardPage::DashboardPage(QWidget* parent)
         if (pimpl_->stats_process_->state() == QProcess::NotRunning) {
             pimpl_->stats_process_->start(Backend::get_instance().get_cli_path(), {"stats"});
         }
+
+        // Fetch real info for top cards asynchronously
+        auto* watcher = new QFutureWatcher<std::pair<std::vector<Quiver::Container>, std::vector<Quiver::Volume>>>(this);
+        connect(watcher, &QFutureWatcher<std::pair<std::vector<Quiver::Container>, std::vector<Quiver::Volume>>>::finished, this, [this, watcher]() {
+            auto result = watcher->result();
+            auto containers = result.first;
+            auto volumes = result.second;
+            int total = containers.size();
+            int running = 0;
+            int failed = 0;
+            for (const auto& c : containers) {
+                if (c.status == "running") running++;
+                else failed++;
+            }
+            int active_vols = volumes.size();
+            
+            pimpl_->total_containers_card_->set_value(QString::number(total));
+            pimpl_->running_containers_card_->set_value(QString::number(running));
+            pimpl_->failed_containers_card_->set_value(QString::number(failed));
+            pimpl_->active_volumes_card_->set_value(QString::number(active_vols));
+            watcher->deleteLater();
+        });
+        watcher->setFuture(QtConcurrent::run([]() {
+            return std::make_pair(Backend::get_instance().get_containers(), Backend::get_instance().get_volumes());
+        }));
     });
     pimpl_->stats_timer_->start(2000);
 }

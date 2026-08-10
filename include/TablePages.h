@@ -49,6 +49,10 @@ public:
     ~ContainersPage() override;
     
     auto refresh() -> void;
+
+signals:
+    void container_info_requested(const QString& container_id);
+
 protected:
     void resizeEvent(QResizeEvent* event) override;
 private:

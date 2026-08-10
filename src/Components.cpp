@@ -678,4 +678,124 @@ auto CreateDialog::on_import_json() -> void {
     }
 }
 
+struct CustomAlert::Impl {
+    QLabel* title_lbl_{};
+    QLabel* msg_lbl_{};
+};
+
+CustomAlert::CustomAlert(Type type, const QString& title, const QString& message, QWidget* parent)
+    : QDialog(parent), pimpl_{std::make_unique<Impl>()}
+{
+    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+    setFixedSize(400, 200);
+    setObjectName("CreateDialog");
+
+    auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(30, 30, 30, 30);
+    layout->setSpacing(15);
+
+    pimpl_->title_lbl_ = new QLabel(title);
+    pimpl_->title_lbl_->setObjectName("PageTitle");
+    layout->addWidget(pimpl_->title_lbl_);
+
+    pimpl_->msg_lbl_ = new QLabel(message);
+    pimpl_->msg_lbl_->setStyleSheet("color: #a1a1aa; font-size: 14px;");
+    pimpl_->msg_lbl_->setWordWrap(true);
+    layout->addWidget(pimpl_->msg_lbl_);
+    layout->addStretch();
+
+    auto* btns = new QHBoxLayout;
+    btns->addStretch();
+
+    if (type == Question) {
+        auto* cancel = new QPushButton("No");
+        cancel->setObjectName("SecondaryBtn");
+        cancel->setCursor(Qt::PointingHandCursor);
+        cancel->setFixedSize(85, 34);
+        connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
+
+        auto* yes_btn = new QPushButton("Yes");
+        yes_btn->setObjectName("PrimaryButton");
+        yes_btn->setCursor(Qt::PointingHandCursor);
+        yes_btn->setFixedSize(85, 34);
+        connect(yes_btn, &QPushButton::clicked, this, &QDialog::accept);
+
+        btns->addWidget(cancel);
+        btns->addWidget(yes_btn);
+    } else if (type == Warning) {
+        auto* ok_btn = new QPushButton("OK");
+        ok_btn->setObjectName("PrimaryButton");
+        ok_btn->setCursor(Qt::PointingHandCursor);
+        ok_btn->setFixedSize(85, 34);
+        connect(ok_btn, &QPushButton::clicked, this, &QDialog::accept);
+
+        btns->addWidget(ok_btn);
+    }
+    
+    layout->addLayout(btns);
+}
+CustomAlert::~CustomAlert() = default;
+
+struct CircularGauge::Impl {
+    QString title_;
+    double soft_limit_;
+    double hard_limit_;
+};
+
+CircularGauge::CircularGauge(const QString& title, double soft_limit, double hard_limit, QWidget* parent)
+    : QWidget(parent), pimpl_{std::make_unique<Impl>()} 
+{
+    pimpl_->title_ = title;
+    pimpl_->soft_limit_ = soft_limit;
+    pimpl_->hard_limit_ = hard_limit;
+    setFixedSize(160, 160);
+}
+
+CircularGauge::~CircularGauge() = default;
+
+void CircularGauge::paintEvent(QPaintEvent* event) {
+    Q_UNUSED(event);
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    int size = qMin(width(), height());
+    int thickness = 12;
+    QRectF rect(thickness, thickness, size - thickness * 2, size - thickness * 2);
+
+    // Draw background circle
+    QPen bg_pen(QColor("#27272a"), thickness);
+    bg_pen.setCapStyle(Qt::RoundCap);
+    painter.setPen(bg_pen);
+    painter.drawArc(rect, 0, 360 * 16);
+
+    // Calculate angles
+    double ratio = (pimpl_->hard_limit_ > 0) ? (pimpl_->soft_limit_ / pimpl_->hard_limit_) : 0.0;
+    if (ratio > 1.0) ratio = 1.0;
+    int span_angle = -static_cast<int>(ratio * 360 * 16);
+
+    // Draw progress arc
+    QLinearGradient grad(0, 0, width(), height());
+    grad.setColorAt(0, QColor("#3b82f6")); // Blue
+    grad.setColorAt(1, QColor("#8b5cf6")); // Purple
+    QPen fg_pen(QBrush(grad), thickness);
+    fg_pen.setCapStyle(Qt::RoundCap);
+    painter.setPen(fg_pen);
+    painter.drawArc(rect, 90 * 16, span_angle); // Start at top (90 deg)
+
+    // Draw text
+    painter.setPen(QColor("#ffffff"));
+    QFont font = painter.font();
+    
+    font.setPixelSize(14);
+    font.setBold(true);
+    painter.setFont(font);
+    painter.drawText(rect, Qt::AlignHCenter | Qt::AlignTop, pimpl_->title_);
+
+    font.setPixelSize(16);
+    font.setBold(false);
+    painter.setFont(font);
+    QString text = QString::number(pimpl_->soft_limit_) + " / " + QString::number(pimpl_->hard_limit_);
+    painter.drawText(rect, Qt::AlignCenter, text);
+}
+
 }

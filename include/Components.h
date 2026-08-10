@@ -116,4 +116,30 @@ private:
     std::unique_ptr<Impl> pimpl_ {};
 };
 
+class CustomAlert : public QDialog {
+    Q_OBJECT
+public:
+    enum Type {
+        Warning,
+        Question
+    };
+    explicit CustomAlert(Type type, const QString& title, const QString& message, QWidget* parent = nullptr);
+    ~CustomAlert() override;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pimpl_ {};
+};
+
+class CircularGauge : public QWidget {
+    Q_OBJECT
+public:
+    explicit CircularGauge(const QString& title, double soft_limit, double hard_limit, QWidget* parent = nullptr);
+    ~CircularGauge() override;
+protected:
+    void paintEvent(QPaintEvent* event) override;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pimpl_ {};
+};
+
 }

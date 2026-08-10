@@ -25,6 +25,7 @@
 #include <QPropertyAnimation>
 #include <QList>
 #include "include/DashboardPage.h"
+#include "include/ContainerDetailsPage.h"
 #include "include/AuthManager.h"
 #include <QProcess> 
 #include <QtCharts/QChartView>
@@ -33,7 +34,6 @@
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
-#include <QMessageBox>
 #include <QDir>
 #include <QCoreApplication>
 #include <QTimer>
@@ -52,6 +52,7 @@ struct MainWindow::Impl {
     VolumesPage*    volumes_page_    {};
     PortsPage*      ports_page_      {};
     DevicesPage*    devices_page_    {};
+    ContainerDetailsPage* details_page_ {};
     QWidget* auth_page_       {}; 
     QFrame* top_bar_         {}; 
     QScrollArea*    scroll_area_     {};
@@ -278,9 +279,10 @@ auto MainWindow::setup_sidebar() -> void {
         cli_status_btn->setProperty("navText", "  CLI: Offline");
         
         QTimer::singleShot(2000, this, [this, cli_path]() {
-            QMessageBox::warning(this, "Quiver CLI Not Found", 
+            CustomAlert alert(CustomAlert::Warning, "Quiver CLI Not Found", 
                 "The Quiver CLI binary was not found at:\n" + cli_path + 
-                "\n\nPlease ensure you have compiled it.");
+                "\n\nPlease ensure you have compiled it.", this);
+            alert.exec();
         });
     }
     pimpl_->sidebar_layout_->addWidget(cli_status_btn);
@@ -484,6 +486,18 @@ pimpl_->main_stack_->addWidget(pimpl_->dashboard_page_);
 
     pimpl_->containers_page_ = new ContainersPage;
     pimpl_->main_stack_->addWidget(pimpl_->containers_page_);
+    
+    pimpl_->details_page_ = new ContainerDetailsPage;
+    pimpl_->main_stack_->addWidget(pimpl_->details_page_);
+
+    connect(pimpl_->containers_page_, &ContainersPage::container_info_requested, this, [this](const QString& id) {
+        pimpl_->details_page_->set_container_id(id);
+        pimpl_->main_stack_->setCurrentWidget(pimpl_->details_page_);
+    });
+    
+    connect(pimpl_->details_page_, &ContainerDetailsPage::back_requested, this, [this]() {
+        pimpl_->main_stack_->setCurrentWidget(pimpl_->containers_page_);
+    });
 
 
     pimpl_->images_page_ = new ImagesPage;
