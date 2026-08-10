@@ -173,6 +173,7 @@ auto ContainerDbManager::get_container(const std::string& key) -> std::optional<
         }
         close(client_fd);
         close(socket_fd);
+        unlink(sock_path.c_str());
         auto metadata{extract_metadata(raw_bytes)};
         auto boot_time{Utils::get_boot_time()};
         if (!metadata) {
@@ -274,6 +275,7 @@ auto ContainerDbManager::get_all_container() -> std::vector<ContainerDbObject> {
         }
         close(client_fd);
         close(socket_fd);
+        unlink(sock_path.c_str());
         return containers;
 }
 

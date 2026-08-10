@@ -260,6 +260,7 @@ auto DatabaseJobProcessor::process_get_all_job(const DatabaseJobData& job_data) 
                                         chrono::system_clock::now(), it2->status().ToString()));
         }
         delete it2;
+        close(connection_fd);
 }
 
 auto DatabaseJobProcessor::log_event(const std::string& log_data) -> void {
