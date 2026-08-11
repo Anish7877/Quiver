@@ -51,6 +51,10 @@ int main(int argc, char* argv[]) {
                         CommandLineHandler::stats(args);
                 } else if (command == "generate-systemd") {
                         CommandLineHandler::generate_systemd(args);
+                } else if (command == "top") {
+                        CommandLineHandler::top(args);
+                } else if (command == "update") {
+                        CommandLineHandler::update(args);
                 } else {
                         std::cerr << "quiver: '" << command << "' is not a quiver command.\n"
                                 << "See 'quiver --help'.\n";

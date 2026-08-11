@@ -23,6 +23,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <pwd.h>
 
 static std::vector<std::string> split_string(const std::string& str, char delimiter) {
         std::vector<std::string> tokens;
@@ -830,4 +831,211 @@ WantedBy=multi-user.target
                         );
 
         std::cout << unit_file;
+}
+
+auto CommandLineHandler::top(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+        if (args.empty()) [[unlikely]] {
+                std::cerr << "Error: No arguments provided. Please specify a container ID.\n";
+                Utils::print_usage();
+                return;
+        }
+        if (args.size() != 1) {
+                std::cerr << "Error: More than one container id provided.\n";
+                Utils::print_usage();
+                return;
+        }
+        struct ProcInfo {
+                std::string uid{};
+                std::string pid{};
+                std::string state{};
+                std::string cmd{};
+        };
+        auto target_id{args[0]};
+        auto container{container_db_manager.get_container(target_id)};
+        if (!container || container->status != "running") {
+                std::cerr << std::format("Error: Container '{}' not found or is not running.\n", target_id);
+                return;
+        }
+        auto get_cgroup_path{[](pid_t pid) -> std::optional<std::string> {
+                std::ifstream file(std::format("/proc/{}/cgroup", pid));
+                std::string line{};
+                while (std::getline(file, line)) {
+                        size_t first_colon{line.find(':')};
+                        if (first_colon != std::string::npos) {
+                                size_t second_colon{line.find(':', first_colon + 1)};
+                                if (second_colon != std::string::npos) {
+                                        return line.substr(second_colon + 1);
+                                }
+                        }
+                }
+                return std::nullopt;
+        }};
+        auto target_cgroup_opt{get_cgroup_path(container->config.pid)};
+        if (!target_cgroup_opt) {
+                std::cerr << std::format("Error: Could not determine cgroup boundary for container '{}'.\n", target_id);
+                return;
+        }
+        std::string target_cgroup{target_cgroup_opt.value()};
+        std::vector<ProcInfo> processes{};
+        for (const auto& entry : fs::directory_iterator("/proc")) {
+                if (!entry.is_directory()) continue;
+
+                std::string pid_str{entry.path().filename().string()};
+
+
+                if (!std::all_of(pid_str.begin(), pid_str.end(), ::isdigit)) continue;
+
+                pid_t current_pid{std::stoi(pid_str)};
+                auto current_cgroup{get_cgroup_path(current_pid)};
+                if (current_cgroup && current_cgroup->starts_with(target_cgroup)) {
+                        ProcInfo info{};
+                        info.pid = pid_str;
+
+                        struct stat st{};
+                        if (stat(entry.path().c_str(), &st) == 0) {
+                                passwd* pw{getpwuid(st.st_uid)};
+                                info.uid = (pw != nullptr) ? pw->pw_name : std::to_string(st.st_uid);
+                        } else {
+                                info.uid = "UNKNOWN";
+                        }
+
+                        std::ifstream stat_file(entry.path() / "stat");
+                        if (stat_file) {
+                                std::string dummy_pid{}, comm{}, state{};
+                                stat_file >> dummy_pid >> comm >> state;
+                                info.state = state;
+
+                                if (comm.size() >= 2 && comm.front() == '(' && comm.back() == ')') {
+                                        info.cmd = comm.substr(1, comm.size() - 2);
+                                } else {
+                                        info.cmd = comm;
+                                }
+                        }
+                        std::ifstream cmd_file(entry.path() / "cmdline");
+                        if (cmd_file) {
+                                std::ostringstream ss{};
+                                ss << cmd_file.rdbuf();
+                                std::string full_cmd{ss.str()};
+
+                                if (!full_cmd.empty()) {
+                                        for (char& c : full_cmd) {
+                                                if (c == '\0') c = ' ';
+                                        }
+                                        if (full_cmd.back() == ' ') full_cmd.pop_back();
+                                        info.cmd = full_cmd;
+                                }
+                        }
+                        processes.push_back(std::move(info));
+                }
+        }
+        std::cout << std::format("{:<12} {:<10} {:<6} {}\n", "UID", "PID", "STAT", "CMD");
+        for (const auto& p : processes) {
+                std::cout << std::format("{:<12} {:<10} {:<6} {}\n", p.uid, p.pid, p.state, p.cmd);
+        }
+}
+
+auto CommandLineHandler::update(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+
+        if (args.empty()) [[unlikely]] {
+                std::cerr << "Error: No arguments provided.\n";
+                std::cerr << "Usage: quiver update [options] <container_id>\n";
+                return;
+        }
+
+        std::string target_id{};
+        int cpu_quota{-1};
+        std::uint64_t cpu_period{100000};
+        bool update_cpu{false};
+
+        std::uint64_t cpu_weight{0};
+
+        std::uint64_t memory_max{0};
+        bool update_memory{false};
+
+        std::uint64_t pids_limit{0};
+        bool update_pids{false};
+
+        std::string cpuset_cpus{};
+
+        for (size_t i{0}; i < args.size(); ++i) {
+                if (args[i] == "--cpu-quota" && i + 1 < args.size()) {
+                        cpu_quota = std::stoi(args[++i]);
+                        update_cpu = true;
+                } else if (args[i] == "--cpu-period" && i + 1 < args.size()) {
+                        cpu_period = std::stoull(args[++i]);
+                        update_cpu = true;
+                } else if (args[i] == "--cpu-weight" && i + 1 < args.size()) {
+                        cpu_weight = std::stoull(args[++i]);
+                } else if (args[i] == "--memory-max" && i + 1 < args.size()) {
+                        memory_max = std::stoull(args[++i]);
+                        update_memory = true;
+                } else if (args[i] == "--pids-limit" && i + 1 < args.size()) {
+                        pids_limit = std::stoull(args[++i]);
+                        update_pids = true;
+                } else if (args[i] == "--cpuset-cpus" && i + 1 < args.size()) {
+                        cpuset_cpus = args[++i];
+                } else if (!args[i].starts_with("--")) {
+                        if (target_id.empty()) {
+                                target_id = args[i];
+                        } else {
+                                std::cerr << std::format("Warning: Extraneous argument '{}' ignored.\n", args[i]);
+                        }
+                } else {
+                        std::cerr << std::format("Warning: Unknown or incomplete flag '{}'\n", args[i]);
+                }
+        }
+        if (target_id.empty()) {
+                std::cerr << "Error: Container ID is required.\n";
+                std::cerr << "Usage: quiver update [options] <container_id>\n";
+                return;
+        }
+        auto container{container_db_manager.get_container(target_id)};
+        if (!container) {
+                std::cerr << std::format("Error: Container '{}' not found.\n", target_id);
+                return;
+        }
+        if (container->status != "running") {
+                std::cerr << std::format("Error: Cannot update limits. Container '{}' is not running.\n", target_id);
+                return;
+        }
+        auto cgroups_manager{CGroupsManagerCreator::create_cgourps_manager(
+                container->config.container_id, container->config.cgroups_path)};
+
+        try {
+                if (update_cpu) {
+                        cgroups_manager->set_cpu_limit(cpu_quota, cpu_period);
+                        std::cout << std::format("Updated CPU Quota: {} (Period: {})\n", cpu_quota, cpu_period);
+                }
+                if (cpu_weight > 0) {
+                        cgroups_manager->set_cpu_weight(cpu_weight);
+                        std::cout << std::format("Updated CPU Weight: {}\n", cpu_weight);
+                }
+                if (update_memory) {
+                        cgroups_manager->set_memory_max(memory_max);
+                        std::cout << std::format("Updated Memory Max: {} bytes\n", memory_max);
+                }
+                if (update_pids) {
+                        cgroups_manager->set_pid_limit(pids_limit);
+                        std::cout << std::format("Updated PIDs Limit: {}\n", pids_limit);
+                }
+                if (!cpuset_cpus.empty()) {
+                        cgroups_manager->set_cpuset_cpus(cpuset_cpus);
+                        std::cout << std::format("Updated CPU Set: {}\n", cpuset_cpus);
+                }
+        }
+        catch (const std::exception& e) {
+                std::cerr << std::format("Error applying updates: {}\n", e.what());
+                return;
+        }
+
+        // TODO:
+        //if (update_cpu || cpu_weight > 0 || update_memory || update_pids || !cpuset_cpus.empty()) {
+        //        container_db_manager.update_container(target_id, container.value());
+        //}
+
+        std::cout << std::format("Successfully updated container '{}'.\n", target_id);
 }
