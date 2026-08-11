@@ -42,7 +42,7 @@ auto LogJobProcessor::process_job() -> void {
                                 while (this->m_running.load(std::memory_order_acquire)) {
                                         auto log_data{m_log_command_queue->atomic_pop()};
                                         if (!log_data.has_value()) {
-                                                std::this_thread::yield();
+                                                std::this_thread::sleep_for(chrono::milliseconds(1));
                                                 continue;
                                         }
                                         this->route_job(log_data.value());

@@ -92,6 +92,9 @@ auto ContainerRuntime::exec_commands() -> void {
 }
 
 auto ContainerRuntime::execute_container_init() -> void {
+        if (getppid() == 1) {
+                _exit(EXIT_FAILURE);
+        }
         if (m_container_config.terminal.value) {
                 int slave_fd{m_pty_session_manager->recv_master_fd(m_container_config.control_sock)};
                 if (!m_pty_session_manager->ok() || slave_fd == -1) {
@@ -216,6 +219,11 @@ auto ContainerRuntime::execute_container_init() -> void {
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
+        if (prctl(PR_SET_PDEATHSIG, SIGKILL) == -1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: prctl PR_SET_PDEATHSIG failed.\n",
+                                        chrono::system_clock::now(), m_container_config.container_id));
+                _exit(EXIT_FAILURE);
+        }
         exec_commands();
         log_event(std::format("[{}] [{}] Container Runtime Error: exec failed.\n",
                                 chrono::system_clock::now(), m_container_config.container_id));
@@ -239,12 +247,13 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                 prop_flags = MS_PRIVATE;
         }
 
-        if (!Mount::_set_propagation("/", prop_flags)) [[unlikely]] {
+        prop_flags |= MS_REC;
+
+        if (mount(nullptr, "/", nullptr, prop_flags, nullptr) == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: root mount failed.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
-
         if(!m_container_config.vfs) {
                 fs::path lower_dir{fs::absolute(m_container_config.rootfs.path)};
                 fs::path upper_dir{Utils::get_base_dir() / "filesystems"
@@ -639,6 +648,18 @@ auto ContainerRuntime::setup_security_paths() -> void {
 }
 
 auto ContainerRuntime::supervise_container(pid_t pid) -> void {
+        static pid_t s_target_child = pid;
+
+        struct sigaction sa{};
+        sa.sa_handler = [](int sig) {
+                if (s_target_child > 0) {
+                        kill(s_target_child, sig);
+                }
+        };
+        sigaction(SIGTERM, &sa, nullptr);
+        sigaction(SIGINT, &sa, nullptr);
+        sigaction(SIGHUP, &sa, nullptr);
+
         int status{};
         while (waitpid(pid, &status, 0) == -1) {
                 if (errno == EINTR) continue;

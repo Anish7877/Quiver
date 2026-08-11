@@ -514,21 +514,58 @@ auto CommandLineHandler::start(std::span<std::string> args) -> void {
         }
 }
 
+// In command_line_handler.cpp -> stop()
+
 auto CommandLineHandler::stop(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
         auto& container_monitor{ContainerMonitor::get_instance()};
         container_db_manager.init();
+
         if (args.empty()) [[unlikely]] {
                 std::cerr << "Error: No arguments provided\n";
                 Utils::print_usage();
                 return;
         }
+
+        auto get_cgroup_path{[](pid_t pid) -> std::optional<fs::path> {
+                std::ifstream file(std::format("/proc/{}/cgroup", pid));
+                std::string line{};
+
+                while (std::getline(file, line)) {
+                        size_t first_colon = line.find(':');
+                        if (first_colon != std::string::npos) {
+                                size_t second_colon = line.find(':', first_colon + 1);
+                                if (second_colon != std::string::npos) {
+                                        std::string cg_path{line.substr(second_colon + 1)};
+                                        if (!cg_path.empty() && cg_path.front() == '/') {
+                                                cg_path.erase(0, 1);
+                                        }
+                                        return fs::path("/sys/fs/cgroup") / cg_path;
+                                }
+                        }
+                }
+                return std::nullopt;
+        }};
+
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(arg)};
                 if (container && container->status == "running") {
+                        auto cgroup_base_opt{get_cgroup_path(container->config.pid)};
+                        if (cgroup_base_opt) {
+                                fs::path cg_kill_path = cgroup_base_opt.value() / "cgroup.kill";
+                                if (fs::exists(cg_kill_path)) {
+                                        std::ofstream kill_file(cg_kill_path);
+                                        if (kill_file.is_open()) {
+                                                kill_file << "1";
+                                        }
+                                }
+                        } else {
+                                std::cerr << std::format("WARN: Could not resolve cgroup path for container '{}' via /proc.\n", arg);
+                        }
+
                         if (kill(container->config.pid, SIGTERM) == 0) {
                                 bool stopped{false};
-                                for (int i{0}; i<100; ++i) {
+                                for (int i{0}; i < 100; ++i) {
                                         if (!Utils::is_process_alive(container->config.pid, container->config.container_id)) {
                                                 stopped = true;
                                                 break;
