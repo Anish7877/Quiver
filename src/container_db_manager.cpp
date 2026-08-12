@@ -288,6 +288,14 @@ auto ContainerDbManager::inspect_container(const std::string& key) -> void {
                 }
                 PrintUtils::print_container_config(metadata->config);
                 PrintUtils::print_field("Boot Time", metadata->boot_time);
+                PrintUtils::print_field("CPU Quota", metadata->cpu_quota);
+                PrintUtils::print_field("CPU Period", metadata->cpu_period);
+                PrintUtils::print_field("CPU Weight", metadata->cpu_weight);
+                PrintUtils::print_field("Memory Limit", metadata->memory_max);
+                PrintUtils::print_field("Memory Swap", metadata->memory_swap);
+                PrintUtils::print_field("PIDs Limit", metadata->pids_limit);
+                PrintUtils::print_field("Memory Limit", metadata->memory_max);
+
         }
         else {
                 std::cerr << std::format("Error: Container '{}' not found\n", key);
