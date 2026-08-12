@@ -43,8 +43,9 @@ namespace chrono = std::chrono;
 ContainerMonitor::ContainerMonitor() = default;
 
 auto ContainerMonitor::init(const ContainerConfig& config, const std::string& image,
-                const std::string& container_name, bool is_new) -> void {
+                const std::string& container_name, const Limits& limits, bool is_new) -> void {
         m_container_config = config;
+        m_limits = limits;
         m_value_heap = &ValueHeap::get_instance();
         m_log_cmd_queue = &LoggerCommandQueue::get_instance();
         m_pty_session_manager = &PtySessionManager::get_instance();
@@ -67,6 +68,16 @@ auto ContainerMonitor::init(const ContainerConfig& config, const std::string& im
                 db_object.status = "created";
                 db_object.boot_time = Utils::get_boot_time();
                 db_object.created_at = std::format("{}", chrono::system_clock::now());
+                db_object.cpu_quota = limits.cpu_quota;
+                db_object.cpu_period = limits.cpu_period;
+                db_object.cpu_weight = limits.cpu_weight;
+                db_object.memory_max = limits.memory_max;
+                db_object.memory_swap = limits.memory_max;
+                db_object.pids_limit = limits.pids_limit;
+                db_object.cpuset_cpus = limits.cpuset_cpus;
+                db_object.cpuset_mems = limits.cpuset_mems;
+                db_object.io_max_updates = limits.io_max_updates;
+                db_object.io_weight_updates = limits.io_weight_updates;
                 m_container_db_manager->add_container(db_object);
         }
 }
@@ -207,13 +218,10 @@ auto ContainerMonitor::invoke_container() -> void {
                 throw std::runtime_error(std::format("[{}] [{}] Container Monitor Error: fork failed -> {}.\n",
                                         chrono::system_clock::now(), m_container_config.container_id, std::strerror(errno)));
         }
-
         if (m_monitor_pid > 0) {
-
                 if (m_container_config.terminal.value || m_container_config.detach.value) {
                         return;
                 }
-
                 int status{};
                 while (waitpid(m_monitor_pid, &status, 0) == -1) {
                         if (errno == EINTR)
@@ -332,17 +340,6 @@ auto ContainerMonitor::run_container_child() -> void {
 auto ContainerMonitor::run_monitor_parent() -> void {
         close(m_monitor_to_container_fd[0]);
         close(m_container_to_monitor_fd[1]);
-        try {
-                m_cgroups_manager->attach_process(m_container_pid);
-        }
-        catch (const std::exception& e) {
-                log_event(std::format("[{}] {}", chrono::system_clock::now(), e.what()), TargetLog::CONTAINERMON);
-        }
-        ScopeGuard cgroups_guard{[this]() -> void {
-                m_cgroups_manager->stop();
-                kill(m_container_pid, SIGKILL);
-        }};
-
         char buf{};
         if (read(m_container_to_monitor_fd[0], &buf, 1) != 1) [[unlikely]] {
                 std::cerr << "\n[Monitor Error] Child failed during unshare() or setup!\n";
@@ -358,6 +355,45 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                 std::cerr << "\n[Monitor Error] User Namespace mapping failed: " << e.what() << "\n";
                 _exit(EXIT_FAILURE);
         }
+        try {
+                m_cgroups_manager->attach_process(m_container_pid);
+                if (m_limits.cpu_quota > 0) {
+                        m_cgroups_manager->set_cpu_limit(m_limits.cpu_quota, m_limits.cpu_period);
+                }
+                if (m_limits.cpu_weight > 0) {
+                        m_cgroups_manager->set_cpu_weight(m_limits.cpu_weight);
+                }
+                if (m_limits.memory_max > 0) {
+                        m_cgroups_manager->set_memory_max(m_limits.memory_max);
+                }
+                if (m_limits.memory_swap > 0) {
+                        m_cgroups_manager->set_memory_swap(m_limits.memory_swap);
+                }
+                if (m_limits.pids_limit > 0) {
+                        m_cgroups_manager->set_pid_limit(m_limits.pids_limit);
+                }
+                if (!m_limits.cpuset_cpus.empty()) {
+                        m_cgroups_manager->set_cpuset_cpus(m_limits.cpuset_cpus);
+                }
+                if (!m_limits.cpuset_mems.empty()) {
+                        m_cgroups_manager->set_cpuset_mems(m_limits.cpuset_mems);
+                }
+                for (const auto& im : m_limits.io_max_updates) {
+                        m_cgroups_manager->set_io_max(im.major, im.minor, im.limits);
+                }
+                for (const auto& iw : m_limits.io_weight_updates) {
+                        m_cgroups_manager->set_io_weight(iw.major, iw.minor, iw.weight);
+                }
+        }
+        catch (const std::exception& e) {
+                log_event(std::format("[{}] {}", chrono::system_clock::now(), e.what()), TargetLog::CONTAINERMON);
+                _exit(EXIT_FAILURE);
+        }
+        ScopeGuard cgroups_guard{[this]() -> void {
+                m_cgroups_manager->stop();
+                kill(m_container_pid, SIGKILL);
+        }};
+
         bool network_required{true};
         for (const auto& [path, namespace_str] : m_container_config.namespaces) {
                 if (namespace_str == "network" && !path.empty()) {
@@ -696,6 +732,8 @@ auto ContainerMonitor::attach_to_container(const std::string& container_id) -> v
 
         struct winsize ws{};
         if (m_container_config.console_size.width > 0 && m_container_config.console_size.height > 0) {
+                ws.ws_col = static_cast<unsigned short>(m_container_config.console_size.width);
+                ws.ws_row = static_cast<unsigned short>(m_container_config.console_size.height);
                 ioctl(master_fd, TIOCSWINSZ, &ws);
         }
         else {
@@ -745,7 +783,6 @@ auto ContainerMonitor::attach_to_container(const std::string& container_id) -> v
                 if (fds[2].revents & POLLIN) {
                         char drain[64];
                         while (read(sigwinch_pipe[0], drain, sizeof(drain)) > 0) {}
-                        struct winsize new_ws{};
                         if (m_container_config.console_size.width > 0 && m_container_config.console_size.height > 0) {
                                 ioctl(master_fd, TIOCSWINSZ, &ws);
                         }

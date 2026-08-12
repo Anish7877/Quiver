@@ -1,4 +1,5 @@
 #include "serialization.hpp"
+#include "container_metadata_generated.h"
 #include "layer_cache_generated.h"
 #include "types.hpp"
 #include <flatbuffers/buffer.h>
@@ -112,14 +113,14 @@ auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const Con
         std::vector<flatbuffers::Offset<FB::OCIRuntime::TimeOffset>> timeoff_vec;
         timeoff_vec.reserve(obj.config.timeoffsets.size());
         for (const auto& to : obj.config.timeoffsets) {
-                timeoff_vec.push_back(FB::OCIRuntime::CreateTimeOffset(
+                timeoff_vec.emplace_back(FB::OCIRuntime::CreateTimeOffset(
                                         builder, builder.CreateString(to.type), to.secs, to.nanosecs));
         }
         auto timeoffsets_off { builder.CreateVector(timeoff_vec) };
         std::vector<flatbuffers::Offset<FB::OCIRuntime::Namespace>> ns_vec;
         ns_vec.reserve(obj.config.namespaces.size());
         for (const auto& ns : obj.config.namespaces) {
-                ns_vec.push_back(FB::OCIRuntime::CreateNamespace(
+                ns_vec.emplace_back(FB::OCIRuntime::CreateNamespace(
                                         builder,
                                         builder.CreateString(ns.path.string()),
                                         builder.CreateString(ns.type)));
@@ -162,11 +163,27 @@ auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const Con
         fb_builder.add_timeoffsets(timeoffsets_off);
         auto config_off = fb_builder.Finish();
 
-        auto name_off = builder.CreateString(obj.name);
-        auto image_off = builder.CreateString(obj.image);
-        auto status_off = builder.CreateString(obj.status);
-        auto created_at_off { builder.CreateString(obj.created_at) };
-        auto final_filesystem_off { builder.CreateString(obj.config.final_filesystem) };
+        std::vector<flatbuffers::Offset<FB::IOMaxUpdate>> io_max_vec{};
+        io_max_vec.reserve(obj.io_max_updates.size());
+        for (const auto& im : obj.io_max_updates) {
+                io_max_vec.push_back(FB::CreateIOMaxUpdate(builder, im.major, im.minor,
+                                        im.limits.rbps, im.limits.wbps, im.limits.riops, im.limits.wiops));
+        }
+        auto io_max_off{builder.CreateVector(io_max_vec)};
+
+        std::vector<flatbuffers::Offset<FB::IOWeightUpdate>> io_weight_vec{};
+        io_weight_vec.reserve(obj.io_weight_updates.size());
+        for (const auto& iw : obj.io_weight_updates) {
+                io_weight_vec.push_back(FB::CreateIOWeightUpdate(builder, iw.major, iw.minor, iw.weight));
+        }
+        auto io_weight_off{builder.CreateVector(io_weight_vec)};
+        auto name_off{builder.CreateString(obj.name)};
+        auto image_off{builder.CreateString(obj.image)};
+        auto status_off{builder.CreateString(obj.status)};
+        auto created_at_off {builder.CreateString(obj.created_at)};
+        auto final_filesystem_off{builder.CreateString(obj.config.final_filesystem)};
+        auto cpusets_off{builder.CreateString(obj.cpuset_cpus)};
+        auto cpusmems_off{builder.CreateString(obj.cpuset_mems)};
 
         FB::ContainerMetadataBuilder meta_builder { builder };
         meta_builder.add_config(config_off);
@@ -176,6 +193,15 @@ auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const Con
         meta_builder.add_created_at(created_at_off);
         meta_builder.add_final_filesystem(final_filesystem_off);
         meta_builder.add_boot_time(obj.boot_time);
+        meta_builder.add_cpu_quota(obj.cpu_quota);
+        meta_builder.add_cpu_period(obj.cpu_period);
+        meta_builder.add_cpu_weight(obj.cpu_weight);
+        meta_builder.add_memory_max(obj.memory_max);
+        meta_builder.add_memory_swap(obj.memory_swap);
+        meta_builder.add_cpuset_cpus(cpusets_off);
+        meta_builder.add_cpuset_mems(cpusmems_off);
+        meta_builder.add_io_max_updates(io_max_off);
+        meta_builder.add_io_weight_updates(io_weight_off);
         return meta_builder.Finish();
 }
 auto Serialization::deserialize(const FB::ContainerMetadata* fb) -> ContainerDbObject {
@@ -186,6 +212,36 @@ auto Serialization::deserialize(const FB::ContainerMetadata* fb) -> ContainerDbO
         if (fb->status()) obj.status = fb->status()->str();
         if (fb->boot_time()) obj.boot_time = fb->boot_time();
         if (fb->created_at()) obj.created_at = fb->created_at()->str();
+        if (fb->cpu_quota()) obj.cpu_quota = fb->cpu_quota();
+        if (fb->cpu_period()) obj.cpu_period = fb->cpu_period();
+        if (fb->cpu_weight()) obj.cpu_weight = fb->cpu_weight();
+        if (fb->memory_max()) obj.memory_max = fb->memory_max();
+        if (fb->memory_swap()) obj.memory_swap = fb->memory_swap();
+        if (fb->cpuset_cpus()) obj.cpuset_cpus = fb->cpuset_cpus()->str();
+        if (fb->cpuset_mems()) obj.cpuset_mems = fb->cpuset_mems()->str();
+
+        if (fb->io_max_updates()) {
+                for (const auto* io_max_update : *fb->io_max_updates()) {
+                        IOMaxUpdate io_update{};
+                        io_update.minor = io_max_update->minor();
+                        io_update.major = io_max_update->major();
+                        io_update.limits.rbps = io_max_update->rbps();
+                        io_update.limits.riops = io_max_update->riops();
+                        io_update.limits.wbps = io_max_update->wbps();
+                        io_update.limits.wiops = io_max_update->wiops();
+                        obj.io_max_updates.emplace_back(io_update);
+                }
+        }
+
+        if (fb->io_weight_updates()) {
+                for (const auto* io_weight_update : *fb->io_weight_updates()) {
+                        IOWeightUpdate io_update{};
+                        io_update.minor = io_weight_update->minor();
+                        io_update.major = io_weight_update->major();
+                        io_update.weight = io_weight_update->weight();
+                        obj.io_weight_updates.emplace_back(io_update);
+                }
+        }
 
         auto fb_conf = fb->config();
         if (!fb_conf) return obj;

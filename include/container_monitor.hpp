@@ -20,12 +20,24 @@ class ContainerMonitor : public Singleton<ContainerMonitor> {
                 ContainerMonitor();
                 ~ContainerMonitor();
         public:
+                struct Limits {
+                        int cpu_quota{};
+                        std::uint64_t cpu_period{100000};
+                        std::uint64_t cpu_weight{};
+                        std::uint64_t memory_max{};
+                        std::uint64_t memory_swap{};
+                        std::uint64_t pids_limit{};
+                        std::string cpuset_cpus{};
+                        std::string cpuset_mems{};
+                        std::vector<IOMaxUpdate> io_max_updates{};
+                        std::vector<IOWeightUpdate> io_weight_updates{};
+                };
                 ContainerMonitor(const ContainerMonitor&) = delete;
                 ContainerMonitor(ContainerMonitor&&) = delete;
                 auto operator=(const ContainerMonitor&) -> ContainerMonitor& = delete;
                 auto operator=(ContainerMonitor&&) -> ContainerMonitor& = delete;
 
-                auto init(const ContainerConfig&, const std::string&, const std::string&, bool) -> void;
+                auto init(const ContainerConfig&, const std::string&, const std::string&, const Limits&, bool) -> void;
                 auto setup_usernamespace() -> void;
                 auto invoke_container() -> void;
                 auto start_logging() -> void;
@@ -55,6 +67,7 @@ class ContainerMonitor : public Singleton<ContainerMonitor> {
                 ValueHeap* m_value_heap{nullptr};
                 PtySessionManager* m_pty_session_manager{nullptr};
                 ContainerDbManager* m_container_db_manager{nullptr};
+                Limits m_limits{};
                 pid_t m_monitor_pid{-1};
                 pid_t m_container_pid{-1};
                 int m_std_out_fd[2]{-1, -1};

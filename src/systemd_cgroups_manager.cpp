@@ -31,6 +31,7 @@ auto SystemdCGroupsManager::attach_process(pid_t pid) -> void {
 }
 
 auto SystemdCGroupsManager::set_cpu_limit(int quota, std::uint64_t period) -> void {
+        update_dbus_property("CPUAccounting", sdbus::Variant(true));
         if (quota <= 0) {
                 update_dbus_property("CPUQuotaPerSecUSec", sdbus::Variant(static_cast<uint64_t>(-1)));
         }
@@ -44,6 +45,7 @@ auto SystemdCGroupsManager::set_cpu_limit(int quota, std::uint64_t period) -> vo
 }
 
 auto SystemdCGroupsManager::set_cpu_weight(std::uint64_t weight) -> void {
+        update_dbus_property("CPUAccounting", sdbus::Variant(true));
         if (weight < 1) weight = 1;
         if (weight > 10000) weight = 10000;
 
@@ -51,6 +53,7 @@ auto SystemdCGroupsManager::set_cpu_weight(std::uint64_t weight) -> void {
 }
 
 auto SystemdCGroupsManager::set_memory_max(std::uint64_t limit_bytes) -> void {
+        update_dbus_property("MemoryAccounting", sdbus::Variant(true));
         if (limit_bytes == 0) {
                 update_dbus_property("MemoryMax", sdbus::Variant(static_cast<uint64_t>(-1)));
         }
@@ -60,15 +63,12 @@ auto SystemdCGroupsManager::set_memory_max(std::uint64_t limit_bytes) -> void {
 }
 
 auto SystemdCGroupsManager::set_memory_swap(std::uint64_t limit_bytes) -> void {
-        if (limit_bytes == 0) {
-                update_dbus_property("MemorySwapMax", sdbus::Variant(static_cast<uint64_t>(-1)));
-        }
-        else {
-                update_dbus_property("MemorySwapMax", sdbus::Variant(limit_bytes));
-        }
+        update_dbus_property("MemoryAccounting", sdbus::Variant(true));
+        update_dbus_property("MemorySwapMax", sdbus::Variant(limit_bytes));
 }
 
 auto SystemdCGroupsManager::set_io_max(std::uint64_t major, std::uint64_t minor, const IOLimits& io_limits) -> void {
+        update_dbus_property("IOAccounting", sdbus::Variant(true));
         std::string dev_path{std::format("/dev/block/{}:{}", major, minor)};
 
         auto make_io_variant{[&](std::uint64_t limit) {
@@ -95,6 +95,7 @@ auto SystemdCGroupsManager::set_io_max(std::uint64_t major, std::uint64_t minor,
 }
 
 auto SystemdCGroupsManager::set_io_weight(std::uint64_t major, std::uint64_t minor, std::uint64_t weight) -> void {
+        update_dbus_property("IOAccounting", sdbus::Variant(true));
         if (weight < 1) weight = 1;
         if (weight > 10000) weight = 10000;
 
@@ -107,6 +108,7 @@ auto SystemdCGroupsManager::set_io_weight(std::uint64_t major, std::uint64_t min
 }
 
 auto SystemdCGroupsManager::set_pid_limit(uint64_t max_pids) -> void {
+        update_dbus_property("TasksAccounting", sdbus::Variant(true));
         if (max_pids == 0) {
                 update_dbus_property("TasksMax", sdbus::Variant(static_cast<uint64_t>(-1)));
         }

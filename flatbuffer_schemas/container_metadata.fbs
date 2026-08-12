@@ -193,6 +193,21 @@ table ContainerConfig {
 	timeoffsets : [FB.OCIRuntime.TimeOffset];
 }
 
+table IOMaxUpdate {
+    major: uint64;
+    minor: uint64;
+    rbps: uint64;
+    wbps: uint64;
+    riops: uint64;
+    wiops: uint64;
+}
+
+table IOWeightUpdate {
+    major: uint64;
+    minor: uint64;
+    weight: uint64;
+}
+
 table ContainerMetadata {
         config           : ContainerConfig;
         name             : string;
@@ -201,6 +216,16 @@ table ContainerMetadata {
         created_at       : string;
         final_filesystem : string;
         boot_time        : int32;
+        cpu_quota        : int;
+        cpu_period       : uint64;
+        cpu_weight       : uint64;
+        memory_max       : uint64;
+        memory_swap      : uint64;
+        pids_limit       : uint64;
+        cpuset_cpus      : string;
+        cpuset_mems      : string;
+        io_max_updates   : [IOMaxUpdate];
+        io_weight_updates: [IOWeightUpdate];
 }
 
 root_type ContainerMetadata;

@@ -1,9 +1,10 @@
-#pragma once
+   #pragma once
 #include "container_config.hpp"
 #include <cstdint>
 #include <atomic>
 #include <string>
 #include <new>
+#include "cgroups_manager_interface.hpp"
 
 enum class JobType : std::uint8_t {
         GET = 0,
@@ -74,6 +75,18 @@ struct ValueHeapHeader {
         alignas(std::hardware_destructive_interference_size) std::atomic<std::uint64_t> data_tail{0};
 };
 
+struct IOMaxUpdate {
+        std::uint64_t major{};
+        std::uint64_t minor{};
+        CGroupsManagerInterface::IOLimits limits{};
+};
+
+struct IOWeightUpdate {
+        std::uint64_t major{};
+        std::uint64_t minor{};
+        std::uint64_t weight{};
+};
+
 struct ContainerDbObject {
         ContainerConfig config{};
         std::string name{};
@@ -82,6 +95,16 @@ struct ContainerDbObject {
         std::string created_at{};
         pid_t pid{};
         long boot_time{};
+        int cpu_quota{-1};
+        std::uint64_t cpu_period{100000};
+        std::uint64_t cpu_weight{};
+        std::uint64_t memory_max{};
+        std::uint64_t memory_swap{};
+        std::uint64_t pids_limit{};
+        std::string cpuset_cpus{};
+        std::string cpuset_mems{};
+        std::vector<IOMaxUpdate> io_max_updates{};
+        std::vector<IOWeightUpdate> io_weight_updates{};
 };
 
 struct DbResult {

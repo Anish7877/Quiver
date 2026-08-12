@@ -1,11 +1,13 @@
 #include "command_line_handler.hpp"
 #include "cgroups_manager_creator.hpp"
+#include "cgroups_manager_interface.hpp"
 #include "spec_generator.hpp"
 #include "utils.hpp"
 #include "container_db_manager.hpp"
 #include "image_manager.hpp"
 #include "container_monitor.hpp"
 #include "utils.hpp"
+#include "types.hpp"
 #include <chrono>
 #include <csignal>
 #include <exception>
@@ -70,7 +72,12 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                     arg == "--pid" || arg == "--net" || arg == "--ipc" || arg == "--uts" ||
                     arg == "--mount-ns" || arg == "--time" || arg == "--cgroup" || arg == "--time-offset" ||
                     arg == "--mask" || arg == "--read-only-path" || arg == "--console-width" ||
-                    arg == "--console-height" || arg == "--cgroup-path") {
+                    arg == "--console-height" || arg == "--cgroup-path" ||
+                    // --- NEW RESOURCE LIMIT FLAGS ---
+                    arg == "--cpu-quota" || arg == "--cpu-period" || arg == "--cpu-weight" ||
+                    arg == "--memory-max" || arg == "--memory-swap" || arg == "--pids-limit" ||
+                    arg == "--cpuset-cpus" || arg == "--set-cpuset-mems" ||
+                    arg == "--set-io-max" || arg == "--set-io-weight") {
                         ++i;
                 }
         }
@@ -96,11 +103,12 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                         throw std::runtime_error(std::format("Failed to pull image with error '{}'\n", error));
                 }
         }
+
         auto container_config{SpecGenerator::generate_default_rootless_spec(container_id, Utils::get_image_path(image_name))};
+        ContainerMonitor::Limits limits{};
 
-        for (size_t i = 0; i < positional_start; ++i) {
+        for (size_t i{0}; i < positional_start; ++i) {
                 const auto& arg = args[i];
-
 
                 if (arg == "--name") {
                         if (++i < positional_start) {
@@ -240,9 +248,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                                 ns.path = args[i];
                                 container_config.namespaces.push_back(ns);
                         }
-                }
-
-                else if (arg == "--time-offset") {
+                } else if (arg == "--time-offset") {
                         if (++i < positional_start) {
                                 auto tokens = split_string(args[i], '=');
                                 if (tokens.size() == 2) {
@@ -252,25 +258,62 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                                         container_config.timeoffsets.push_back(offset);
                                 }
                         }
-                }
-
-                else if (arg == "--mask") {
+                } else if (arg == "--mask") {
                         if (++i < positional_start) container_config.masked_paths.paths.push_back(args[i]);
                 } else if (arg == "--read-only-path") {
                         if (++i < positional_start) container_config.read_only_paths.paths.push_back(args[i]);
-                }
-
-                else if (arg == "--console-width") {
+                } else if (arg == "--console-width") {
                         if (++i < positional_start) container_config.console_size.width = std::stoi(args[i]);
                 } else if (arg == "--console-height") {
                         if (++i < positional_start) container_config.console_size.height = std::stoi(args[i]);
-                }
-
-                else if (arg == "--cgroup-path") {
+                } else if (arg == "--cgroup-path") {
                         if (++i < positional_start) container_config.cgroups_path = args[i];
-                }
-
-                else {
+                } else if (arg == "--cpu-quota") {
+                        if (++i < positional_start) limits.cpu_quota = std::stoi(args[i]);
+                } else if (arg == "--cpu-period") {
+                        if (++i < positional_start) limits.cpu_period = std::stoull(args[i]);
+                } else if (arg == "--cpu-weight") {
+                        if (++i < positional_start) limits.cpu_weight = std::stoull(args[i]);
+                } else if (arg == "--memory-max") {
+                        if (++i < positional_start) limits.memory_max = std::stoull(args[i]);
+                } else if (arg == "--memory-swap") {
+                        if (++i < positional_start) limits.memory_swap = std::stoull(args[i]);
+                } else if (arg == "--pids-limit") {
+                        if (++i < positional_start) limits.pids_limit = std::stoull(args[i]);
+                } else if (arg == "--cpuset-cpus") {
+                        if (++i < positional_start) limits.cpuset_cpus = args[i];
+                } else if (arg == "--set-cpuset-mems") {
+                        if (++i < positional_start) limits.cpuset_mems = args[i];
+                } else if (arg == "--set-io-weight") {
+                        if (++i < positional_start) {
+                                auto tokens = split_string(args[i], ':');
+                                if (tokens.size() == 3) {
+                                        IOWeightUpdate iw{};
+                                        iw.major = std::stoull(tokens[0]);
+                                        iw.minor = std::stoull(tokens[1]);
+                                        iw.weight = std::stoull(tokens[2]);
+                                        limits.io_weight_updates.push_back(iw);
+                                } else {
+                                        std::cerr << "Warning: Invalid format for --set-io-weight. Expected MAJOR:MINOR:WEIGHT\n";
+                                }
+                        }
+                } else if (arg == "--set-io-max") {
+                        if (++i < positional_start) {
+                                auto tokens = split_string(args[i], ':');
+                                if (tokens.size() == 6) {
+                                        IOMaxUpdate im{};
+                                        im.major = std::stoull(tokens[0]);
+                                        im.minor = std::stoull(tokens[1]);
+                                        im.limits.rbps = std::stoull(tokens[2]);
+                                        im.limits.wbps = std::stoull(tokens[3]);
+                                        im.limits.riops = std::stoull(tokens[4]);
+                                        im.limits.wiops = std::stoull(tokens[5]);
+                                        limits.io_max_updates.push_back(im);
+                                } else {
+                                        std::cerr << "Warning: Invalid format for --set-io-max. Expected MAJOR:MINOR:RBPS:WBPS:RIOPS:WIOPS\n";
+                                }
+                        }
+                } else {
                         throw std::runtime_error("Unknown option: " + arg);
                 }
         }
@@ -322,8 +365,10 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
         bool is_terminal{container_config.terminal.value};
         bool is_detached{container_config.detach.value};
         container_config.rootfs.path = std::move(outpath);
-        container_monitor.init(container_config, image_name, container_name, true);
+
+        container_monitor.init(container_config, image_name, container_name, limits, true);
         container_monitor.invoke_container();
+
         if (is_terminal && !is_detached) {
                 container_monitor.attach_to_container(container_id);
         }
@@ -440,7 +485,8 @@ auto CommandLineHandler::attach(std::span<std::string> args) -> void {
         auto container{container_db_manager.get_container(args.front())};
         if (container) {
                 auto& container_monitor{ContainerMonitor::get_instance()};
-                container_monitor.init(container->config, container->image, container->name, false);
+                ContainerMonitor::Limits limits{};
+                container_monitor.init(container->config, container->image, container->name, limits, false);
                 container_monitor.attach_to_container(args.front());
         }
         else {
@@ -505,7 +551,18 @@ auto CommandLineHandler::start(std::span<std::string> args) -> void {
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(arg)};
                 if (container && container->status != "running") {
-                        container_monitor.init(container->config, container->image, container->name, false);
+                        ContainerMonitor::Limits limits{};
+                        limits.cpu_quota = container->cpu_quota;
+                        limits.cpu_period = container->cpu_period;
+                        limits.cpu_weight = container->cpu_weight;
+                        limits.memory_max = container->memory_max;
+                        limits.memory_swap = container->memory_max;
+                        limits.pids_limit = container->pids_limit;
+                        limits.cpuset_cpus = container->cpuset_cpus;
+                        limits.cpuset_mems = container->cpuset_mems;
+                        limits.io_max_updates = container->io_max_updates;
+                        limits.io_weight_updates = container->io_weight_updates;
+                        container_monitor.init(container->config, container->image, container->name, limits, false);
                         container_monitor.invoke_container();
                 }
                 else {
@@ -513,8 +570,6 @@ auto CommandLineHandler::start(std::span<std::string> args) -> void {
                 }
         }
 }
-
-// In command_line_handler.cpp -> stop()
 
 auto CommandLineHandler::stop(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
@@ -987,16 +1042,17 @@ auto CommandLineHandler::update(std::span<std::string> args) -> void {
         int cpu_quota{-1};
         std::uint64_t cpu_period{100000};
         bool update_cpu{false};
-
         std::uint64_t cpu_weight{0};
-
         std::uint64_t memory_max{0};
         bool update_memory{false};
-
+        std::uint64_t memory_swap{0};
+        bool update_memory_swap{false};
         std::uint64_t pids_limit{0};
         bool update_pids{false};
-
         std::string cpuset_cpus{};
+        std::string cpuset_mems{};
+        std::vector<IOMaxUpdate> io_max_updates{};
+        std::vector<IOWeightUpdate> io_weight_updates{};
 
         for (size_t i{0}; i < args.size(); ++i) {
                 if (args[i] == "--cpu-quota" && i + 1 < args.size()) {
@@ -1010,11 +1066,43 @@ auto CommandLineHandler::update(std::span<std::string> args) -> void {
                 } else if (args[i] == "--memory-max" && i + 1 < args.size()) {
                         memory_max = std::stoull(args[++i]);
                         update_memory = true;
+                } else if (args[i] == "--memory-swap" && i + 1 < args.size()) {
+                        memory_swap = std::stoull(args[++i]);
+                        update_memory_swap = true;
                 } else if (args[i] == "--pids-limit" && i + 1 < args.size()) {
                         pids_limit = std::stoull(args[++i]);
                         update_pids = true;
                 } else if (args[i] == "--cpuset-cpus" && i + 1 < args.size()) {
                         cpuset_cpus = args[++i];
+                } else if (args[i] == "--set-cpuset-mems" && i + 1 < args.size()) {
+                        cpuset_mems = args[++i];
+                } else if (args[i] == "--set-io-weight" && i + 1 < args.size()) {
+                        // Expected format: MAJOR:MINOR:WEIGHT
+                        auto tokens{split_string(args[++i], ':')};
+                        if (tokens.size() == 3) {
+                                IOWeightUpdate iw{};
+                                iw.major = std::stoull(tokens[0]);
+                                iw.minor = std::stoull(tokens[1]);
+                                iw.weight = std::stoull(tokens[2]);
+                                io_weight_updates.push_back(iw);
+                        } else {
+                                std::cerr << "Warning: Invalid format for --set-io-weight. Expected MAJOR:MINOR:WEIGHT\n";
+                        }
+                } else if (args[i] == "--set-io-max" && i + 1 < args.size()) {
+                        // Expected format: MAJOR:MINOR:RBPS:WBPS:RIOPS:WIOPS
+                        auto tokens{split_string(args[++i], ':')};
+                        if (tokens.size() == 6) {
+                                IOMaxUpdate im{};
+                                im.major = std::stoull(tokens[0]);
+                                im.minor = std::stoull(tokens[1]);
+                                im.limits.rbps = std::stoull(tokens[2]);
+                                im.limits.wbps = std::stoull(tokens[3]);
+                                im.limits.riops = std::stoull(tokens[4]);
+                                im.limits.wiops = std::stoull(tokens[5]);
+                                io_max_updates.push_back(im);
+                        } else {
+                                std::cerr << "Warning: Invalid format for --set-io-max. Expected MAJOR:MINOR:RBPS:WBPS:RIOPS:WIOPS\n";
+                        }
                 } else if (!args[i].starts_with("--")) {
                         if (target_id.empty()) {
                                 target_id = args[i];
@@ -1025,54 +1113,81 @@ auto CommandLineHandler::update(std::span<std::string> args) -> void {
                         std::cerr << std::format("Warning: Unknown or incomplete flag '{}'\n", args[i]);
                 }
         }
+
         if (target_id.empty()) {
                 std::cerr << "Error: Container ID is required.\n";
                 std::cerr << "Usage: quiver update [options] <container_id>\n";
                 return;
         }
+
         auto container{container_db_manager.get_container(target_id)};
+
         if (!container) {
                 std::cerr << std::format("Error: Container '{}' not found.\n", target_id);
                 return;
         }
+
         if (container->status != "running") {
                 std::cerr << std::format("Error: Cannot update limits. Container '{}' is not running.\n", target_id);
                 return;
         }
+
         auto cgroups_manager{CGroupsManagerCreator::create_cgourps_manager(
                 container->config.container_id, container->config.cgroups_path)};
 
         try {
                 if (update_cpu) {
                         cgroups_manager->set_cpu_limit(cpu_quota, cpu_period);
+                        container->cpu_quota = cpu_quota;
                         std::cout << std::format("Updated CPU Quota: {} (Period: {})\n", cpu_quota, cpu_period);
                 }
                 if (cpu_weight > 0) {
                         cgroups_manager->set_cpu_weight(cpu_weight);
+                        container->cpu_weight = cpu_weight;
                         std::cout << std::format("Updated CPU Weight: {}\n", cpu_weight);
                 }
                 if (update_memory) {
                         cgroups_manager->set_memory_max(memory_max);
+                        container->memory_max = memory_max;
                         std::cout << std::format("Updated Memory Max: {} bytes\n", memory_max);
+                }
+                if (update_memory_swap) {
+                        cgroups_manager->set_memory_swap(memory_swap);
+                        container->memory_swap = memory_swap;
+                        std::cout << std::format("Updated Memory Swap Max: {} bytes\n", memory_swap);
                 }
                 if (update_pids) {
                         cgroups_manager->set_pid_limit(pids_limit);
+                        container->pids_limit = pids_limit;
                         std::cout << std::format("Updated PIDs Limit: {}\n", pids_limit);
                 }
                 if (!cpuset_cpus.empty()) {
                         cgroups_manager->set_cpuset_cpus(cpuset_cpus);
+                        container->cpuset_cpus = cpuset_cpus;
                         std::cout << std::format("Updated CPU Set: {}\n", cpuset_cpus);
                 }
+                if (!cpuset_mems.empty()) {
+                        cgroups_manager->set_cpuset_mems(cpuset_mems);
+                        container->cpuset_mems = cpuset_mems;
+                        std::cout << std::format("Updated CPU Set Mems: {}\n", cpuset_mems);
+                }
+                for (const auto& iw : io_weight_updates) {
+                        cgroups_manager->set_io_weight(iw.major, iw.minor, iw.weight);
+                        std::cout << std::format("Updated IO Weight for device {}:{} to {}\n", iw.major, iw.minor, iw.weight);
+                }
+                for (const auto& im : io_max_updates) {
+                        cgroups_manager->set_io_max(im.major, im.minor, im.limits);
+                        std::cout << std::format("Updated IO Max for device {}:{} -> rbps:{} wbps:{} riops:{} wiops:{}\n",
+                                                 im.major, im.minor, im.limits.rbps, im.limits.wbps, im.limits.riops, im.limits.wiops);
+                }
+                container->io_weight_updates = io_weight_updates;
+                container->io_max_updates = io_max_updates;
         }
         catch (const std::exception& e) {
                 std::cerr << std::format("Error applying updates: {}\n", e.what());
                 return;
         }
-
-        // TODO:
-        //if (update_cpu || cpu_weight > 0 || update_memory || update_pids || !cpuset_cpus.empty()) {
-        //        container_db_manager.update_container(target_id, container.value());
-        //}
-
+        container_db_manager.update_container(container->config.container_id, container.value());
         std::cout << std::format("Successfully updated container '{}'.\n", target_id);
 }
+

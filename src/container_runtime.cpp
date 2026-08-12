@@ -263,9 +263,9 @@ auto ContainerRuntime::setup_root_filesystem() -> void {
                 fs::path merged_dir{Utils::get_base_dir() / "filesystems"
                         / std::format("quiver_{}", m_container_config.container_id) / "merged_dir"};
                 if (!m_container_config.final_filesystem.empty()) {
-                        upper_dir = final_filesystem / "upper_dir";
-                        work_dir = final_filesystem / "work_dir";
-                        merged_dir = final_filesystem / "merged_dir";
+                        upper_dir = static_cast<fs::path>(m_container_config.final_filesystem) / "upper_dir";
+                        work_dir = static_cast<fs::path>(m_container_config.final_filesystem) / "work_dir";
+                        merged_dir = static_cast<fs::path>(m_container_config.final_filesystem) / "merged_dir";
                 }
                 try {
                         Utils::ensure_dir(upper_dir);
