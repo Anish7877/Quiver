@@ -406,6 +406,12 @@ auto CommandLineHandler::remove(std::span<std::string> args) -> void {
         }
         for (const auto& arg : args) {
                 container_db_manager.remove_container(arg);
+                try {
+                        Utils::remove_directory(std::format("{}/filesystems/quiver_{}", Utils::get_base_dir().string(), arg));
+                }
+                catch (const std::exception& e) {
+                        std::cerr << e.what() << '\n';
+                }
         }
 }
 
@@ -654,6 +660,13 @@ auto CommandLineHandler::prune(std::span<std::string> args) -> void {
         for (const auto& container : containers) {
                 if (container.status != "running") {
                         container_db_manager.remove_container(container.config.container_id);
+                        try {
+                                Utils::remove_directory(std::format("{}/filesystems/quiver_{}", Utils::get_base_dir().string(),
+                                                        container.config.container_id));
+                        }
+                        catch (const std::exception& e) {
+                                std::cerr << e.what() << '\n';
+                        }
                 }
         }
 }

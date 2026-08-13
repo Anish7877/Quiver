@@ -94,9 +94,9 @@ auto LogJobProcessor::process_log(const fs::path& path, const LogJobData& job_da
                 return;
         }
         std::string value(data_ptr, job_data.value_length);
+        m_value_heap->commit_read_head(job_data.value_length);
         try {
                 Utils::write_file(path, value, true);
-                m_value_heap->commit_read_head(job_data.value_length);
         }
         catch (const std::exception& e) {
                 m_log_file << std::format("[{}] Log Job Processor Error: got error -> '{}'.\n",

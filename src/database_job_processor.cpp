@@ -147,12 +147,10 @@ auto DatabaseJobProcessor::process_get_job(const DatabaseJobData& job_data) -> v
         }
 
         if (status.IsNotFound() || !status.ok()) [[unlikely]] {
-                if (status.IsNotFound()) {
-                        log_event(std::format("[{}] Database Job Processor Error: Key not found\n", chrono::system_clock::now()));
-                } else {
-                        log_event(std::format("[{}] Database Job Processor Error: Get failed -> '{}'\n", chrono::system_clock::now(), status.ToString()));
+                if (!status.IsNotFound()) {
+                        log_event(std::format("[{}] Database Job Processor Error: Get failed -> '{}'\n",
+                                                chrono::system_clock::now(), status.ToString()));
                 }
-
                 size_t buf_size{0};
                 send(connection_fd, &buf_size, sizeof(buf_size), 0);
         }
@@ -184,12 +182,10 @@ auto DatabaseJobProcessor::process_put_job(const DatabaseJobData& job_data) -> v
         rocksdb::Slice key{job_data.key, 32};
         std::string value(data_ptr, job_data.value_length);
         rocksdb::Status status{(*m_current_db)->Put(rocksdb::WriteOptions(), key, value)};
+        m_value_heap->commit_read_head(job_data.value_length);
         if (!status.ok()) [[unlikely]] {
                 log_event(std::format("[{}] Database Job Processor Error: Unable to process put job -> '{}'.",
                                         chrono::system_clock::now(), status.ToString()));
-        }
-        else {
-                m_value_heap->commit_read_head(job_data.value_length);
         }
 }
 

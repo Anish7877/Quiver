@@ -115,9 +115,7 @@ auto ValueHeap::get_job_data_pointer(std::size_t offset) const -> const char* {
 }
 
 auto ValueHeap::commit_read_head(std::size_t bytes_processed) -> void {
-        std::size_t current_head{m_header->data_head.load(std::memory_order_relaxed)};
-        std::size_t next_head{current_head + bytes_processed};
-        m_header->data_head.store(next_head, std::memory_order_release);
+        m_header->data_head.fetch_add(bytes_processed, std::memory_order_release);
 }
 
 ValueHeap::~ValueHeap() {

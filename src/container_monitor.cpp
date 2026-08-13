@@ -212,6 +212,11 @@ auto ContainerMonitor::foreground_logging() -> void {
 }
 
 auto ContainerMonitor::invoke_container() -> void {
+        if (m_container_config.terminal.value || m_container_config.detach.value) {
+                if (pipe2(m_cli_sync_pipe, O_CLOEXEC) == -1) [[unlikely]] {
+                        throw std::runtime_error("Monitor Error: CLI sync pipe creation failed.");
+                }
+        }
         m_monitor_pid = fork();
 
         if (m_monitor_pid == -1) [[unlikely]] {
@@ -220,13 +225,24 @@ auto ContainerMonitor::invoke_container() -> void {
         }
         if (m_monitor_pid > 0) {
                 if (m_container_config.terminal.value || m_container_config.detach.value) {
+                        close(m_cli_sync_pipe[1]);
+
+                        char status_byte{0};
+                        ssize_t n = read(m_cli_sync_pipe[0], &status_byte, 1);
+                        close(m_cli_sync_pipe[0]);
+
+                        if (n <= 0) {
+                                std::cerr << "Fatal: Container crashed during initialization.\n";
+                                exit(EXIT_FAILURE);
+                        }
+
+                        std::cout << m_container_config.container_id << "\n";
                         return;
                 }
                 int status{};
                 while (waitpid(m_monitor_pid, &status, 0) == -1) {
                         if (errno == EINTR)
                                 continue;
-
                         return;
                 }
                 if (WIFEXITED(status)) {
@@ -461,6 +477,14 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                 container->boot_time = Utils::get_boot_time();
                 container->status = "running";
                 m_container_db_manager->update_container(m_container_config.container_id, container.value());
+        }
+
+        if (m_container_config.terminal.value || m_container_config.detach.value) {
+                char ready_signal{'1'};
+                if (write(m_cli_sync_pipe[1], &ready_signal, 1) == -1) {
+                        std::cerr << "Monitor Warning: Failed to signal parent CLI.\n";
+                }
+                close(m_cli_sync_pipe[1]);
         }
         std::atomic<bool> container_running{true};
 

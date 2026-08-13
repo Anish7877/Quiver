@@ -111,7 +111,26 @@ auto Utils::copy_directory(const fs::path& source, const fs::path& destination) 
 
 auto Utils::remove_directory(const fs::path& path) -> void {
         std::error_code error_code{};
+        if (fs::exists(path)) {
+                fs::permissions(path, fs::perms::all, fs::perm_options::add, error_code);
+                for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)) {
+                        fs::permissions(entry.path(), fs::perms::all, fs::perm_options::add, error_code);
+                }
+        }
         fs::remove_all(path, error_code);
+        if (error_code == std::errc::permission_denied) {
+                pid_t pid{fork()};
+                if (pid == 0) {
+                        if (unshare(CLONE_NEWUSER) == 0) {
+                                std::error_code ec{};
+                                fs::remove_all(path, ec);
+                        }
+                        _exit(0);
+                } else if (pid > 0) {
+                        waitpid(pid, nullptr, 0);
+                        error_code.clear();
+                }
+        }
         if (error_code) [[unlikely]] {
                 throw std::runtime_error(std::format("Directory Error: couldn't remove '{}' - {}\n", path.string(), error_code.message()));
         }

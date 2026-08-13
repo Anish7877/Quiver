@@ -119,8 +119,8 @@ auto LoggerCommandQueue::atomic_pop() -> std::optional<LogJobData> {
         std::size_t index{current_head % QUEUE_SIZE};
         LogSlot& acquired_slot{m_mapped_address[index]};
 
-        if (acquired_slot.state.load(std::memory_order_acquire) != SlotState::READY) {
-                return std::nullopt;
+        while (acquired_slot.state.load(std::memory_order_acquire) != SlotState::READY) {
+                _mm_pause();
         }
 
         LogJobData local_copy{};

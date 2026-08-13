@@ -2,6 +2,7 @@
 #include "types.hpp"
 #include <atomic>
 #include <cstring>
+#include <emmintrin.h>
 #include <iostream>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -119,8 +120,8 @@ auto DatabaseCommandQueue::atomic_pop() -> std::optional<DatabaseJobData> {
         std::size_t index{current_head % QUEUE_SIZE};
         JobSlot& acquired_slot{m_mapped_address[index]};
 
-        if (acquired_slot.state.load(std::memory_order_acquire) != SlotState::READY) {
-                return std::nullopt;
+        while (acquired_slot.state.load(std::memory_order_acquire) != SlotState::READY) {
+                _mm_pause();
         }
 
         DatabaseJobData local_copy{};

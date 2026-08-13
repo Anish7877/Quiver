@@ -70,6 +70,7 @@ class ContainerMonitor : public Singleton<ContainerMonitor> {
                 Limits m_limits{};
                 pid_t m_monitor_pid{-1};
                 pid_t m_container_pid{-1};
+                int m_cli_sync_pipe[2]{-1, -1};
                 int m_std_out_fd[2]{-1, -1};
                 int m_std_err_fd[2]{-1, -1};
                 int m_container_to_monitor_fd[2]{-1, -1};
