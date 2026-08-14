@@ -52,6 +52,8 @@ struct DashboardPage::Impl {
     StatCard* running_containers_card_{};
     StatCard* failed_containers_card_{};
     StatCard* active_volumes_card_{};
+    QWidget* graphs_pane_{};
+    QWidget* no_data_widget_{};
 };
 static auto create_cpu_cores_panel(const QString& title) -> QFrame* {
     auto* panel = new QFrame;
@@ -256,13 +258,45 @@ DashboardPage::DashboardPage(QWidget* parent)
     stats_row->addWidget(pimpl_->failed_containers_card_);
     stats_row->addWidget(pimpl_->active_volumes_card_);
     scroll_layout->addLayout(stats_row);
-
-
-
+    
     auto* split_layout = new QHBoxLayout;
     split_layout->setSpacing(24);
 
+    pimpl_->no_data_widget_ = new QWidget;
+    auto* no_data_layout = new QVBoxLayout(pimpl_->no_data_widget_);
+    no_data_layout->setAlignment(Qt::AlignCenter);
+    no_data_layout->setSpacing(20);
+    
+    auto* no_data_lbl = new QLabel("No container is running right now");
+    no_data_lbl->setStyleSheet("color: #A1A1AA; font-size: 16px; font-weight: bold;");
+    no_data_lbl->setAlignment(Qt::AlignCenter);
+    no_data_layout->addWidget(no_data_lbl);
+    
+    auto* btn_layout = new QHBoxLayout;
+    btn_layout->setAlignment(Qt::AlignCenter);
+    btn_layout->setSpacing(15);
+    
+    auto* create_btn = new QPushButton("Create Container");
+    create_btn->setObjectName("PrimaryButton");
+    create_btn->setCursor(Qt::PointingHandCursor);
+    create_btn->setFixedSize(140, 36);
+    connect(create_btn, &QPushButton::clicked, this, &DashboardPage::open_create_container);
+    
+    auto* go_btn = new QPushButton("Go to Containers");
+    go_btn->setObjectName("SecondaryBtn");
+    go_btn->setCursor(Qt::PointingHandCursor);
+    go_btn->setFixedSize(140, 36);
+    connect(go_btn, &QPushButton::clicked, this, &DashboardPage::navigate_to_containers);
+    
+    btn_layout->addWidget(create_btn);
+    btn_layout->addWidget(go_btn);
+    no_data_layout->addLayout(btn_layout);
+    
+    pimpl_->no_data_widget_->hide();
+    split_layout->addWidget(pimpl_->no_data_widget_, 5);
+
     auto* left_pane = new QFrame;
+    pimpl_->graphs_pane_ = left_pane;
     left_pane->setObjectName("DashPanel");
     left_pane->setStyleSheet("QFrame#DashPanel { background: transparent; border: none; }");
     auto* left_layout = new QVBoxLayout(left_pane);
@@ -479,6 +513,8 @@ DashboardPage::DashboardPage(QWidget* parent)
         pimpl_->stats_buffer_.clear();
 
         if (!categories.isEmpty()) {
+            pimpl_->no_data_widget_->hide();
+            pimpl_->graphs_pane_->show();
             pimpl_->cpu_series_->clear();
             pimpl_->cpu_series_->append(cpu_set);
             pimpl_->cpu_axisX_->clear();
@@ -501,6 +537,12 @@ DashboardPage::DashboardPage(QWidget* parent)
                 }
             }
         } else {
+            pimpl_->no_data_widget_->show();
+            pimpl_->graphs_pane_->hide();
+            pimpl_->cpu_series_->clear();
+            pimpl_->mem_series_->clear();
+            pimpl_->cpu_axisX_->clear();
+            pimpl_->mem_axisX_->clear();
             delete cpu_set;
             delete mem_set;
         }

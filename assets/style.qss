@@ -262,7 +262,7 @@ QPushButton#SmallPlusBtn {
     padding-bottom: 2px;
 }
 QPushButton#SmallPlusBtn:hover {
-    background-color: #F97316;
+    background-color: rgba(249, 115, 22, 0.15);
     color: #FFFFFF;
 }
 
@@ -666,12 +666,15 @@ QPushButton#BulkActionBtn_stop:hover, QPushButton#BulkActionBtn_delete:hover, QP
 QPushButton#BulkActionBtn_pause { border: 1px solid #f97316; }
 QPushButton#BulkActionBtn_pause:hover { background: #f97316; color: white; }
 
-QPushButton#RowActionBtn_play, QPushButton#RowActionBtn_stop, QPushButton#RowActionBtn_pause, QPushButton#RowActionBtn_delete, QPushButton#RowActionBtn_attach, QPushButton#RowActionBtn_copy, QPushButton#RowActionBtn_info {
+QPushButton#RowActionBtn_play, QPushButton#RowActionBtn_stop, QPushButton#RowActionBtn_pause, QPushButton#RowActionBtn_delete, QPushButton#RowActionBtn_attach, QPushButton#RowActionBtn_copy, QPushButton#RowActionBtn_info, QPushButton#RowActionBtn_update {
     border-radius: 4px;
     background: transparent;
 }
 QPushButton#RowActionBtn_play { border: 1px solid #2ea043; }
 QPushButton#RowActionBtn_play:hover { background: #2ea043; }
+
+QPushButton#RowActionBtn_update { border: 1px solid #58a6ff; }
+QPushButton#RowActionBtn_update:hover { background: #58a6ff; }
 
 QPushButton#RowActionBtn_pause { border: 1px solid #f97316; }
 QPushButton#RowActionBtn_pause:hover { background: #f97316; }
@@ -684,3 +687,52 @@ QPushButton#RowActionBtn_attach:hover { background: #58a6ff; }
 
 QPushButton#RowActionBtn_copy, QPushButton#RowActionBtn_info { border: 1px solid #a1a1aa; }
 QPushButton#RowActionBtn_copy:hover, QPushButton#RowActionBtn_info:hover { background: #a1a1aa; }
+
+/* =======================================================
+   SCROLLBAR (SLEEK DARK MODE)
+======================================================== */
+QScrollBar:vertical {
+    border: none;
+    background: #09090B;
+    width: 8px;
+    margin: 0px 0px 0px 0px;
+}
+QScrollBar::handle:vertical {
+    background: #27272A;
+    min-height: 20px;
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #3F3F46;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    border: none;
+    background: none;
+    height: 0px;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+QScrollBar:horizontal {
+    border: none;
+    background: #09090B;
+    height: 8px;
+    margin: 0px 0px 0px 0px;
+}
+QScrollBar::handle:horizontal {
+    background: #27272A;
+    min-width: 20px;
+    border-radius: 4px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: #3F3F46;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    border: none;
+    background: none;
+    width: 0px;
+}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
+}

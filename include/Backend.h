@@ -19,6 +19,15 @@ struct Container {
     bool prevent_interaction {false};
     QString command {};
     QString options {};
+    int cpu_quota {0};
+    int cpu_weight {0};
+    QString memory_max {};
+    QString memory_swap {};
+    int pids_limit {0};
+    QString cpuset_cpus {};
+    QString cpuset_mems {};
+    QString io_weight {};
+    QString io_max {};
 };
 
 struct Image {
@@ -65,12 +74,14 @@ public:
 
     auto get_containers() const -> std::vector<Container>;
     auto get_container_inspect(const QString& id) const -> QString;
+    auto get_container_top(const QString& id) const -> QString;
     auto add_container(const Container& container) -> void;
     auto delete_container(const QStringList& container_ids) -> void;
     auto pause_container(const QStringList& container_ids) -> void;
     auto unpause_container(const QStringList& container_ids) -> void;
     auto start_container(const QStringList& container_ids) -> void;
     auto stop_container(const QStringList& container_ids) -> void;
+    auto update_container(const Container& container) -> void;
     auto prune_containers() -> void;
 
     auto get_images() const -> std::vector<Image>;

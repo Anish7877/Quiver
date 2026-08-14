@@ -91,6 +91,11 @@ QIcon createActionIcon(const QString& type, const QColor& color) {
             p.drawEllipse(2, 2, 12, 12);
             p.drawLine(8, 5, 8, 6);
             p.drawLine(8, 8, 8, 11);
+        } else if (type == "refresh") {
+            p.setPen(QPen(drawColor, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(Qt::NoBrush);
+            p.drawArc(3, 3, 10, 10, 45 * 16, 270 * 16);
+            p.drawPolyline(QPolygonF() << QPointF(13, 7) << QPointF(13, 3) << QPointF(9, 3));
         }
         return pixmap;
     };
@@ -208,13 +213,16 @@ struct TablePage::Impl {
     QTableWidget* table_   {};
     QPushButton*  add_btn_ {};
     QHBoxLayout*  header_layout_ {};
+    bool          has_actions_ {true};
 };
 
 TablePage::TablePage(const QString& title,
                      const QStringList& columns,
-                     QWidget* parent)
+                     QWidget* parent,
+                     bool has_actions)
     : QWidget(parent), pimpl_{ std::make_unique<Impl>() }
 {
+    pimpl_->has_actions_ = has_actions;
     auto* layout { new QVBoxLayout(this) };
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
@@ -229,7 +237,9 @@ TablePage::TablePage(const QString& title,
 
 
     QStringList all_cols { columns };
-    all_cols << "ACTIONS";
+    if (has_actions) {
+        all_cols << "ACTIONS";
+    }
 
     pimpl_->table_ = new QTableWidget;
     pimpl_->table_->setObjectName("MainTable");
@@ -252,7 +262,7 @@ TablePage::TablePage(const QString& title,
     pimpl_->table_->horizontalHeader()->setSectionResizeMode(
         action_col, QHeaderView::Fixed);
 
-    pimpl_->table_->setColumnWidth(action_col, 230);
+    pimpl_->table_->setColumnWidth(action_col, 280);
     pimpl_->table_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
     
     pimpl_->table_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
@@ -407,6 +417,7 @@ ContainersPage::ContainersPage(QWidget* parent)
     pimpl_->page_->table()->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
     pimpl_->page_->table()->setColumnWidth(0, 60);
 
+
     pimpl_->bulk_widget_ = new QWidget;
     auto* bulk_row = new QHBoxLayout(pimpl_->bulk_widget_);
     bulk_row->setContentsMargins(0, 0, 0, 0);
@@ -515,40 +526,36 @@ ContainersPage::ContainersPage(QWidget* parent)
     pimpl_->page_->header_layout()->addWidget(prune_btn);
 
     connect(pimpl_->page_, &TablePage::add_clicked, this, [this]() {
-        CreateDialog d(this);
-        if (d.exec() == QDialog::Accepted) {
-            QString name { d.get_container_name() };
-            QString img  { d.get_container_image() };
-            if (name.trimmed().isEmpty()) name = "new-container";
-            if (img.trimmed().isEmpty())  img  = "ubuntu:latest";
-            QString id { QString::number(QRandomGenerator::global()->generate(), 16).right(6) };
-            
-            Container c;
-            c.id = id;
-            c.name = name;
-            c.image = img;
-            c.status = "running";
-            c.filesystem = d.get_filesystem();
-            c.devices = d.get_devices();
-            c.volumes = d.get_volumes();
-            c.ports = d.get_ports();
-            c.prevent_interaction = d.get_prevent_interaction();
-            c.options = d.get_options();
-            c.command = d.get_command();
-            
-            Backend::get_instance().add_container(c);
-            refresh();
-        }
+        open_create_dialog();
     });
 
     // Create the overlay for loading
     pimpl_->overlay_ = new QWidget(this);
-    pimpl_->overlay_->setStyleSheet("background-color: rgba(0, 0, 0, 150); border-radius: 8px;");
-    auto* overlay_layout = new QVBoxLayout(pimpl_->overlay_);
+    pimpl_->overlay_->setFixedSize(160, 40);
+    pimpl_->overlay_->setStyleSheet("background-color: #27272A; border: 1px solid #3F3F46; border-radius: 20px;");
+    
+    auto* overlay_layout = new QHBoxLayout(pimpl_->overlay_);
+    overlay_layout->setContentsMargins(20, 0, 20, 0);
+    overlay_layout->setSpacing(10);
+    
+    auto* spinner_lbl = new QLabel;
+    spinner_lbl->setStyleSheet("color: #F97316; font-size: 18px; font-weight: bold; background: transparent; border: none;");
+    
     pimpl_->loading_text_ = new QLabel("Processing...");
-    pimpl_->loading_text_->setStyleSheet("color: white; font-size: 16px; font-weight: bold;");
-    pimpl_->loading_text_->setAlignment(Qt::AlignCenter);
+    pimpl_->loading_text_->setStyleSheet("color: #FAFAFA; font-size: 13px; font-weight: bold; background: transparent; border: none;");
+    
+    overlay_layout->addWidget(spinner_lbl);
     overlay_layout->addWidget(pimpl_->loading_text_);
+    
+    auto* timer = new QTimer(pimpl_->overlay_);
+    connect(timer, &QTimer::timeout, pimpl_->overlay_, [spinner_lbl]() {
+        static int frame = 0;
+        const QString frames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+        spinner_lbl->setText(frames[frame]);
+        frame = (frame + 1) % 10;
+    });
+    timer->start(80);
+    
     pimpl_->overlay_->hide();
 
     root->addWidget(pimpl_->page_);
@@ -556,12 +563,48 @@ ContainersPage::ContainersPage(QWidget* parent)
     QTimer::singleShot(100, this, &ContainersPage::refresh);
 }
 
+auto ContainersPage::open_create_dialog() -> void {
+    CreateDialog d(this);
+    if (d.exec() == QDialog::Accepted) {
+        QString name { d.get_container_name() };
+        QString img  { d.get_container_image() };
+        if (name.trimmed().isEmpty()) name = "new-container";
+        if (img.trimmed().isEmpty())  img  = "ubuntu:latest";
+        QString id { QString::number(QRandomGenerator::global()->generate(), 16).right(6) };
+        
+        Container c;
+        c.id = id;
+        c.name = name;
+        c.image = img;
+        c.status = "running";
+        c.filesystem = d.get_filesystem();
+        c.devices = d.get_devices();
+        c.volumes = d.get_volumes();
+        c.ports = d.get_ports();
+        c.prevent_interaction = d.get_prevent_interaction();
+        c.options = d.get_options();
+        c.command = d.get_command();
+        c.cpu_quota = d.get_cpu_quota();
+        c.cpu_weight = d.get_cpu_weight();
+        c.memory_max = d.get_memory_max();
+        c.memory_swap = d.get_memory_swap();
+        c.pids_limit = d.get_pids_limit();
+        c.cpuset_cpus = d.get_cpuset_cpus();
+        c.cpuset_mems = d.get_cpuset_mems();
+        c.io_weight = d.get_io_weight();
+        c.io_max = d.get_io_max();
+        
+        Backend::get_instance().add_container(c);
+        refresh();
+    }
+}
+
 ContainersPage::~ContainersPage() = default;
 
 void ContainersPage::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     if (pimpl_->overlay_) {
-        pimpl_->overlay_->resize(this->size());
+        pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 40);
     }
 }
 
@@ -698,6 +741,30 @@ auto ContainersPage::refresh() -> void {
         
         h->addWidget(create_btn("delete", "Delete", "#f85149", [](const QStringList& ids){ Backend::get_instance().delete_container(ids); }, "Are you sure you want to delete this container?"));
 
+        auto* update_btn = new HoverIconButton("", "refresh", "#58a6ff");
+        update_btn->setObjectName("RowActionBtn_update");
+        update_btn->setIconSize(QSize(14, 14));
+        update_btn->setToolTip("Update Container");
+        update_btn->setCursor(Qt::PointingHandCursor);
+        update_btn->setFixedSize(30, 28);
+        connect(update_btn, &QPushButton::clicked, this, [c, this]() {
+            UpdateDialog d(c, this);
+            if (d.exec() == QDialog::Accepted) {
+                Quiver::Container updated = c;
+                updated.cpu_quota = d.get_cpu_quota();
+                updated.cpu_weight = d.get_cpu_weight();
+                updated.memory_max = d.get_memory_max();
+                updated.memory_swap = d.get_memory_swap();
+                updated.pids_limit = d.get_pids_limit();
+                updated.cpuset_cpus = d.get_cpuset_cpus();
+                updated.cpuset_mems = d.get_cpuset_mems();
+                updated.io_weight = d.get_io_weight();
+                updated.io_max = d.get_io_max();
+                Backend::get_instance().update_container(updated);
+            }
+        });
+        h->addWidget(update_btn);
+
         auto* attach_btn = new HoverIconButton("", "attach", "#58a6ff");
         attach_btn->setObjectName("RowActionBtn_attach");
         attach_btn->setIconSize(QSize(14, 14));
@@ -753,18 +820,18 @@ ImagesPage::ImagesPage(QWidget* parent)
 
     pimpl_->page_ = new TablePage(
         "Images",
-        { "REPOSITORY", "STATUS", "TAG", "IMAGE ID", "SIZE", "CREATED" },
+        { "REPOSITORY", "TAG",  "SIZE", "CREATED" },
         this);
 
     auto add = [&](const QStringList& d) {
         pimpl_->page_->add_row(d, "Delete", "TableDangerBtn");
     };
-    add({ "nginx",    "active",   "alpine",    "a6bd71f48f68", "23.5 MB", "2 days ago"  });
-    add({ "redis",    "active",   "6.2",       "7614ae9453d1", "113 MB",  "1 week ago"  });
-    add({ "postgres", "active",   "14",        "d3b0b5c6a2f3", "376 MB",  "3 days ago"  });
-    add({ "ubuntu",   "inactive", "22.04",     "8f70a8b0e4c1", "77.8 MB", "5 days ago"  });
-    add({ "node",     "active",   "18-alpine", "9c2d4e6f0a1b", "168 MB",  "1 day ago"   });
-    add({ "python",   "inactive", "3.11-slim", "b5e7f9a3c2d4", "125 MB",  "4 days ago"  });
+    add({ "nginx",       "alpine",     "23.5 MB", "2 days ago"  });
+    add({ "redis",       "6.2",      "113 MB",  "1 week ago"  });
+    add({ "postgres",   "14",       "376 MB",  "3 days ago"  });
+    add({ "ubuntu",    "22.04",      "77.8 MB", "5 days ago"  });
+    add({ "node",        "18-alpine",  "168 MB",  "1 day ago"   });
+    add({ "python",    "3.11-slim",  "125 MB",  "4 days ago"  });
 
     connect(pimpl_->page_, &TablePage::add_clicked, this, [this]() {
         QDialog d(this);
@@ -796,9 +863,6 @@ ImagesPage::ImagesPage(QWidget* parent)
             QString name { name_in->text().trimmed() };
             if (name.isEmpty()) return;
             QString tag { tag_in->text().trimmed() };
-            if (tag.isEmpty()) tag = "latest";
-            pimpl_->page_->add_row({ name, "active", tag, "pending...", "—", "just now" },
-                                   "Delete", "TableDangerBtn");
         }
     });
 
@@ -823,16 +887,16 @@ VolumesPage::VolumesPage(QWidget* parent)
 
     pimpl_->page_ = new TablePage(
         "Volumes",
-        { "NAME", "STATUS", "DRIVER", "MOUNT POINT", "SIZE", "CREATED" },
+        { "NAME", "DRIVER", "MOUNT POINT", "SIZE", "CREATED" },
         this);
 
     auto add = [&](const QStringList& d) {
-        pimpl_->page_->add_row(d, "Unmount", "TableDangerBtn");
+        pimpl_->page_->add_row(d);
     };
-    add({ "postgres_data", "mounted",  "local", "/var/lib/docker/volumes/postgres_data", "2.3 GB",  "3 days ago" });
-    add({ "redis_cache",   "mounted",  "local", "/var/lib/docker/volumes/redis_cache",   "128 MB",  "1 week ago" });
-    add({ "nginx_conf",    "inactive", "local", "/var/lib/docker/volumes/nginx_conf",    "4.2 MB",  "5 days ago" });
-    add({ "app_uploads",   "mounted",  "nfs",   "/mnt/nfs/uploads",                      "14.7 GB", "2 days ago" });
+    add({ "postgres_data",   "local", "/var/lib/docker/volumes/postgres_data", "2.3 GB",  "3 days ago" });
+    add({ "redis_cache",    "local", "/var/lib/docker/volumes/redis_cache",   "128 MB",  "1 week ago" });
+    add({ "nginx_conf",     "local", "/var/lib/docker/volumes/nginx_conf",    "4.2 MB",  "5 days ago" });
+    add({ "app_uploads",    "nfs",   "/mnt/nfs/uploads",                      "14.7 GB", "2 days ago" });
 
     connect(pimpl_->page_, &TablePage::add_clicked, this, [this]() {
         QDialog d(this);
@@ -898,7 +962,12 @@ PortsPage::PortsPage(QWidget* parent)
     pimpl_->page_ = new TablePage(
         "Ports",
         { "CONTAINER ID", "TCP PORTS", "UDP PORTS" },
-        this);
+        this, false);
+    
+    // Set a reasonable fixed width for Container ID
+    // pimpl_->page_->table()->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
+    pimpl_->page_->table()->setColumnWidth(0, 250);
+
 
     connect(pimpl_->page_, &TablePage::add_clicked, this, [this]() {
         QDialog d(this);
@@ -959,11 +1028,13 @@ auto PortsPage::refresh() -> void {
         pimpl_->page_->table()->insertRow(row);
         
         pimpl_->page_->table()->setItem(row, 0, make_item(p.id, true));
-        pimpl_->page_->table()->setItem(row, 1, make_item(p.tcp));
-        pimpl_->page_->table()->setItem(row, 2, make_item(p.udp));
-        
-        auto* cell = new QWidget;
-        pimpl_->page_->table()->setCellWidget(row, 3, cell);
+        if (p.tcp.isEmpty() && p.udp.isEmpty()) {
+            pimpl_->page_->table()->setItem(row, 1, make_item("no ports forwarded"));
+            pimpl_->page_->table()->setItem(row, 2, make_item("no ports forwarded"));
+        } else {
+            pimpl_->page_->table()->setItem(row, 1, make_item(p.tcp));
+            pimpl_->page_->table()->setItem(row, 2, make_item(p.udp));
+        }
     }
     
     pimpl_->stat_total_->set_value(QString::number(total));

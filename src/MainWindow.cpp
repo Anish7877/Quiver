@@ -46,7 +46,7 @@ struct MainWindow::Impl {
     QVBoxLayout*    sidebar_layout_  {};
 
     QStackedWidget* main_stack_      {};
-    QWidget*        dashboard_page_  {};
+    DashboardPage*  dashboard_page_  {};
     ContainersPage* containers_page_ {};
     ImagesPage*     images_page_     {};
     VolumesPage*    volumes_page_    {};
@@ -239,7 +239,7 @@ auto MainWindow::setup_sidebar() -> void {
             switch_tab(index); 
         });
         
-        pimpl_->nav_group_->addButton(btn);
+        pimpl_->nav_group_->addButton(btn, index);
         pimpl_->sidebar_layout_->addWidget(btn);
     };
 
@@ -481,12 +481,44 @@ auto* logo_lbl = new QLabel;
    
     
     pimpl_->dashboard_page_ = new DashboardPage;
-pimpl_->main_stack_->addWidget(pimpl_->dashboard_page_);
-
+    pimpl_->main_stack_->addWidget(pimpl_->dashboard_page_);
 
     pimpl_->containers_page_ = new ContainersPage;
     pimpl_->main_stack_->addWidget(pimpl_->containers_page_);
+
+    connect(pimpl_->dashboard_page_, &DashboardPage::navigate_to_containers, this, [this]() {
+        if (pimpl_->nav_group_) {
+            if (auto* btn = pimpl_->nav_group_->button(1)) {
+                btn->setChecked(true);
+            }
+        }
+        if (pimpl_->settings_btn_) pimpl_->settings_btn_->setChecked(false);
+        switch_tab(1);
+    });
     
+    connect(pimpl_->dashboard_page_, &DashboardPage::open_create_container, this, [this]() {
+        if (pimpl_->nav_group_) {
+            if (auto* btn = pimpl_->nav_group_->button(1)) {
+                btn->setChecked(true);
+            }
+        }
+        if (pimpl_->settings_btn_) pimpl_->settings_btn_->setChecked(false);
+        switch_tab(1);
+        pimpl_->containers_page_->open_create_dialog();
+    });
+    
+    pimpl_->images_page_ = new ImagesPage;
+    pimpl_->main_stack_->addWidget(pimpl_->images_page_);
+
+    pimpl_->volumes_page_ = new VolumesPage;
+    pimpl_->main_stack_->addWidget(pimpl_->volumes_page_);
+
+    pimpl_->ports_page_ = new PortsPage;
+    pimpl_->main_stack_->addWidget(pimpl_->ports_page_);
+
+    pimpl_->devices_page_ = new DevicesPage;
+    pimpl_->main_stack_->addWidget(pimpl_->devices_page_);
+
     pimpl_->details_page_ = new ContainerDetailsPage;
     pimpl_->main_stack_->addWidget(pimpl_->details_page_);
 
@@ -498,22 +530,6 @@ pimpl_->main_stack_->addWidget(pimpl_->dashboard_page_);
     connect(pimpl_->details_page_, &ContainerDetailsPage::back_requested, this, [this]() {
         pimpl_->main_stack_->setCurrentWidget(pimpl_->containers_page_);
     });
-
-
-    pimpl_->images_page_ = new ImagesPage;
-    pimpl_->main_stack_->addWidget(pimpl_->images_page_);
-
-
-    pimpl_->volumes_page_ = new VolumesPage;
-    pimpl_->main_stack_->addWidget(pimpl_->volumes_page_);
-
-
-    pimpl_->ports_page_ = new PortsPage;
-    pimpl_->main_stack_->addWidget(pimpl_->ports_page_);
-
-
-    pimpl_->devices_page_ = new DevicesPage;
-    pimpl_->main_stack_->addWidget(pimpl_->devices_page_);
 
     pimpl_->settings_page_ = new SettingsPage;
     pimpl_->main_stack_->addWidget(pimpl_->settings_page_);

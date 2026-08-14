@@ -92,6 +92,15 @@ public:
     auto get_prevent_interaction() const -> bool;
     auto get_command() const -> QString;
     auto get_options() const -> QString;
+    auto get_cpu_quota() const -> int;
+    auto get_cpu_weight() const -> int;
+    auto get_memory_max() const -> QString;
+    auto get_memory_swap() const -> QString;
+    auto get_pids_limit() const -> int;
+    auto get_cpuset_cpus() const -> QString;
+    auto get_cpuset_mems() const -> QString;
+    auto get_io_weight() const -> QString;
+    auto get_io_max() const -> QString;
 
 private slots:
     auto show_visual() -> void;
@@ -100,6 +109,27 @@ private slots:
     auto on_add_volume() -> void;
     auto on_add_port() -> void;
     auto on_import_json() -> void;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pimpl_ {};
+};
+
+class UpdateDialog : public QDialog {
+    Q_OBJECT
+public:
+    explicit UpdateDialog(const Quiver::Container& c, QWidget* parent = nullptr);
+    ~UpdateDialog() override;
+
+    auto get_cpu_quota() const -> int;
+    auto get_cpu_weight() const -> int;
+    auto get_memory_max() const -> QString;
+    auto get_memory_swap() const -> QString;
+    auto get_pids_limit() const -> int;
+    auto get_cpuset_cpus() const -> QString;
+    auto get_cpuset_mems() const -> QString;
+    auto get_io_weight() const -> QString;
+    auto get_io_max() const -> QString;
 
 private:
     struct Impl;

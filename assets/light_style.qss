@@ -199,8 +199,8 @@ QPushButton#SmallPlusBtn {
     padding-bottom: 2px;
 }
 QPushButton#SmallPlusBtn:hover {
-    background-color: #F97316;
-    color: #FFFFFF;
+    background-color: rgba(249, 115, 22, 0.1);
+    color: #09090B;
 }
 
 /* Form Typography & Editors */

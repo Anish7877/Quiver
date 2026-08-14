@@ -18,6 +18,8 @@ public:
 signals:
     void back_requested();
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
 private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_;

@@ -14,12 +14,13 @@ class TablePage : public QWidget {
 public:
     explicit TablePage(const QString&     title,
                        const QStringList& columns,
-                       QWidget*           parent = nullptr);
+                       QWidget*           parent = nullptr,
+                       bool               has_actions = true);
     ~TablePage() override;
 
     auto add_row(const QStringList& row_data,
-                 const QString&     action_label,
-                 const QString&     action_obj_name) -> void;
+                 const QString&     action_label = QString(),
+                 const QString&     action_obj_name = QString()) -> void;
 
     auto table() -> QTableWidget*;
     auto header_layout() -> QHBoxLayout*;
@@ -49,6 +50,7 @@ public:
     ~ContainersPage() override;
     
     auto refresh() -> void;
+    auto open_create_dialog() -> void;
 
 signals:
     void container_info_requested(const QString& container_id);
