@@ -1328,7 +1328,7 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
         fs::path ctx_full_path{fs::absolute(context_path)};
 
         if (!fs::exists(df_full_path)) [[unlikely]] {
-                std::cerr << std::format("Error: Dockerfile not found at '{}'\n", df_full_path.string());
+                std::cerr << std::format("Error: Quiverfile not found at '{}'\n", df_full_path.string());
                 return;
         }
 
