@@ -23,7 +23,6 @@
 #include <functional>
 #include <iterator>
 #include <libcuckoo/cuckoohash_map.hh>
-#include <mutex>
 #include <optional>
 #include <queue>
 #include <stdexcept>
@@ -47,7 +46,6 @@ auto BuildExecutor::execute_instructions(const std::vector<std::vector<size_t>>&
         m_image_manager = &ImageManager::get_instance();
         m_in_flight_cache_manager = &InFlightCacheManager::get_instance();
         m_layer_cache_manager = &LayerCacheManager::get_instance();
-        m_container_monitor = &ContainerMonitor::get_instance();
         m_layer_cache_manager->init();
         if (target.empty()) {
                 m_target_node = stages.back().node_number;
@@ -603,7 +601,7 @@ auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction
         instruction_hash.parent_digest = current_digest;
         instruction_hash.expanded_raw_ins = raw_instruction;
         if (stage.current_user.has_value()) {
-                instruction_hash.user = std::format("{}:{}", stage.current_user->first, stage.current_user->second);
+                instruction_hash.user = stage.current_user.value();
         }
         if (stage.current_workdir.has_value()) {
                 instruction_hash.workdir = stage.current_workdir.value().workdir;
@@ -658,6 +656,7 @@ auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction
                 try {
                         std::string container_id{Utils::generate_container_id()};
                         std::string base_dir{Utils::get_base_dir()};
+                        std::string image_name{};
                         std::string rootfs{};
                         bool is_overlay{false};
                         ScopeGuard guard{[&]() {
@@ -695,6 +694,7 @@ auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction
                         }
                         else {
                                 std::string lower_dirs_str{};
+                                image_name = stage.base_image;
                                 std::string image_path{Utils::get_image_path(stage.base_image)};
                                 std::vector<std::string> current_lower_dirs{};
                                 if (!m_stage_lower_dirs.find(stage.node_number, current_lower_dirs)) [[unlikely]] {
@@ -741,11 +741,10 @@ auto BuildExecutor::exec_run(const GraphBuilder::Stage& stage, const Instruction
                         }
                         config.env.value = std::vector(config_envs.begin(), config_envs.end());
                         config.args.value = config_args;
-                        {
-                                std::lock_guard lock{m_run_mutex};
-                                m_container_monitor->init(config);
-                                m_container_monitor->invoke_container();
-                        }
+                        ContainerMonitor container_monitor{};
+                        ContainerMonitor::Limits limits{};
+                        container_monitor.init(config, image_name, "", limits, true);
+                        container_monitor.invoke_container();
                         fs::path upper_path{std::format("{}/filesystems/quiver_{}/upper_dir", base_dir, container_id)};
                         fs::path layer_snapshot{std::format("{}/layer_snapshots/quiver_layer_{}", base_dir, hash)};
                         Utils::ensure_dir(layer_snapshot);
@@ -1198,7 +1197,6 @@ auto BuildExecutor::prepare(const std::vector<GraphBuilder::Stage>& stages, Grap
         return hex_stream.str();
 }
 
-
 auto BuildExecutor::assemble_oci_image(const GraphBuilder::Stage& stage, const std::string& target_name) -> void {
         std::vector<std::string> layers{};
         if (!m_stage_layers.find(stage.node_number, layers)) {
@@ -1277,7 +1275,7 @@ auto BuildExecutor::assemble_oci_image(const GraphBuilder::Stage& stage, const s
                 {"size", config_str.length()}
         };
 
-        fs::path target_path = Utils::get_image_path(target_name);
+        fs::path target_path{Utils::get_image_path(target_name)};
         Utils::ensure_dir(target_path);
 
         nlohmann::json index = {

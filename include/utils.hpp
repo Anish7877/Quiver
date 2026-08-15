@@ -53,7 +53,6 @@ namespace Utils {
         auto resolve_user_group(const std::vector<std::string>&, const std::string&) -> std::pair<uid_t, gid_t>;
         auto build_gid_map_payload(pid_t) -> std::string;
         auto write_all(int, const char*, size_t) -> bool;
-        auto create_tar_gz(const std::string&, const std::string&) -> void;
         auto extract_tarball(const std::string&, const std::string&) -> void;
         auto extract_oci_layer(const std::string&, const std::string&) -> void;
         auto is_archive(const fs::path&) -> bool;
@@ -62,10 +61,6 @@ namespace Utils {
         auto print_usage() -> void;
 
         auto sha256_final(EVP_MD_CTX*) -> std::string;
-        auto is_overlay_whiteout(const fs::path&) -> bool;
-        auto is_opaque_directory(const fs::path&) -> bool;
-        auto create_oci_layer(const fs::path& upper_dir, const fs::path& output_path) -> LayerInfo;
-
         [[nodiscard]] auto load_seccomp_profile(const fs::path&) -> OCIRuntime::Seccomp;
         auto send_all(int fd, const void* data, size_t size) -> bool;
         auto recv_all(int fd, void* data, size_t size) -> bool;

@@ -164,6 +164,7 @@ auto ContainerDbManager::get_container(const std::string& key) -> std::optional<
                 close(client_fd);
                 return std::nullopt;
         }
+
         std::string raw_bytes{};
         raw_bytes.resize(result_size);
         if (!Utils::recv_all(client_fd, &raw_bytes[0], result_size)) [[unlikely]] {

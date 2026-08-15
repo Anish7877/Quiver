@@ -8,6 +8,7 @@
 #include "container_monitor.hpp"
 #include "utils.hpp"
 #include "types.hpp"
+#include "process_lock.hpp"
 #include <chrono>
 #include <csignal>
 #include <exception>
@@ -35,6 +36,80 @@ static std::vector<std::string> split_string(const std::string& str, char delimi
                 tokens.push_back(token);
         }
         return tokens;
+}
+
+static auto ensure_buildkit() -> void {
+        std::string uid{std::to_string(getuid())};
+        fs::path run_dir{std::format("/run/user/{}/buildkit", uid)};
+        fs::path socket_path{run_dir / "buildkitd.sock"};
+        fs::path lock_path{run_dir / "quiver_buildkit.lock"};
+
+
+        auto spawn_buildkit{[&]() {
+                if (fs::exists(socket_path)) {
+                        return;
+                }
+                fs::path log_dir{fs::path(Utils::get_base_dir()) / "logs"};
+                fs::create_directories(log_dir);
+                fs::path log_file{log_dir / "buildkitd.log"};
+                std::vector<std::string> exec_args = {
+                        "rootlesskit",
+                        "buildkitd",
+                        "--oci-worker-snapshotter=overlayfs"
+                };
+                std::vector<char*> c_args;
+                c_args.reserve(exec_args.size() + 1);
+                for (auto& arg : exec_args) c_args.push_back(arg.data());
+                c_args.push_back(nullptr);
+
+                pid_t pid{fork()};
+
+                if (pid < 0) [[unlikely]] {
+                        throw std::runtime_error("Failed to fork process for BuildKit buildkit.");
+                }
+                else if (pid == 0) {
+                        setsid();
+
+                        pid_t sid_pid{fork()};
+                        if (sid_pid < 0) exit(EXIT_FAILURE);
+                        if (sid_pid > 0) exit(EXIT_SUCCESS);
+
+
+                        int log_fd{open(log_file.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644)};
+                        if (log_fd != -1) {
+                                dup2(log_fd, STDIN_FILENO);
+                                dup2(log_fd, STDOUT_FILENO);
+                                dup2(log_fd, STDERR_FILENO);
+                                close(log_fd);
+                        }
+
+                        execvp(c_args[0], c_args.data());
+                        exit(EXIT_FAILURE);
+                }
+                else {
+                        int status;
+                        waitpid(pid, &status, 0);
+
+                        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                                for (int i{0}; i < 50; ++i) {
+                                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                                        if (fs::exists(socket_path)) {
+                                                return;
+                                        }
+                                }
+                                throw std::runtime_error(std::format("Buildkit started, but socket not found. See logs: {}", log_file.string()));
+                        } else {
+                                throw std::runtime_error("Failed to launch BuildKit buildkit.");
+                        }
+                }
+        }};
+
+        try {
+                ProcessLock lock(lock_path);
+                spawn_buildkit();
+        } catch (const std::exception& e) {
+                std::cerr << std::format("Error during buildkit initialization: {}\n", e.what());
+        }
 }
 
 auto CommandLineHandler::run(std::span<std::string> args) -> void {
@@ -73,7 +148,6 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                     arg == "--mount-ns" || arg == "--time" || arg == "--cgroup" || arg == "--time-offset" ||
                     arg == "--mask" || arg == "--read-only-path" || arg == "--console-width" ||
                     arg == "--console-height" || arg == "--cgroup-path" ||
-                    // --- NEW RESOURCE LIMIT FLAGS ---
                     arg == "--cpu-quota" || arg == "--cpu-period" || arg == "--cpu-weight" ||
                     arg == "--memory-max" || arg == "--memory-swap" || arg == "--pids-limit" ||
                     arg == "--cpuset-cpus" || arg == "--set-cpuset-mems" ||
@@ -579,7 +653,6 @@ auto CommandLineHandler::start(std::span<std::string> args) -> void {
 
 auto CommandLineHandler::stop(std::span<std::string> args) -> void {
         auto& container_db_manager{ContainerDbManager::get_instance()};
-        auto& container_monitor{ContainerMonitor::get_instance()};
         container_db_manager.init();
 
         if (args.empty()) [[unlikely]] {
@@ -1090,7 +1163,6 @@ auto CommandLineHandler::update(std::span<std::string> args) -> void {
                 } else if (args[i] == "--set-cpuset-mems" && i + 1 < args.size()) {
                         cpuset_mems = args[++i];
                 } else if (args[i] == "--set-io-weight" && i + 1 < args.size()) {
-                        // Expected format: MAJOR:MINOR:WEIGHT
                         auto tokens{split_string(args[++i], ':')};
                         if (tokens.size() == 3) {
                                 IOWeightUpdate iw{};
@@ -1102,7 +1174,6 @@ auto CommandLineHandler::update(std::span<std::string> args) -> void {
                                 std::cerr << "Warning: Invalid format for --set-io-weight. Expected MAJOR:MINOR:WEIGHT\n";
                         }
                 } else if (args[i] == "--set-io-max" && i + 1 < args.size()) {
-                        // Expected format: MAJOR:MINOR:RBPS:WBPS:RIOPS:WIOPS
                         auto tokens{split_string(args[++i], ':')};
                         if (tokens.size() == 6) {
                                 IOMaxUpdate im{};
@@ -1204,3 +1275,208 @@ auto CommandLineHandler::update(std::span<std::string> args) -> void {
         std::cout << std::format("Successfully updated container '{}'.\n", target_id);
 }
 
+auto CommandLineHandler::build(std::span<std::string> args) -> void {
+        if (args.empty()) [[unlikely]] {
+                std::cerr << "Error: Build context path not specified.\n";
+                std::cerr << "Usage: quiver build [OPTIONS] PATH\n";
+                return;
+        }
+
+        std::vector<std::string> tags{};
+        std::string dockerfile_path{};
+        std::vector<std::string> build_args{};
+        std::string target{};
+        std::string output_path{};
+        bool no_cache{false};
+        bool pull{false};
+        std::string context_path{};
+
+
+        for (size_t i{0}; i < args.size(); ++i) {
+                const std::string& arg = args[i];
+                if (arg == "-t" || arg == "--tag") {
+                        if (++i < args.size()) tags.push_back(args[i]);
+                } else if (arg == "-f" || arg == "--file") {
+                        if (++i < args.size()) dockerfile_path = args[i];
+                } else if (arg == "-o" || arg == "--output") {
+                        if (++i < args.size()) output_path = args[i];
+                } else if (arg == "--build-arg") {
+                        if (++i < args.size()) build_args.push_back(args[i]);
+                } else if (arg == "--target") {
+                        if (++i < args.size()) target = args[i];
+                } else if (arg == "--no-cache") {
+                        no_cache = true;
+                } else if (arg == "--pull") {
+                        pull = true;
+                } else if (!arg.starts_with("-")) {
+                        context_path = arg;
+                } else {
+                        std::cerr << std::format("Warning: Unknown flag '{}' ignored.\n", arg);
+                }
+        }
+
+        if (context_path.empty()) [[unlikely]] {
+                std::cerr << "Error: Build context path not specified.\n";
+                return;
+        }
+
+        if (dockerfile_path.empty()) {
+                dockerfile_path = (fs::path(context_path) / "Quiverfile").string();
+        }
+
+        fs::path df_full_path{fs::absolute(dockerfile_path)};
+        fs::path ctx_full_path{fs::absolute(context_path)};
+
+        if (!fs::exists(df_full_path)) [[unlikely]] {
+                std::cerr << std::format("Error: Dockerfile not found at '{}'\n", df_full_path.string());
+                return;
+        }
+
+        ensure_buildkit();
+        std::string uid{std::to_string(getuid())};
+        std::string socket_path{std::format("/run/user/{}/buildkit/buildkitd.sock", uid)};
+
+        if (!fs::exists(socket_path)) [[unlikely]] {
+                std::cerr << "Error: Rootless BuildKit socket failed to initialize.\n";
+                return;
+        }
+
+        std::vector<std::string> exec_args;
+        exec_args.push_back("buildctl");
+        exec_args.push_back("--addr");
+        exec_args.push_back("unix://" + socket_path);
+        exec_args.push_back("build");
+        exec_args.push_back("--frontend");
+        exec_args.push_back("dockerfile.v0");
+        exec_args.push_back("--local");
+        exec_args.push_back("context=" + ctx_full_path.string());
+        exec_args.push_back("--local");
+        exec_args.push_back("dockerfile=" + df_full_path.parent_path().string());
+        exec_args.push_back("--opt");
+        exec_args.push_back("filename=" + df_full_path.filename().string());
+
+        if (!target.empty()) {
+                exec_args.push_back("--opt");
+                exec_args.push_back("target=" + target);
+        }
+        for (const auto& ba : build_args) {
+                exec_args.push_back("--opt");
+                exec_args.push_back("build-arg:" + ba);
+        }
+        if (no_cache) exec_args.push_back("--no-cache");
+        if (pull) {
+                exec_args.push_back("--opt");
+                exec_args.push_back("pull=true");
+        }
+
+
+        fs::path final_dest_dir{};
+        std::string temp_oci_dir = std::format("/tmp/quiver_oci_{}", getpid());
+
+
+        if (!tags.empty()) {
+                const char* home_dir = std::getenv("HOME");
+                if (home_dir == nullptr) {
+                        struct passwd* pw = getpwuid(getuid());
+                        if (pw) home_dir = pw->pw_dir;
+                }
+
+                std::string primary_tag = tags[0];
+                for (char& c : primary_tag) {
+                        if (c == ':' || c == '/') c = '_';
+                }
+
+                final_dest_dir = fs::path(home_dir) / ".quiver" / "images" / primary_tag;
+                fs::create_directories(final_dest_dir);
+
+
+                exec_args.push_back("--output");
+                exec_args.push_back("type=local,dest=" + final_dest_dir.string());
+
+
+                exec_args.push_back("--output");
+                exec_args.push_back("type=oci,dest=" + temp_oci_dir + ",tar=false");
+
+                std::cout << std::format("[Quiver Build] Generating native engine image at: {}\n", final_dest_dir.string());
+        }
+        else if (!output_path.empty()) {
+                fs::path output_tar{fs::absolute(output_path)};
+                if (output_tar.has_parent_path()) fs::create_directories(output_tar.parent_path());
+                exec_args.push_back("--output");
+                exec_args.push_back("type=oci,dest=" + output_tar.string());
+                std::cout << std::format("[Quiver Build] Exporting custom OCI tarball to: {}\n", output_tar.string());
+        }
+
+        std::cout << "[Quiver Build] Executing parallel build graph...\n";
+
+        std::vector<char*> c_args;
+        c_args.reserve(exec_args.size() + 1);
+        for (auto& arg : exec_args) c_args.push_back(arg.data());
+        c_args.push_back(nullptr);
+
+
+        pid_t pid = fork();
+
+        if (pid < 0) [[unlikely]] {
+                std::cerr << "Error: Failed to fork process for execution.\n";
+                return;
+        }
+        else if (pid == 0) {
+                execvp(c_args[0], c_args.data());
+                std::cerr << std::format("Error: Failed to execute '{}'. Is buildctl in your PATH?\n", c_args[0]);
+                exit(EXIT_FAILURE);
+        }
+        else {
+                int status;
+                waitpid(pid, &status, 0);
+
+
+                if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                        if (!final_dest_dir.empty()) {
+                                try {
+                                        std::ifstream index_file(fs::path(temp_oci_dir) / "index.json");
+                                        nlohmann::json index_json;
+                                        index_file >> index_json;
+
+                                        std::string manifest_digest = index_json["manifests"][0]["digest"];
+                                        std::string manifest_hash = manifest_digest.substr(7);
+
+
+                                        std::ifstream manifest_file(fs::path(temp_oci_dir) / "blobs" / "sha256" / manifest_hash);
+                                        nlohmann::json manifest_json;
+                                        manifest_file >> manifest_json;
+
+                                        std::string config_digest = manifest_json["config"]["digest"];
+                                        std::string config_hash = config_digest.substr(7);
+
+
+                                        fs::path source_config = fs::path(temp_oci_dir) / "blobs" / "sha256" / config_hash;
+                                        fs::path dest_config = final_dest_dir / "config.json";
+                                        std::error_code ec;
+                                        if (fs::exists(dest_config)) {
+                                                fs::permissions(dest_config, fs::perms::owner_write, fs::perm_options::add, ec);
+                                                fs::remove(dest_config, ec);
+                                        }
+
+                                        fs::copy_file(source_config, dest_config, fs::copy_options::overwrite_existing);
+
+                                        std::cout << "[Quiver Build] Successfully embedded config.json.\n";
+                                        std::cout << "[Quiver Build] Build completed successfully!\n";
+                                } catch (const std::exception& e) {
+                                        std::cerr << "Warning: Rootfs built, but failed to process config metadata: " << e.what() << "\n";
+                                }
+                        } else {
+                                std::cout << "[Quiver Build] Build completed successfully!\n";
+                        }
+                } else if (WIFSIGNALED(status)) {
+                        std::cerr << std::format("Error: Process killed by signal {}\n", WTERMSIG(status));
+                } else {
+                        std::cerr << std::format("Error: Build failed with exit code {}\n", WEXITSTATUS(status));
+                }
+
+                std::error_code ec{};
+                if (!temp_oci_dir.empty() && fs::exists(temp_oci_dir)) {
+                        fs::remove_all(temp_oci_dir, ec);
+                }
+        }
+}

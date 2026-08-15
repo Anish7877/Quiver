@@ -6,7 +6,6 @@
 #include "types.hpp"
 #include <filesystem>
 #include <libcuckoo/cuckoohash_map.hh>
-#include <mutex>
 #include <vector>
 
 class ImageManager;
@@ -44,12 +43,10 @@ class BuildExecutor {
                 [[nodiscard]] auto sanitize_filename(const std::string&) -> std::string;
                 [[nodiscard]] auto get_temp_filename() -> std::string;
                 fs::path m_build_dir{"/"};
-                std::mutex m_run_mutex{};
                 size_t m_target_node{};
                 ImageManager* m_image_manager{};
                 InFlightCacheManager* m_in_flight_cache_manager{};
                 LayerCacheManager* m_layer_cache_manager{};
-                ContainerMonitor* m_container_monitor{};
                 ThreadPool m_thread_pool{static_cast<size_t>(std::jthread::hardware_concurrency())};
                 libcuckoo::cuckoohash_map<size_t, std::vector<std::string>> m_stage_lower_dirs{};
                 libcuckoo::cuckoohash_map<size_t, std::vector<std::string>> m_stage_layers{};

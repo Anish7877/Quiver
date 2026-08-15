@@ -9,6 +9,7 @@ Quiverfile
 !conanfile.txt
 !setup.sh
 !third_party/CLI11.hpp
+Dockerfile
 
 .vscode/**
 *.code-workspace

@@ -55,6 +55,8 @@ int main(int argc, char* argv[]) {
                         CommandLineHandler::top(args);
                 } else if (command == "update") {
                         CommandLineHandler::update(args);
+                } else if (command == "build") {
+                        CommandLineHandler::build(args);
                 } else {
                         std::cerr << "quiver: '" << command << "' is not a quiver command.\n"
                                 << "See 'quiver --help'.\n";

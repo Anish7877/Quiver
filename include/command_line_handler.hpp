@@ -19,4 +19,5 @@ namespace CommandLineHandler {
         auto generate_systemd(std::span<std::string>) -> void;
         auto top(std::span<std::string>) -> void;
         auto update(std::span<std::string>) -> void;
+        auto build(std::span<std::string>) -> void;
 }
