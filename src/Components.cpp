@@ -1,4 +1,11 @@
 #include "include/Components.h"
+#include <QGraphicsOpacityEffect>
+#include <QPropertyAnimation>
+#include <QProgressBar>
+#include <QProcess>
+#include <QRegularExpression>
+#include <QTimer>
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPainter>
@@ -40,6 +47,10 @@ ToggleSwitch::ToggleSwitch(QWidget* parent)
 }
 ToggleSwitch::~ToggleSwitch() = default;
 
+
+auto ToggleSwitch::hitButton(const QPoint& pos) const -> bool {
+    return rect().contains(pos);
+}
 auto ToggleSwitch::paintEvent(QPaintEvent*) -> void {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
@@ -230,6 +241,455 @@ DeleteDialog::DeleteDialog(const QString& container_name, QWidget* parent)
     layout->addLayout(btns);
 }
 DeleteDialog::~DeleteDialog() = default;
+
+
+
+
+
+
+struct BuildProgressDialog::Impl {
+    QProgressBar* progress_bar_ {};
+    QLabel*       status_label_ {};
+    QTextEdit*    log_view_     {};
+    QProcess*     process_      {};
+};
+
+BuildProgressDialog::BuildProgressDialog(const QStringList& build_args, QWidget* parent)
+    : QDialog(parent), pimpl_{std::make_unique<Impl>()}
+{
+    setObjectName("CreateDialog");
+    setWindowTitle("Building Image");
+    setFixedSize(550, 400);
+    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+
+    auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(30, 30, 30, 30);
+    layout->setSpacing(15);
+
+    auto* title = new QLabel("Building Image...");
+    title->setObjectName("PageTitle");
+    title->setAlignment(Qt::AlignCenter);
+    layout->addWidget(title);
+
+    pimpl_->progress_bar_ = new QProgressBar;
+    pimpl_->progress_bar_->setRange(0, 100);
+    pimpl_->progress_bar_->setValue(0);
+    pimpl_->progress_bar_->setTextVisible(true);
+    pimpl_->progress_bar_->setAlignment(Qt::AlignCenter);
+    pimpl_->progress_bar_->setStyleSheet(
+        "QProgressBar { border: 1px solid #3f3f46; border-radius: 6px; background: transparent; color: white; }"
+        "QProgressBar::chunk { background-color: #f97316; border-radius: 5px; }"
+    );
+    pimpl_->progress_bar_->setFixedHeight(24);
+    layout->addWidget(pimpl_->progress_bar_);
+
+    pimpl_->status_label_ = new QLabel("Starting build process...");
+    pimpl_->status_label_->setStyleSheet("color: #a1a1aa; font-size: 13px;");
+    layout->addWidget(pimpl_->status_label_);
+    
+    pimpl_->log_view_ = new QTextEdit;
+    pimpl_->log_view_->setReadOnly(true);
+    pimpl_->log_view_->setStyleSheet("background: #18181b; color: #d4d4d8; border: 1px solid #3f3f46; border-radius: 6px; font-family: monospace; font-size: 11px;");
+    layout->addWidget(pimpl_->log_view_);
+
+    auto* btns = new QHBoxLayout;
+    btns->addStretch();
+    auto* cancel_btn = new QPushButton("Cancel / Close");
+    cancel_btn->setObjectName("SecondaryBtn");
+    cancel_btn->setCursor(Qt::PointingHandCursor);
+    connect(cancel_btn, &QPushButton::clicked, this, [this]() {
+        if (pimpl_->process_ && pimpl_->process_->state() == QProcess::Running) {
+            pimpl_->process_->terminate();
+        }
+        reject();
+    });
+    btns->addWidget(cancel_btn);
+    layout->addLayout(btns);
+
+    pimpl_->process_ = new QProcess(this);
+    
+    auto parse_output = [this](const QString& output) {
+        QString clean = output.trimmed();
+        if (clean.isEmpty()) return;
+        
+        QRegularExpression re(R"(\[([a-zA-Z0-9_-]+)\s+(\d+)/(\d+)\])");
+        auto match = re.match(clean);
+        if (match.hasMatch()) {
+            int current = match.captured(2).toInt();
+            int total = match.captured(3).toInt();
+            if (total > 0) {
+                int percentage = (current * 100) / total;
+                pimpl_->progress_bar_->setValue(percentage);
+            }
+            pimpl_->status_label_->setText(QString("Running %1 step %2 of %3...").arg(match.captured(1)).arg(current).arg(total));
+        } else if (clean.contains("FINISHED")) {
+            pimpl_->progress_bar_->setValue(100);
+            pimpl_->status_label_->setText("Build finished successfully!");
+        } else if (clean.contains("exporting")) {
+            pimpl_->status_label_->setText("Exporting image...");
+        }
+    };
+    
+    connect(pimpl_->process_, &QProcess::readyReadStandardOutput, this, [this, parse_output]() {
+        QString output = pimpl_->process_->readAllStandardOutput();
+        pimpl_->log_view_->append(output.trimmed());
+        parse_output(output);
+    });
+
+    connect(pimpl_->process_, &QProcess::readyReadStandardError, this, [this, parse_output]() {
+        QString output = pimpl_->process_->readAllStandardError();
+        pimpl_->log_view_->append("<span style=\"color: #f87171;\">" + output.trimmed().replace("\n", "<br>") + "</span>");
+        parse_output(output);
+    });
+
+    connect(pimpl_->process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this](int exitCode, QProcess::ExitStatus exitStatus) {
+        if (exitCode == 0 && exitStatus == QProcess::NormalExit) {
+            pimpl_->progress_bar_->setValue(100);
+            pimpl_->status_label_->setText("Build complete!");
+            // Accept the dialog automatically after a successful build
+            QTimer::singleShot(2000, this, &QDialog::accept);
+        } else {
+            pimpl_->status_label_->setText("Build failed! Check logs.");
+        }
+    });
+
+    QString cli_path = Quiver::Backend::get_instance().get_cli_path();
+    pimpl_->process_->start(cli_path, build_args);
+}
+
+BuildProgressDialog::~BuildProgressDialog() {
+    if (pimpl_->process_ && pimpl_->process_->state() == QProcess::Running) {
+        pimpl_->process_->terminate();
+        pimpl_->process_->waitForFinished(1000);
+    }
+}
+
+struct BuildImageDialog::Impl {
+    ToggleSwitch* output_toggle_{};
+    QWidget*      image_widget_{};
+    QWidget*      output_widget_{};
+    QLineEdit*    name_input_{};
+    QLineEdit*    tag_input_{};
+    QLineEdit*    context_input_{};
+    QPushButton*  context_btn_{};
+    QLineEdit*    file_input_{};
+    QPushButton*  file_btn_{};
+    QLineEdit*    output_input_{};
+    QPushButton*  output_btn_{};
+    QLineEdit*    target_input_{};
+    QLineEdit*    buildarg_input_{};
+    ToggleSwitch* no_cache_toggle_{};
+    QScrollArea*  scroll_area_{};
+    QWidget*      scroll_content_{};
+};
+
+BuildImageDialog::BuildImageDialog(QWidget* parent)
+    : QDialog(parent), pimpl_{std::make_unique<Impl>()}
+{
+    setObjectName("CreateDialog");
+    setWindowTitle("Build Image");
+    setFixedSize(600, 750);
+    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+
+    auto* main { new QVBoxLayout(this) };
+    main->setContentsMargins(30, 30, 30, 30);
+    main->setSpacing(15);
+
+    auto* head { new QHBoxLayout };
+    head->setContentsMargins(0, 0, 0, 10);
+    
+    auto* title_lbl { new QLabel("Build Project Image") };
+    title_lbl->setObjectName("PageTitle");
+    title_lbl->setAlignment(Qt::AlignCenter);
+
+    auto* close { new QPushButton("✕") };
+    close->setObjectName("CloseBtn");
+    close->setFixedSize(30, 30);
+    close->setCursor(Qt::PointingHandCursor);
+    connect(close, &QPushButton::clicked, this, &QDialog::reject);
+    
+    head->addStretch();
+    head->addWidget(title_lbl);
+    head->addStretch();
+    head->addWidget(close);
+    main->addLayout(head);
+
+    auto* div1 { new QFrame };
+    div1->setObjectName("Divider");
+    div1->setFixedHeight(1);
+    main->addWidget(div1);
+
+    pimpl_->scroll_area_ = new QScrollArea;
+    pimpl_->scroll_area_->setWidgetResizable(true);
+    pimpl_->scroll_area_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    pimpl_->scroll_area_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    pimpl_->scroll_area_->setStyleSheet("QScrollArea { border: none; background: transparent; } QScrollBar:vertical { background: transparent; width: 8px; border-radius: 4px; margin: 0px; } QScrollBar::handle:vertical { background: #52525B; border-radius: 4px; } QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }");
+    
+    pimpl_->scroll_content_ = new QWidget;
+    pimpl_->scroll_content_->setStyleSheet("background: transparent;");
+    auto* v_layout { new QVBoxLayout(pimpl_->scroll_content_) };
+    v_layout->setContentsMargins(0, 10, 15, 10);
+    v_layout->setSpacing(20);
+    pimpl_->scroll_area_->setWidget(pimpl_->scroll_content_);
+    main->addWidget(pimpl_->scroll_area_);
+
+    
+    // Toggle for Output Directory
+    auto* out_toggle_row { new QHBoxLayout };
+    pimpl_->output_toggle_ = new ToggleSwitch;
+    out_toggle_row->addWidget(pimpl_->output_toggle_);
+    auto* out_toggle_lbl { new QLabel("Export to Directory Instead of Quiver image") };
+    out_toggle_lbl->setObjectName("ToggleText");
+    out_toggle_row->addWidget(out_toggle_lbl);
+    out_toggle_row->addStretch();
+    v_layout->addLayout(out_toggle_row);
+
+    // Use a QStackedWidget to prevent layout jitter when switching
+    auto* type_stack = new QStackedWidget;
+    type_stack->setFixedHeight(80); // Set a fixed height to prevent any jitter
+
+    // Image Name Widget (Default Shown)
+    pimpl_->image_widget_ = new QWidget;
+    auto* img_layout = new QVBoxLayout(pimpl_->image_widget_);
+    img_layout->setContentsMargins(0, 0, 0, 0);
+    auto* img_lbl { new QLabel("Image Name") };
+    img_lbl->setObjectName("FormLabel");
+    img_layout->addWidget(img_lbl);
+    auto* img_row { new QHBoxLayout };
+    pimpl_->name_input_ = new QLineEdit;
+    pimpl_->name_input_->setPlaceholderText("abc");
+    pimpl_->name_input_->setFixedHeight(36);
+    pimpl_->tag_input_ = new QLineEdit;
+    pimpl_->tag_input_->setObjectName("TagInput");
+    pimpl_->tag_input_->setText("v1");
+    pimpl_->tag_input_->setFixedSize(100, 36);
+    pimpl_->tag_input_->setAlignment(Qt::AlignCenter);
+    img_row->addWidget(pimpl_->name_input_);
+    auto* colon { new QLabel(":") };
+    colon->setObjectName("ColonLabel");
+    img_row->addWidget(colon);
+    img_row->addWidget(pimpl_->tag_input_);
+    img_layout->addLayout(img_row);
+    type_stack->addWidget(pimpl_->image_widget_);
+
+    // Output Widget (Hidden by Default)
+    pimpl_->output_widget_ = new QWidget;
+    auto* out_layout = new QVBoxLayout(pimpl_->output_widget_);
+    out_layout->setContentsMargins(0, 0, 0, 0);
+    auto* output_lbl { new QLabel("Output Directory") };
+    output_lbl->setObjectName("FormLabel");
+    out_layout->addWidget(output_lbl);
+    auto* out_row { new QHBoxLayout };
+    pimpl_->output_input_ = new QLineEdit;
+    pimpl_->output_input_->setPlaceholderText("e.g. ./temp/");
+    pimpl_->output_input_->setFixedHeight(36);
+    pimpl_->output_btn_ = new QPushButton("Browse...");
+    pimpl_->output_btn_->setObjectName("SecondaryBtn");
+    pimpl_->output_btn_->setFixedSize(100, 36);
+    pimpl_->output_btn_->setCursor(Qt::PointingHandCursor);
+    connect(pimpl_->output_btn_, &QPushButton::clicked, this, [this]() {
+        QString dir = QFileDialog::getExistingDirectory(this, "Select Output Directory", QDir::homePath());
+        if (!dir.isEmpty()) pimpl_->output_input_->setText(dir);
+    });
+    out_row->addWidget(pimpl_->output_input_);
+    out_row->addWidget(pimpl_->output_btn_);
+    out_layout->addLayout(out_row);
+    type_stack->addWidget(pimpl_->output_widget_);
+
+    v_layout->addWidget(type_stack);
+
+    // Toggle logic with fade animation
+    connect(pimpl_->output_toggle_, &QCheckBox::toggled, this, [this, type_stack](bool checked) {
+        QWidget* old_widget = checked ? pimpl_->image_widget_ : pimpl_->output_widget_;
+        QWidget* new_widget = checked ? pimpl_->output_widget_ : pimpl_->image_widget_;
+        
+        auto* effect = new QGraphicsOpacityEffect(old_widget);
+        old_widget->setGraphicsEffect(effect);
+        auto* anim = new QPropertyAnimation(effect, "opacity");
+        anim->setDuration(150);
+        anim->setStartValue(1.0);
+        anim->setEndValue(0.0);
+        connect(anim, &QPropertyAnimation::finished, this, [this, type_stack, new_widget, old_widget]() {
+            // setGraphicsEffect(nullptr) deletes the effect automatically
+            old_widget->setGraphicsEffect(nullptr);
+            type_stack->setCurrentWidget(new_widget);
+            
+            auto* effect2 = new QGraphicsOpacityEffect(new_widget);
+            new_widget->setGraphicsEffect(effect2);
+            auto* anim2 = new QPropertyAnimation(effect2, "opacity");
+            anim2->setDuration(150);
+            anim2->setStartValue(0.0);
+            anim2->setEndValue(1.0);
+            connect(anim2, &QPropertyAnimation::finished, this, [new_widget]() {
+                new_widget->setGraphicsEffect(nullptr);
+            });
+            anim2->start(QAbstractAnimation::DeleteWhenStopped);
+        });
+        anim->start(QAbstractAnimation::DeleteWhenStopped);
+    });
+
+    // Context Path
+    auto* context_lbl { new QLabel("Context Directory (Default)") };
+    context_lbl->setObjectName("FormLabel");
+    v_layout->addWidget(context_lbl);
+    auto* ctx_row { new QHBoxLayout };
+    pimpl_->context_input_ = new QLineEdit;
+    pimpl_->context_input_->setPlaceholderText("e.g. ~/Downloads/");
+    pimpl_->context_input_->setFixedHeight(36);
+    pimpl_->context_btn_ = new QPushButton("Browse...");
+    pimpl_->context_btn_->setObjectName("SecondaryBtn");
+    pimpl_->context_btn_->setFixedSize(100, 36);
+    pimpl_->context_btn_->setCursor(Qt::PointingHandCursor);
+    connect(pimpl_->context_btn_, &QPushButton::clicked, this, [this]() {
+        QString dir = QFileDialog::getExistingDirectory(this, "Select Context Directory", QDir::homePath());
+        if (!dir.isEmpty()) pimpl_->context_input_->setText(dir);
+    });
+    ctx_row->addWidget(pimpl_->context_input_);
+    ctx_row->addWidget(pimpl_->context_btn_);
+    v_layout->addLayout(ctx_row);
+
+    // Custom File Path
+    auto* file_lbl { new QLabel("Custom Quiverfile") };
+    file_lbl->setObjectName("FormLabel");
+    v_layout->addWidget(file_lbl);
+    auto* file_row { new QHBoxLayout };
+    pimpl_->file_input_ = new QLineEdit;
+    pimpl_->file_input_->setPlaceholderText("Leave empty for default Quiverfile in Context Dir");
+    pimpl_->file_input_->setFixedHeight(36);
+    pimpl_->file_btn_ = new QPushButton("Browse...");
+    pimpl_->file_btn_->setObjectName("SecondaryBtn");
+    pimpl_->file_btn_->setFixedSize(100, 36);
+    pimpl_->file_btn_->setCursor(Qt::PointingHandCursor);
+    connect(pimpl_->file_btn_, &QPushButton::clicked, this, [this]() {
+        QString file = QFileDialog::getOpenFileName(this, "Select Custom File", QDir::homePath());
+        if (!file.isEmpty()) pimpl_->file_input_->setText(file);
+    });
+    file_row->addWidget(pimpl_->file_input_);
+    file_row->addWidget(pimpl_->file_btn_);
+    v_layout->addLayout(file_row);
+
+    // Target Stage & Build Args
+    auto* half_row { new QHBoxLayout };
+    auto* half_left { new QVBoxLayout };
+    auto* target_lbl { new QLabel("Target Stage") };
+    target_lbl->setObjectName("FormLabel");
+    half_left->addWidget(target_lbl);
+    pimpl_->target_input_ = new QLineEdit;
+    pimpl_->target_input_->setPlaceholderText("e.g. build-stage");
+    pimpl_->target_input_->setFixedHeight(36);
+    half_left->addWidget(pimpl_->target_input_);
+    half_row->addLayout(half_left);
+
+    auto* half_right { new QVBoxLayout };
+    auto* no_cache_lbl { new QLabel("Options") };
+    no_cache_lbl->setObjectName("FormLabel");
+    half_right->addWidget(no_cache_lbl);
+    
+    auto* cache_row { new QHBoxLayout };
+    pimpl_->no_cache_toggle_ = new ToggleSwitch;
+    cache_row->addWidget(pimpl_->no_cache_toggle_);
+    auto* cache_txt { new QLabel("No Cache") };
+    cache_txt->setObjectName("ToggleText");
+    cache_row->addWidget(cache_txt);
+    cache_row->addStretch();
+    half_right->addLayout(cache_row);
+    
+    half_row->addLayout(half_right);
+    v_layout->addLayout(half_row);
+
+    auto* buildarg_lbl { new QLabel("Build Arguments") };
+    buildarg_lbl->setObjectName("FormLabel");
+    v_layout->addWidget(buildarg_lbl);
+    pimpl_->buildarg_input_ = new QLineEdit;
+    pimpl_->buildarg_input_->setPlaceholderText("e.g. VERSION=1.2 NAME=100");
+    pimpl_->buildarg_input_->setFixedHeight(36);
+    v_layout->addWidget(pimpl_->buildarg_input_);
+    
+    v_layout->addStretch();
+
+    auto* foot { new QHBoxLayout };
+    foot->addStretch();
+    auto* create { new QPushButton("Build Image") };
+    create->setObjectName("PrimaryButton");
+    create->setFixedSize(160, 40);
+    create->setCursor(Qt::PointingHandCursor);
+    connect(create, &QPushButton::clicked, this, [this]() {
+        QString ctx = pimpl_->context_input_->text().trimmed();
+        QString custom_file = pimpl_->file_input_->text().trimmed();
+        
+        if (custom_file.isEmpty() && !ctx.isEmpty()) {
+            QDir dir(ctx);
+            if (!dir.exists("Quiverfile")) {
+                CustomAlert alert(CustomAlert::Warning, "File Not Found", "No Quiverfile found in default location: " + ctx, this);
+                alert.exec();
+                return;
+            }
+        } else if (custom_file.isEmpty() && ctx.isEmpty()) {
+            QDir dir(QDir::currentPath());
+            if (!dir.exists("Quiverfile")) {
+                CustomAlert alert(CustomAlert::Warning, "File Not Found", "No Quiverfile found in current directory.", this);
+                alert.exec();
+                return;
+            }
+        }
+        
+        QStringList args;
+        args << "build";
+        
+        if (!pimpl_->output_toggle_->isChecked()) {
+            QString name = pimpl_->name_input_->text().trimmed();
+            QString tag = pimpl_->tag_input_->text().trimmed();
+            if (!name.isEmpty()) {
+                if (!tag.isEmpty()) {
+                    args << "-t" << (name + ":" + tag);
+                } else {
+                    args << "-t" << name;
+                }
+            }
+        } else {
+            QString output = pimpl_->output_input_->text().trimmed();
+            if (!output.isEmpty()) {
+                args << "--output" << output;
+            }
+        }
+        
+        if (!custom_file.isEmpty()) {
+            args << "--file" << custom_file;
+        }
+        
+        if (pimpl_->no_cache_toggle_->isChecked()) {
+            args << "--no-cache";
+        }
+        
+        QString target = pimpl_->target_input_->text().trimmed();
+        if (!target.isEmpty()) {
+            args << "--target" << target;
+        }
+        
+        QString buildargs = pimpl_->buildarg_input_->text().trimmed();
+        if (!buildargs.isEmpty()) {
+            QStringList parts = buildargs.split(" ", Qt::SkipEmptyParts);
+            for (const QString& part : parts) {
+                args << "--build-arg" << part;
+            }
+        }
+        
+        if (!ctx.isEmpty()) {
+            args << ctx;
+        } else {
+            args << ".";
+        }
+        
+        BuildProgressDialog progress_dialog(args, this);
+        progress_dialog.exec();
+        
+        accept();
+    });
+    foot->addWidget(create);
+    main->addLayout(foot);
+}
+BuildImageDialog::~BuildImageDialog() = default;
+
 
 
 struct CreateDialog::Impl {

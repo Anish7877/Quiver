@@ -27,6 +27,7 @@ public:
     ~ToggleSwitch() override;
 protected:
     auto paintEvent(QPaintEvent* event) -> void override;
+    auto hitButton(const QPoint& pos) const -> bool override;
 private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_ {};
@@ -76,6 +77,28 @@ private:
     std::unique_ptr<Impl> pimpl_ {};
 };
 
+
+class BuildProgressDialog : public QDialog {
+    Q_OBJECT
+public:
+    explicit BuildProgressDialog(const QStringList& build_args, QWidget* parent = nullptr);
+    ~BuildProgressDialog() override;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pimpl_ {};
+};
+
+class BuildImageDialog : public QDialog {
+    Q_OBJECT
+public:
+    explicit BuildImageDialog(QWidget* parent = nullptr);
+    ~BuildImageDialog() override;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pimpl_ {};
+};
 
 class CreateDialog : public QDialog {
     Q_OBJECT

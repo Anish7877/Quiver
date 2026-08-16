@@ -823,6 +823,22 @@ ImagesPage::ImagesPage(QWidget* parent)
         { "REPOSITORY", "TAG",  "SIZE", "CREATED" },
         this);
 
+    auto* build_btn = new QPushButton("Build Image");
+    build_btn->setStyleSheet(
+        "QPushButton { background: #f97316; color: #ffffff; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; }"
+        "QPushButton:hover { background: #ea580c; }"
+    );
+    build_btn->setFixedSize(120, 36);
+    build_btn->setCursor(Qt::PointingHandCursor);
+    
+    connect(build_btn, &QPushButton::clicked, this, [this]() {
+        BuildImageDialog dialog(this);
+        dialog.exec();
+    });
+
+    pimpl_->page_->header_layout()->addStretch();
+    pimpl_->page_->header_layout()->addWidget(build_btn);
+
     auto add = [&](const QStringList& d) {
         pimpl_->page_->add_row(d, "Delete", "TableDangerBtn");
     };
