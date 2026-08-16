@@ -22,8 +22,7 @@ enum class SlotState : std::uint32_t {
 
 enum class TargetDB : std::uint8_t {
         CONTAINER = 0,
-        IMAGE = 2,
-        LAYERCACHE = 3
+        IMAGE = 1
 };
 
 enum class TargetLog : std::uint8_t {
@@ -117,21 +116,10 @@ struct SubIDRange {
     uint32_t count{};
 };
 
-struct LayerCache {
-        std::string hash{};
-        std::string diff_id{};
-        std::string lower_dir{};
-        int64_t blob_size{0};
-};
-
 struct ImageMetadata {
         std::string id{};
         std::string name{};
         std::string tag{};
-        std::string digest{};
-        std::string path{};
         uint64_t size_bytes{};
-        int64_t created_at{};
-        std::string architecture{"amd64"};
         std::string source{};
 };

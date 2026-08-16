@@ -1,3 +1,5 @@
+#include "container_config.hpp"
+#include "database_job_processor.hpp"
 #include "log_job_processor.hpp"
 #include "oci_runtime.hpp"
 #include "types.hpp"
@@ -15,11 +17,15 @@
 #include <exception>
 #include <fcntl.h>
 #include <filesystem>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <nlohmann/json.hpp>
+#include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -29,6 +35,7 @@
 #include <random>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -42,9 +49,9 @@
 #include <thread>
 #include <unistd.h>
 #include <zlib.h>
-#include <nlohmann/json.hpp>
-#include "database_job_processor.hpp"
 using json = nlohmann::json;
+namespace fs = std::filesystem;
+
 
 auto Utils::dir_exists(const fs::path& path) -> bool {
         return fs::is_directory(path);
@@ -292,7 +299,7 @@ auto Utils::find_program_path(const std::string& program_name) -> fs::path {
         return "";
 }
 
-auto Utils::generate_container_id() -> std::string {
+auto Utils::generate_id() -> std::string {
         auto now{std::chrono::system_clock::now().time_since_epoch().count()};
         std::random_device rd{};
         std::string input{std::to_string(now) + ":" + std::to_string(rd())};
@@ -487,7 +494,6 @@ auto Utils::resolve_user_group(const std::vector<std::string>& lower_dirs, const
         }
 
         if (!uid_set || !gid_set) {
-                // Find /etc/passwd and /etc/group from lower_dirs (top to bottom)
                 fs::path passwd_file;
                 fs::path group_file;
 
@@ -545,8 +551,8 @@ auto Utils::resolve_user_group(const std::vector<std::string>& lower_dirs, const
         }
 
         if (!uid_set && !is_number(user)) {
-                // throw std::runtime_error(std::format("Unknown user '{}'", user));
-                // Usually Docker defaults to 0 if not found, or fails. We fail to match builder.
+
+
                 throw std::runtime_error(std::format("Unknown user '{}'", user));
         }
         if (!gid_set && !group.empty() && !is_number(group)) {
@@ -600,10 +606,8 @@ auto Utils::extract_tarball(const std::string& tarball_path, const std::string& 
         struct archive* ext;
         struct archive_entry* entry;
 
-        // FIX: Removed ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS since we are manually
-        // sanitizing and providing safe absolute paths to libarchive.
         int flags{ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
-                  ARCHIVE_EXTRACT_FFLAGS | ARCHIVE_EXTRACT_SECURE_SYMLINKS};
+                ARCHIVE_EXTRACT_FFLAGS | ARCHIVE_EXTRACT_SECURE_SYMLINKS};
         int r;
 
         a = archive_read_new();
@@ -621,7 +625,6 @@ auto Utils::extract_tarball(const std::string& tarball_path, const std::string& 
                 throw std::runtime_error(std::format("Tar Error: Could not open {} - {}", tarball_path, archive_error_string(a)));
         }
 
-        // Pre-calculate the canonical destination to use as a security boundary
         const fs::path canonical_dest{fs::weakly_canonical(destination_path)};
 
         while (true) {
@@ -632,29 +635,23 @@ auto Utils::extract_tarball(const std::string& tarball_path, const std::string& 
                         if (r < ARCHIVE_WARN) throw std::runtime_error("Tar Critical Error");
                 }
 
-                // --- SECURITY CHECK: Path Traversal Guard ---
                 std::string raw_path = archive_entry_pathname(entry);
 
-                // 1. Strip leading slashes to prevent absolute path overriding
                 while (!raw_path.empty() && raw_path.front() == '/') {
                         raw_path.erase(0, 1);
                 }
 
-                // 2. Lexically normalize (resolves . and .. textually, WITHOUT touching the host disk)
                 fs::path entry_path{raw_path};
                 entry_path = entry_path.lexically_normal();
 
-                // 3. Block path traversal purely based on the normalized string
                 if (entry_path.string().starts_with("..")) [[unlikely]] {
                         std::cerr << std::format("Security Warning: Blocked path traversal attempt in tarball: {}\n", entry_path.string());
                         continue;
                 }
 
-                // 4. Safely construct the final absolute path
                 const fs::path full_path{canonical_dest / entry_path};
                 archive_entry_set_pathname(entry, full_path.c_str());
 
-                // 5. Handle hard links with the exact same string-only normalization
                 const char* hardlink_target = archive_entry_hardlink(entry);
                 if (hardlink_target != nullptr) {
                         std::string raw_hl = hardlink_target;
@@ -678,7 +675,6 @@ auto Utils::extract_tarball(const std::string& tarball_path, const std::string& 
                         std::cerr << std::format("Tar Error: failed to write header for {} - {}\n",
                                         archive_entry_pathname(entry), archive_error_string(ext));
                 } else if (archive_entry_size(entry) > 0) {
-                        // Copy the data from the archive to the disk
                         const void* buff;
                         size_t size;
                         la_int64_t offset;
@@ -708,7 +704,7 @@ auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string
         struct archive* ext;
         struct archive_entry* entry;
 
-        // Standard extraction flags: preserve time, permissions, ACLs, flags, and security checks
+
         int flags{ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL | ARCHIVE_EXTRACT_FFLAGS |
                   ARCHIVE_EXTRACT_SECURE_SYMLINKS};
         int r;
@@ -728,7 +724,7 @@ auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string
                 throw std::runtime_error(std::format("Tar Error: Could not open {} - {}", tarball_path, archive_error_string(a)));
         }
 
-        // Pre-calculate the canonical destination to use as a security boundary
+
         const fs::path canonical_dest{fs::weakly_canonical(destination_path)};
 
         while (true) {
@@ -739,25 +735,25 @@ auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string
                         if (r < ARCHIVE_WARN) throw std::runtime_error("Tar Critical Error");
                 }
 
-                // --- SECURITY CHECK: Path Traversal Guard ---
+
                 std::string raw_path = archive_entry_pathname(entry);
 
-                // 1. Strip leading slashes to prevent absolute path overriding
+
                 while (!raw_path.empty() && raw_path.front() == '/') {
                         raw_path.erase(0, 1);
                 }
 
-                // 2. Lexically normalize (resolves . and .. textually, WITHOUT touching the host disk)
+
                 fs::path entry_path{raw_path};
                 entry_path = entry_path.lexically_normal();
 
-                // 3. Block path traversal purely based on the normalized string
+
                 if (entry_path.string().starts_with("..")) [[unlikely]] {
                         std::cerr << std::format("Security Warning: Blocked path traversal attempt in tarball: {}\n", entry_path.string());
                         continue;
                 }
 
-                // OCI Whiteout Handling
+
                 std::string filename = entry_path.filename().string();
                 if (filename == ".wh..wh..opq") {
                         fs::path parent_dir = canonical_dest / entry_path.parent_path();
@@ -766,7 +762,7 @@ auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string
                                         fs::remove_all(p.path());
                                 }
                         }
-                        // Skip writing the .wh..wh..opq file
+
                         continue;
                 } else if (filename.starts_with(".wh.")) {
                         std::string target = filename.substr(4);
@@ -774,15 +770,15 @@ auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string
                         if (fs::exists(target_path)) {
                                 fs::remove_all(target_path);
                         }
-                        // Skip writing the whiteout file
+
                         continue;
                 }
 
-                // 4. Safely construct the final absolute path
+
                 const fs::path full_path{canonical_dest / entry_path};
                 archive_entry_set_pathname(entry, full_path.c_str());
 
-                // 5. Handle hard links with the exact same string-only normalization
+
                 const char* hardlink_target = archive_entry_hardlink(entry);
                 if (hardlink_target != nullptr) {
                         std::string raw_hl = hardlink_target;
@@ -805,7 +801,7 @@ auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string
                         std::cerr << std::format("Tar Error: failed to write header for {} - {}\n",
                                         archive_entry_pathname(entry), archive_error_string(ext));
                 } else if (archive_entry_size(entry) > 0) {
-                        // Copy the data from the archive to the disk
+
                         const void* buff;
                         size_t size;
                         la_int64_t offset;
@@ -1268,4 +1264,133 @@ auto Utils::get_boot_time() -> long {
         std::from_chars(sv.data() + pos, sv.data() + sv.size(), btime);
 
         return btime;
+}
+
+auto Utils::load_oci_tar(const fs::path& tar_path, const fs::path& dest_dir) -> bool {
+        if (!fs::exists(tar_path)) {
+                std::cerr << "Error: Tar file not found: " << tar_path.string() << "\n";
+                return false;
+        }
+
+        std::error_code ec{};
+        fs::path temp_layout_dir{std::format("/tmp/quiver_layout_{}", getpid())};
+        fs::create_directories(temp_layout_dir, ec);
+
+        std::cout << "Extracting raw OCI layout\n";
+
+        try {
+                Utils::extract_tarball(tar_path.string(), temp_layout_dir.string());
+        } catch (const std::exception& e) {
+                std::cerr << "Error extracting OCI tarball: " << e.what() << "\n";
+                fs::remove_all(temp_layout_dir, ec);
+                return false;
+        }
+
+        std::string manifest_digest{};
+        try {
+                fs::path index_path = temp_layout_dir / "index.json";
+
+                std::ifstream index_file(index_path);
+                if (!index_file.is_open()) {
+                        throw std::runtime_error(
+                                        std::format("Unable to open '{}'", index_path.string())
+                                        );
+                }
+
+                nlohmann::json index_json;
+                index_file >> index_json;
+                index_file.close();
+
+                if (!index_json.contains("manifests") ||
+                                !index_json["manifests"].is_array() ||
+                                index_json["manifests"].empty()) {
+                        throw std::runtime_error(
+                                        "OCI index.json does not contain any manifests"
+                                        );
+                }
+
+                auto& manifest{index_json["manifests"][0]};
+
+                if (!manifest.contains("digest") ||
+                                !manifest["digest"].is_string()) {
+                        throw std::runtime_error(
+                                        "OCI manifest descriptor does not contain a valid digest"
+                                        );
+                }
+
+                manifest_digest = manifest["digest"].get<std::string>();
+
+                manifest["annotations"]["org.opencontainers.image.ref.name"] = "latest";
+
+                std::ofstream out_index(index_path);
+                if (!out_index.is_open()) {
+                        throw std::runtime_error(
+                                        std::format("Unable to write '{}'", index_path.string())
+                                        );
+                }
+
+                out_index << index_json.dump(4);
+                out_index.close();
+
+        } catch (const std::exception& e) {
+                std::cerr << "Error parsing OCI index.json: "
+                        << e.what() << "\n";
+
+                fs::remove_all(temp_layout_dir, ec);
+                return false;
+        }
+
+        std::cout << "Unpacking image layers\n";
+
+        if (fs::exists(dest_dir)) {
+                fs::remove_all(dest_dir, ec);
+        }
+
+        std::string image_ref{std::format("{}:latest", temp_layout_dir.string())};
+        std::vector<std::string> umoci_args = {
+                "umoci",
+                "unpack",
+                "--rootless",
+                "--image",
+                image_ref,
+                dest_dir.string()
+        };
+
+        std::vector<char*> c_args;
+        c_args.reserve(umoci_args.size() + 1);
+        for (auto& arg : umoci_args) c_args.push_back(arg.data());
+        c_args.push_back(nullptr);
+
+        pid_t pid = fork();
+
+        if (pid < 0) {
+                std::cerr << "Error: Failed to fork process.\n";
+                fs::remove_all(temp_layout_dir, ec);
+                return false;
+        }
+        else if (pid == 0) {
+                execvp(c_args[0], c_args.data());
+                std::cerr << std::format("Error: Failed to execute '{}'.?\n", c_args[0]);
+                exit(EXIT_FAILURE);
+        }
+        else {
+                int status;
+                waitpid(pid, &status, 0);
+
+                bool success = false;
+                if (WIFEXITED(status)) {
+                        int exit_code = WEXITSTATUS(status);
+                        if (exit_code == 0) {
+                                std::cout << "Successfully unpacked OCI bundle\n";
+                                success = true;
+                        } else {
+                                std::cerr << "Error: extraction failed with exit code " << exit_code << "\n";
+                        }
+                } else if (WIFSIGNALED(status)) {
+                        std::cerr << "Error: process killed by signal " << WTERMSIG(status) << "\n";
+                }
+                fs::remove_all(temp_layout_dir);
+
+                return success;
+        }
 }

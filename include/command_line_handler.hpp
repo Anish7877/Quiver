@@ -20,4 +20,8 @@ namespace CommandLineHandler {
         auto top(std::span<std::string>) -> void;
         auto update(std::span<std::string>) -> void;
         auto build(std::span<std::string>) -> void;
+        auto create(std::span<std::string>) -> void;
+        auto image(std::span<std::string>) -> void;
+        auto restart(std::span<std::string>) -> void;
+        auto volume(std::span<std::string>) -> void;
 }

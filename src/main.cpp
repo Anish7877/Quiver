@@ -57,19 +57,25 @@ int main(int argc, char* argv[]) {
                         CommandLineHandler::update(args);
                 } else if (command == "build") {
                         CommandLineHandler::build(args);
+                } else if (command == "create") {
+                        CommandLineHandler::create(args);
+                } else if (command == "image") {
+                        CommandLineHandler::image(args);
+                } else if (command == "restart") {
+                        CommandLineHandler::restart(args);
+                } else if (command == "volume") {
+                        CommandLineHandler::volume(args);
                 } else {
                         std::cerr << "quiver: '" << command << "' is not a quiver command.\n"
                                 << "See 'quiver --help'.\n";
                         return 1;
                 }
         } catch (const std::exception& e) {
-                // Catch the std::runtime_error thrown by CommandLineHandler::run
                 std::cerr << "Error: " << e.what() << "\n";
                 return 1;
         } catch (...) {
                 std::cerr << "An unknown fatal error occurred.\n";
                 return 1;
         }
-
         return 0;
 }

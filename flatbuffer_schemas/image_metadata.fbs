@@ -4,11 +4,7 @@ table ImageMetadata {
         id           : string;
         name         : string;
         tag          : string;
-        digest       : string;
-        path         : string;
         size_bytes   : uint64;
-        created_at   : int64;
-        architecture : string = "amd64";
         source       : string;
 }
 

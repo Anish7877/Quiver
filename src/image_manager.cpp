@@ -1,9 +1,6 @@
 #include "image_manager.hpp"
 #include "utils.hpp"
 #include "serialization.hpp"
-// #include "database_command_queue.hpp" // Commented out — DB subsystem disabled
-// #include "logger_command_queue.hpp"   // Commented out — logger subsystem disabled
-// #include "value_heap.hpp"             // Commented out — logger subsystem disabled
 #include <cpr/cpr.h>
 #include <blake3.h>
 #include <exception>
@@ -18,13 +15,14 @@
 #include <regex>
 #include<iostream>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <pwd.h>
+#include <mutex>
+#include <unordered_map>
+#include <atomic>
+#include <algorithm>
 
-namespace chrono = std::chrono;
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 static constexpr std::size_t  MAX_TOKEN_RESPONSE_SIZE {   64 * 1024};
 static constexpr std::size_t  MAX_MANIFEST_SIZE       {    1 * 1024 * 1024};
 static constexpr std::size_t  MAX_CONFIG_SIZE         {    1 * 1024 * 1024};
@@ -33,11 +31,6 @@ static constexpr std::int32_t TIMEOUT_AUTH_MS         {    5'000};
 static constexpr std::int32_t TIMEOUT_MANIFEST_MS     {    5'000};
 static constexpr std::int32_t TIMEOUT_CONFIG_MS       {   10'000};
 static constexpr std::int32_t TIMEOUT_LAYER_MS        {  300'000};
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
 [[nodiscard]] static auto blake3_hex(std::string_view data) -> std::string {
         blake3_hasher hasher{};
         blake3_hasher_init(&hasher);
@@ -116,9 +109,123 @@ static auto secure_zero(std::string& s) -> void {
         return true;
 }
 
-// ---------------------------------------------------------------------------
-// ImageManager Implementation
-// ---------------------------------------------------------------------------
+namespace {
+struct LayerProgressState {
+        std::atomic<std::int64_t> downloaded{0};
+        std::int64_t total{0}; // known up front from the manifest, never mutated concurrently
+        std::atomic<bool> done{false};
+        std::atomic<bool> failed{false};
+};
+
+std::mutex g_progress_mutex;
+std::unordered_map<std::string, std::shared_ptr<LayerProgressState>> g_progress;
+}
+
+[[nodiscard]] static auto short_digest(const std::string& digest) -> std::string {
+        const auto colon{digest.find(':')};
+        const std::string hex{colon == std::string::npos ? digest : digest.substr(colon + 1)};
+        return hex.substr(0, 12);
+}
+
+[[nodiscard]] static auto format_mb(std::int64_t bytes) -> std::string {
+        return std::format("{:.1f}MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
+}
+
+static auto render_progress(const std::vector<std::string>& order, std::size_t previous_lines) -> std::size_t {
+        struct Snapshot { std::string digest; std::int64_t downloaded; std::int64_t total; bool done; bool failed; };
+        std::vector<Snapshot> snapshot;
+        {
+                std::lock_guard<std::mutex> lock(g_progress_mutex);
+                snapshot.reserve(order.size());
+                for (const auto& d : order) {
+                        auto it{g_progress.find(d)};
+                        if (it == g_progress.end()) continue;
+                        const auto& st{*it->second};
+                        snapshot.push_back({d, st.downloaded.load(), st.total, st.done.load(), st.failed.load()});
+                }
+        }
+
+        if (previous_lines > 0) {
+                std::cout << std::format("\033[{}A", previous_lines);
+        }
+
+        for (const auto& s : snapshot) {
+                std::string status{};
+                if (s.failed) {
+                        status = "Error";
+                } else if (s.done) {
+                        status = std::format("Complete   {}", format_mb(s.total));
+                } else if (s.total > 0) {
+                        const double pct{100.0 * static_cast<double>(s.downloaded) / static_cast<double>(s.total)};
+                        status = std::format("Downloading [{:5.1f}%]  {} / {}", pct, format_mb(s.downloaded), format_mb(s.total));
+                } else {
+                        status = std::format("Downloading  {}", format_mb(s.downloaded));
+                }
+                std::cout << "\033[K" << short_digest(s.digest) << ": " << status << "\n";
+        }
+        std::cout.flush();
+        return snapshot.size();
+}
+
+[[nodiscard]] static auto unpack_with_umoci(const fs::path& layout_dir, const std::string& tag,
+                const fs::path& dest_dir, std::string& error) -> bool {
+        std::string image_ref{std::format("{}:{}", layout_dir.string(), tag)};
+
+        std::vector<std::string> umoci_args{
+                "umoci", "unpack", "--rootless", "--image", image_ref, dest_dir.string()
+        };
+        std::vector<char*> c_args;
+        c_args.reserve(umoci_args.size() + 1);
+        for (auto& arg : umoci_args) c_args.push_back(arg.data());
+        c_args.push_back(nullptr);
+
+        int err_pipe[2];
+        if (pipe(err_pipe) != 0) {
+                error = "Failed to create pipe for umoci stderr";
+                return false;
+        }
+
+        pid_t pid = fork();
+        if (pid < 0) {
+                error = "Failed to fork process for umoci";
+                close(err_pipe[0]);
+                close(err_pipe[1]);
+                return false;
+        }
+        else if (pid == 0) {
+                close(err_pipe[0]);
+                dup2(err_pipe[1], STDERR_FILENO);
+                close(err_pipe[1]);
+                execvp(c_args[0], c_args.data());
+                std::cerr << std::format("Error: failed to execute '{}'\n", c_args[0]);
+                _exit(EXIT_FAILURE);
+        }
+
+        close(err_pipe[1]);
+        std::string umoci_stderr{};
+        std::array<char, 4096> buf{};
+        ssize_t n{};
+        while ((n = read(err_pipe[0], buf.data(), buf.size())) > 0) {
+                umoci_stderr.append(buf.data(), static_cast<std::size_t>(n));
+        }
+        close(err_pipe[0]);
+
+        int status{};
+        waitpid(pid, &status, 0);
+
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                return true;
+        }
+
+        if (WIFEXITED(status)) {
+                error = std::format("umoci unpack failed (exit {}): {}", WEXITSTATUS(status), umoci_stderr);
+        } else if (WIFSIGNALED(status)) {
+                error = std::format("umoci unpack killed by signal {}: {}", WTERMSIG(status), umoci_stderr);
+        } else {
+                error = std::format("umoci unpack failed: {}", umoci_stderr);
+        }
+        return false;
+}
 
 auto ImageManager::init() -> void {
         m_images_root = Utils::get_base_dir();
@@ -166,7 +273,6 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
                 }
         }
 
-        // Guard manifest structure
         if (!manifest.contains("config") || !manifest.contains("layers")) [[unlikely]] {
                 error = "Registry Error: Manifest missing required 'config' or 'layers' fields";
                 secure_zero(token);
@@ -184,23 +290,68 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
                 secure_zero(token);
                 return {};
         }
-        //--------------------------------------------------------------------------------------------------------
-        fs::path img_dest{Utils::get_image_path(image_name)};
-        Utils::ensure_dir(img_dest);
 
-        std::vector<std::future<std::string>> download_futures;
-        for (const auto& layer : manifest["layers"]) {
-                std::string layer_digest{};
-                std::size_t layer_size{};
-                if (!json_get_string(layer, "digest", layer_digest, error) || !json_get_size(layer, "size", layer_size, error)) {
-                        secure_zero(token);
-                        return {};
-                }
-                download_futures.push_back(std::async(std::launch::async, &ImageManager::download_layer,
-                                        this, repo, layer_digest, token, img_dest, layer_size));
+        fs::path temp_layout_dir{std::format("/tmp/quiver_pull_{}", getpid())};
+        std::error_code ec{};
+        fs::create_directories(temp_layout_dir / "blobs" / "sha256", ec);
+        if (ec) {
+                error = std::format("Failed to create temp layout dir: {}", ec.message());
+                secure_zero(token);
+                return {};
         }
 
-        std::vector<fs::path> tar_paths;
+        struct TempCleanup {
+                fs::path path;
+                ~TempCleanup() { std::error_code e{}; fs::remove_all(path, e); }
+        } layout_cleanup{temp_layout_dir};
+
+        fs::path blobs_root{temp_layout_dir / "blobs"};
+
+        std::vector<std::string> layer_order;
+        std::vector<std::size_t> layer_sizes;
+
+        struct ProgressCleanup {
+                const std::vector<std::string>& order;
+                ~ProgressCleanup() {
+                        std::lock_guard<std::mutex> lock(g_progress_mutex);
+                        for (const auto& d : order) g_progress.erase(d);
+                }
+        } progress_cleanup{layer_order};
+
+        {
+                std::lock_guard<std::mutex> lock(g_progress_mutex);
+                for (const auto& layer : manifest["layers"]) {
+                        std::string d{}; std::size_t sz{};
+                        if (!json_get_string(layer, "digest", d, error) || !json_get_size(layer, "size", sz, error)) {
+                                secure_zero(token);
+                                return {};
+                        }
+                        auto state{std::make_shared<LayerProgressState>()};
+                        state->total = static_cast<std::int64_t>(sz);
+                        g_progress[d] = state;
+                        layer_order.push_back(d);
+                        layer_sizes.push_back(sz);
+                }
+        }
+
+        std::vector<std::future<std::string>> download_futures;
+        for (std::size_t i{0}; i < layer_order.size(); ++i) {
+                download_futures.push_back(std::async(std::launch::async, &ImageManager::download_layer,
+                                        this, repo, layer_order[i], token, blobs_root, layer_sizes[i]));
+        }
+
+        std::size_t printed_lines{0};
+        bool all_ready{false};
+        while (!all_ready) {
+                printed_lines = render_progress(layer_order, printed_lines);
+                all_ready = std::all_of(download_futures.begin(), download_futures.end(), [](auto& f) {
+                        return f.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
+                });
+                if (!all_ready) std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        }
+        render_progress(layer_order, printed_lines);
+
+        std::vector<fs::path> layer_blob_paths;
         for (auto& fut : download_futures) {
                 std::string path{fut.get()};
                 if (path.empty()) {
@@ -208,30 +359,92 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
                         secure_zero(token);
                         return {};
                 }
-                tar_paths.emplace_back(std::move(path));
+                layer_blob_paths.emplace_back(std::move(path));
         }
 
         secure_zero(token);
 
-        for (const auto& tar_path : tar_paths) {
-                if (!extract_layer(fs::path(tar_path), img_dest, error)) return {};
-                try {
-                        Utils::ensure_dir(Utils::get_layers_path(tar_path.filename().string()).parent_path());
-                        Utils::rename_file_or_directory(tar_path, Utils::get_layers_path(tar_path.filename().string()));
-                }
-                catch (const std::exception& e) {
-                        std::cerr << e.what() << '\n';
+        const std::string config_bytes{image_config.dump(4)};
+        const std::string config_hash{Utils::sha256(config_bytes)};
+        if (config_hash.empty()) {
+                error = "Failed to hash image config while staging OCI layout";
+                return {};
+        }
+        {
+                std::ofstream cfg_out(blobs_root / "sha256" / config_hash, std::ios::binary);
+                if (!cfg_out.is_open()) {
+                        error = "Failed to write config blob to temp layout";
                         return {};
                 }
+                cfg_out << config_bytes;
+        }
+        manifest["config"]["digest"] = "sha256:" + config_hash;
+        manifest["config"]["size"]   = config_bytes.size();
+
+        const std::string manifest_bytes{manifest.dump(4)};
+        const std::string manifest_hash{Utils::sha256(manifest_bytes)};
+        if (manifest_hash.empty()) {
+                error = "Failed to hash manifest while staging OCI layout";
+                return {};
+        }
+        {
+                std::ofstream man_out(blobs_root / "sha256" / manifest_hash, std::ios::binary);
+                if (!man_out.is_open()) {
+                        error = "Failed to write manifest blob to temp layout";
+                        return {};
+                }
+                man_out << manifest_bytes;
         }
 
-        fs::path config_path = img_dest / "config.json";
-        std::ofstream config_file(config_path);
+        const std::string manifest_media_type{
+                manifest.value("mediaType", std::string{"application/vnd.oci.image.manifest.v1+json"})
+        };
+
+        {
+                std::ofstream layout_out(temp_layout_dir / "oci-layout");
+                if (!layout_out.is_open()) {
+                        error = "Failed to write oci-layout marker";
+                        return {};
+                }
+                layout_out << json{{"imageLayoutVersion", "1.0.0"}}.dump(4);
+        }
+
+        {
+                json index_json{
+                        {"schemaVersion", 2},
+                        {"manifests", json::array({
+                                json{
+                                        {"mediaType", manifest_media_type},
+                                        {"digest", "sha256:" + manifest_hash},
+                                        {"size", manifest_bytes.size()},
+                                        {"annotations", json{{"org.opencontainers.image.ref.name", tag}}}
+                                }
+                        })}
+                };
+                std::ofstream index_out(temp_layout_dir / "index.json");
+                if (!index_out.is_open()) {
+                        error = "Failed to write index.json";
+                        return {};
+                }
+                index_out << index_json.dump(4);
+        }
+
+        fs::path img_dest{Utils::get_image_path(image_name)};
+        if (fs::exists(img_dest)) fs::remove_all(img_dest, ec);
+        Utils::ensure_dir(img_dest.parent_path());
+
+        if (!unpack_with_umoci(temp_layout_dir, tag, img_dest, error)) {
+                fs::remove_all(img_dest, ec);
+                return {};
+        }
+
+        fs::path image_config_path{img_dest / "image_config.json"};
+        std::ofstream config_file(image_config_path);
         if (config_file.is_open()) {
-                config_file << image_config.dump(4); // dump(4) adds nice indentation
+                config_file << config_bytes; // already dump(4)-formatted above
                 config_file.close();
         } else {
-                error = "Failed to write config.json to disk";
+                error = "Failed to write image_config.json to disk";
                 return {};
         }
 
@@ -326,10 +539,35 @@ auto ImageManager::fetch_config_blob(const std::string& repo, const std::string&
 auto ImageManager::download_layer(const std::string& repo, const std::string& digest,
                 const std::string& token, const fs::path& dest,
                 std::size_t expected_size) -> std::string {
+        // Look up this layer's progress-tracking slot, if pull() registered one.
+        std::shared_ptr<LayerProgressState> progress{};
+        {
+                std::lock_guard<std::mutex> lock(g_progress_mutex);
+                if (auto it{g_progress.find(digest)}; it != g_progress.end()) progress = it->second;
+        }
+
+        // Marks the tracked progress entry done/failed on every return path,
+        // success or not, without repeating the bookkeeping at each early return.
+        bool succeeded{false};
+        struct ProgressFinisher {
+                std::shared_ptr<LayerProgressState> p;
+                bool* ok;
+                ~ProgressFinisher() { if (p) { p->failed.store(!*ok); p->done.store(true); } }
+        } finisher{progress, &succeeded};
+
         if (!is_valid_digest(digest)) [[unlikely]] return "";
 
+        const auto colon{digest.find(':')};
+        const std::string algo{digest.substr(0, colon)};
+        const std::string hex{digest.substr(colon + 1)};
+
         auto url{std::format("https://registry-1.docker.io/v2/{}/blobs/{}", repo, digest)};
-        fs::path file_path{dest / std::format("{}.tar.gz", digest.substr(7, 12))};
+
+        // `dest` is expected to be a layout's "blobs" root; land the blob at
+        // blobs/<algo>/<hex> per the OCI Image Layout spec, no extension.
+        std::error_code dir_ec{};
+        fs::create_directories(dest / algo, dir_ec);
+        fs::path file_path{dest / algo / hex};
 
         const fs::path canonical_dest{fs::weakly_canonical(dest)};
         const fs::path canonical_file{fs::weakly_canonical(file_path)};
@@ -349,6 +587,11 @@ auto ImageManager::download_layer(const std::string& repo, const std::string& di
                         cpr::WriteCallback([&ofs](std::string_view data, intptr_t) -> bool {
                                 ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
                                 return ofs.good();
+                                }),
+                        cpr::ProgressCallback([progress](cpr::cpr_off_t, cpr::cpr_off_t downloadNow,
+                                        cpr::cpr_off_t, cpr::cpr_off_t, intptr_t) -> bool {
+                                if (progress) progress->downloaded.store(downloadNow);
+                                return true; // false would abort the transfer
                                 })
                         )};
 
@@ -369,13 +612,14 @@ auto ImageManager::download_layer(const std::string& repo, const std::string& di
                 return "";
         }
 
-        std::string actual_digest{Utils::sha256_file(file_path)};
+        const std::string actual_digest{Utils::sha256_file(file_path)};
         if (actual_digest.empty() || actual_digest != digest) [[unlikely]] {
-                std::cerr << std::format("Digest Mismatch: expected {} got sha256:{}\n", digest, actual_digest);
+                std::cerr << std::format("Digest Mismatch: expected {} got {}\n", digest, actual_digest);
                 fs::remove(file_path);
                 return "";
         }
 
+        succeeded = true;
         return file_path.string();
 }
 

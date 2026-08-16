@@ -5,10 +5,12 @@
 #include "utils.hpp"
 #include "container_db_manager.hpp"
 #include "image_manager.hpp"
+#include "container_config_parser.hpp"
 #include "container_monitor.hpp"
 #include "utils.hpp"
 #include "types.hpp"
 #include "process_lock.hpp"
+#include "image_db_manager.hpp"
 #include <chrono>
 #include <csignal>
 #include <exception>
@@ -27,6 +29,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <pwd.h>
+#include <chrono>
+#include <set>
 
 static std::vector<std::string> split_string(const std::string& str, char delimiter) {
         std::vector<std::string> tokens;
@@ -113,11 +117,14 @@ static auto ensure_buildkit() -> void {
 }
 
 auto CommandLineHandler::run(std::span<std::string> args) -> void {
+        auto& image_db_manager{ImageDbManager::get_instance()};
+        auto& container_monitor{ContainerMonitor::get_instance()};
+        image_db_manager.init();
         if (args.empty()) [[unlikely]] {
                 throw std::runtime_error("Image name not found");
         }
 
-        auto container_id{Utils::generate_container_id()};
+        auto container_id{Utils::generate_id()};
 
         std::string image_name{};
         std::string container_name{};
@@ -166,16 +173,46 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
         }
 
         auto& image_manager{ImageManager::get_instance()};
+        image_manager.init();
         std::string outpath{Utils::get_image_path(image_name).string()};
         std::string error{};
 
         if (!Utils::file_exists(fs::path(outpath) / "config.json")) {
                 std::cout << std::format("Unable to find image '{}' locally. Pulling...\n", image_name);
                 image_manager.pull(image_name, outpath, error);
-
                 if (!error.empty()) {
                         throw std::runtime_error(std::format("Failed to pull image with error '{}'\n", error));
                 }
+                std::string metadata_image_name{};
+                std::string metadata_image_tag{};
+                auto index{image_name.find(':')};
+                if (index != std::string::npos) {
+                        metadata_image_name = image_name.substr(0, index);
+                        metadata_image_name = image_name.substr(index + 1);
+                } else {
+                        metadata_image_name = image_name;
+                        metadata_image_tag = "latest";
+                }
+                ImageMetadata image_metadata{};
+                image_metadata.id = Utils::generate_id();
+                image_metadata.name = metadata_image_name;
+                image_metadata.tag = metadata_image_tag;
+                image_metadata.size_bytes = 0;
+
+                try {
+                        auto dir_opts = fs::directory_options::skip_permission_denied;
+                        for (const auto& entry : fs::recursive_directory_iterator(outpath, dir_opts)) {
+                                if (entry.is_regular_file() && !entry.is_symlink()) {
+                                        image_metadata.size_bytes += entry.file_size();
+                                }
+                        }
+                } catch (const std::exception& e) {
+                        std::cerr << "Warning: Could not accurately calculate total image size: " << e.what() << "\n";
+                }
+
+                image_metadata.source = "dockerhub";
+                image_db_manager.add_image(image_metadata);
+                std::cout << std::format("Successfully pulled Image '{}'\n", image_name);
         }
 
         auto container_config{SpecGenerator::generate_default_rootless_spec(container_id, Utils::get_image_path(image_name))};
@@ -226,6 +263,14 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                                         mnt.destination = tokens[1];
                                         mnt.type = "bind";
                                         mnt.options.push_back("rbind");
+                                        if (tokens.size() >= 3) {
+                                                if (tokens[2] == "ro") {
+                                                        mnt.options.push_back("ro");
+                                                } else if (tokens[2] == "rw") {
+                                                        mnt.options.push_back("rw");
+                                                }
+                                        }
+
                                         container_config.mounts.push_back(mnt);
                                 }
                         }
@@ -392,53 +437,191 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                 }
         }
 
-        if (commands.empty()) {
-                fs::path config_path{fs::path(outpath) / "config.json"};
-                if (Utils::file_exists(config_path)) {
-                        std::ifstream config_file(config_path);
-                        nlohmann::json img_config;
-                        config_file >> img_config;
+        fs::path config_path{fs::path(outpath) / "config.json"};
 
-                        if (img_config.contains("config")) {
-                                auto& cfg = img_config["config"];
+        if (!Utils::file_exists(config_path)) {
+                config_path = fs::path(outpath) / "image_config.json";
+        }
 
-                                if (commands.empty()) {
-                                        if (cfg.contains("Entrypoint") && !cfg["Entrypoint"].is_null()) {
-                                                for (const auto& item : cfg["Entrypoint"]) {
-                                                        commands.push_back(item.get<std::string>());
-                                                }
-                                        }
-                                        if (cfg.contains("Cmd") && !cfg["Cmd"].is_null()) {
-                                                for (const auto& item : cfg["Cmd"]) {
-                                                        commands.push_back(item.get<std::string>());
-                                                }
+        if (Utils::file_exists(config_path)) {
+                std::ifstream config_file(config_path);
+                nlohmann::json img_config;
+                config_file >> img_config;
+
+                if (img_config.contains("process")) {
+                        auto& process_cfg = img_config["process"];
+
+                        if (process_cfg.contains("terminal") && process_cfg["terminal"].is_boolean()) {
+                                if (!container_config.terminal.value) {
+                                        container_config.terminal.value = process_cfg["terminal"].get<bool>();
+                                }
+                        }
+
+                        if (process_cfg.contains("user")) {
+                                auto& user_cfg = process_cfg["user"];
+                                if (user_cfg.contains("uid") && user_cfg["uid"].is_number()) {
+                                        container_config.user.uid = user_cfg["uid"].get<uid_t>();
+                                }
+                                if (user_cfg.contains("gid") && user_cfg["gid"].is_number()) {
+                                        container_config.user.gid = user_cfg["gid"].get<gid_t>();
+                                }
+                                if (user_cfg.contains("additionalGids") && user_cfg["additionalGids"].is_array()) {
+                                        for (const auto& gid : user_cfg["additionalGids"]) {
+                                                container_config.user.additional_gids.push_back(gid.get<gid_t>());
                                         }
                                 }
+                        }
 
-                                if (cfg.contains("Env") && !cfg["Env"].is_null()) {
-                                        for (const auto& item : cfg["Env"]) {
-                                                container_config.env.value.push_back(item.get<std::string>());
+                        if (commands.empty() && process_cfg.contains("args") && process_cfg["args"].is_array()) {
+                                for (const auto& item : process_cfg["args"]) {
+                                        commands.push_back(item.get<std::string>());
+                                }
+                        }
+
+                        if (process_cfg.contains("env") && process_cfg["env"].is_array()) {
+                                for (const auto& item : process_cfg["env"]) {
+                                        container_config.env.value.push_back(item.get<std::string>());
+                                }
+                        }
+
+                        if (process_cfg.contains("cwd") && process_cfg["cwd"].is_string()) {
+                                if (container_config.cwd.value == "/") {
+                                        container_config.cwd.value = process_cfg["cwd"].get<std::string>();
+                                }
+                        }
+
+                        if (process_cfg.contains("capabilities")) {
+                                auto& caps = process_cfg["capabilities"];
+                                auto append_caps = [](const nlohmann::json& j, const std::string& key, std::vector<std::string>& out) {
+                                        if (j.contains(key) && j[key].is_array()) {
+                                                for (const auto& item : j[key]) {
+                                                        std::string cap = item.get<std::string>();
+                                                        if (std::find(out.begin(), out.end(), cap) == out.end()) {
+                                                                out.push_back(cap);
+                                                        }
+                                                }
+                                        }
+                                };
+                                append_caps(caps, "bounding", container_config.capabilities.bounding);
+                                append_caps(caps, "effective", container_config.capabilities.effective);
+                                append_caps(caps, "inheritable", container_config.capabilities.inheritable);
+                                append_caps(caps, "permitted", container_config.capabilities.permitted);
+                                append_caps(caps, "ambient", container_config.capabilities.ambient);
+                        }
+
+                        if (process_cfg.contains("rlimits") && process_cfg["rlimits"].is_array()) {
+                                for (const auto& rl : process_cfg["rlimits"]) {
+                                        OCIRuntime::RLimit rlimit{};
+                                        if (rl.contains("type") && rl["type"].is_string()) {
+                                                std::string r_type = rl["type"].get<std::string>();
+                                                if (r_type.starts_with("RLIMIT_")) r_type = r_type.substr(7);
+                                                rlimit.name = r_type;
+                                        }
+                                        if (rl.contains("hard") && rl["hard"].is_number()) rlimit.hard_limit = rl["hard"].get<uint64_t>();
+                                        if (rl.contains("soft") && rl["soft"].is_number()) rlimit.soft_limit = rl["soft"].get<uint64_t>();
+                                        container_config.rlimits.push_back(rlimit);
+                                }
+                        }
+
+                        if (process_cfg.contains("noNewPrivileges") && process_cfg["noNewPrivileges"].is_boolean()) {
+                                container_config.no_new_privileges.value = process_cfg["noNewPrivileges"].get<bool>();
+                        }
+                        if (process_cfg.contains("oomScoreAdj") && process_cfg["oomScoreAdj"].is_number()) {
+                                container_config.oom_score.value = process_cfg["oomScoreAdj"].get<int>();
+                        }
+                }
+
+                if (img_config.contains("root")) {
+                        auto& root_cfg = img_config["root"];
+                        if (root_cfg.contains("readonly") && root_cfg["readonly"].is_boolean()) {
+                                container_config.rootfs.read_only = root_cfg["readonly"].get<bool>();
+                        }
+                }
+
+                if (img_config.contains("mounts") && img_config["mounts"].is_array()) {
+                        for (const auto& m : img_config["mounts"]) {
+                                OCIRuntime::Mount mnt;
+                                if (m.contains("destination") && m["destination"].is_string()) mnt.destination = m["destination"].get<std::string>();
+                                if (m.contains("type") && m["type"].is_string()) mnt.type = m["type"].get<std::string>();
+                                if (m.contains("source") && m["source"].is_string()) mnt.source = m["source"].get<std::string>();
+                                if (m.contains("options") && m["options"].is_array()) {
+                                        for (const auto& opt : m["options"]) {
+                                                mnt.options.push_back(opt.get<std::string>());
                                         }
                                 }
+                                container_config.mounts.push_back(mnt);
+                        }
+                }
 
-                                if (cfg.contains("WorkingDir") && !cfg["WorkingDir"].is_null()) {
-                                        std::string wd = cfg["WorkingDir"].get<std::string>();
-                                        if (!wd.empty()) {
-                                                container_config.cwd.value = wd;
+                if (img_config.contains("linux")) {
+                        auto& linux_cfg = img_config["linux"];
+
+                        if (linux_cfg.contains("uidMappings") && linux_cfg["uidMappings"].is_array() && !linux_cfg["uidMappings"].empty()) {
+                                auto& m = linux_cfg["uidMappings"][0];
+                                if (m.contains("containerID")) container_config.uid_mapping.container_id = m["containerID"].get<uint32_t>();
+                                if (m.contains("hostID")) container_config.uid_mapping.host_id = m["hostID"].get<uint32_t>();
+                                if (m.contains("size")) container_config.uid_mapping.size = m["size"].get<uint32_t>();
+                        }
+
+                        if (linux_cfg.contains("gidMappings") && linux_cfg["gidMappings"].is_array() && !linux_cfg["gidMappings"].empty()) {
+                                auto& m = linux_cfg["gidMappings"][0];
+                                if (m.contains("containerID")) container_config.gid_mapping.container_id = m["containerID"].get<uint32_t>();
+                                if (m.contains("hostID")) container_config.gid_mapping.host_id = m["hostID"].get<uint32_t>();
+                                if (m.contains("size")) container_config.gid_mapping.size = m["size"].get<uint32_t>();
+                        }
+
+                        if (linux_cfg.contains("maskedPaths") && linux_cfg["maskedPaths"].is_array()) {
+                                for (const auto& mp : linux_cfg["maskedPaths"]) {
+                                        container_config.masked_paths.paths.push_back(mp.get<std::string>());
+                                }
+                        }
+
+                        if (linux_cfg.contains("readonlyPaths") && linux_cfg["readonlyPaths"].is_array()) {
+                                for (const auto& ro : linux_cfg["readonlyPaths"]) {
+                                        container_config.read_only_paths.paths.push_back(ro.get<std::string>());
+                                }
+                        }
+                }
+
+                if (img_config.contains("config")) {
+                        auto& cfg = img_config["config"];
+
+                        if (commands.empty()) {
+                                if (cfg.contains("Entrypoint") && !cfg["Entrypoint"].is_null()) {
+                                        for (const auto& item : cfg["Entrypoint"]) {
+                                                commands.push_back(item.get<std::string>());
                                         }
+                                }
+                                if (cfg.contains("Cmd") && !cfg["Cmd"].is_null()) {
+                                        for (const auto& item : cfg["Cmd"]) {
+                                                commands.push_back(item.get<std::string>());
+                                        }
+                                }
+                        }
+
+                        if (cfg.contains("Env") && !cfg["Env"].is_null()) {
+                                for (const auto& item : cfg["Env"]) {
+                                        container_config.env.value.push_back(item.get<std::string>());
+                                }
+                        }
+
+                        if (cfg.contains("WorkingDir") && !cfg["WorkingDir"].is_null()) {
+                                std::string wd = cfg["WorkingDir"].get<std::string>();
+                                if (!wd.empty()) {
+                                        container_config.cwd.value = wd;
                                 }
                         }
                 }
         }
+
         if (!commands.empty()) {
                 container_config.args.value = commands;
         }
 
         container_config.container_id = container_id;
-        auto& container_monitor{ContainerMonitor::get_instance()};
         bool is_terminal{container_config.terminal.value};
         bool is_detached{container_config.detach.value};
-        container_config.rootfs.path = std::move(outpath);
+        container_config.rootfs.path = outpath + "/rootfs/";
 
         container_monitor.init(container_config, image_name, container_name, limits, true);
         container_monitor.invoke_container();
@@ -1386,7 +1569,7 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                         if (c == ':' || c == '/') c = '_';
                 }
 
-                final_dest_dir = fs::path(home_dir) / ".quiver" / "images" / primary_tag;
+                final_dest_dir = fs::path(home_dir) / ".quiver" / "images" / primary_tag / "rootfs";
                 fs::create_directories(final_dest_dir);
 
 
@@ -1397,25 +1580,22 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                 exec_args.push_back("--output");
                 exec_args.push_back("type=oci,dest=" + temp_oci_dir + ",tar=false");
 
-                std::cout << std::format("[Quiver Build] Generating native engine image at: {}\n", final_dest_dir.string());
+                std::cout << std::format("Generating native engine image at: {}\n", final_dest_dir.string());
         }
         else if (!output_path.empty()) {
                 fs::path output_tar{fs::absolute(output_path)};
                 if (output_tar.has_parent_path()) fs::create_directories(output_tar.parent_path());
                 exec_args.push_back("--output");
                 exec_args.push_back("type=oci,dest=" + output_tar.string());
-                std::cout << std::format("[Quiver Build] Exporting custom OCI tarball to: {}\n", output_tar.string());
+                std::cout << std::format("Exporting custom OCI tarball to: {}\n", output_tar.string());
         }
-
-        std::cout << "[Quiver Build] Executing parallel build graph...\n";
 
         std::vector<char*> c_args;
         c_args.reserve(exec_args.size() + 1);
         for (auto& arg : exec_args) c_args.push_back(arg.data());
         c_args.push_back(nullptr);
 
-
-        pid_t pid = fork();
+        pid_t pid{fork()};
 
         if (pid < 0) [[unlikely]] {
                 std::cerr << "Error: Failed to fork process for execution.\n";
@@ -1449,9 +1629,8 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                                         std::string config_digest = manifest_json["config"]["digest"];
                                         std::string config_hash = config_digest.substr(7);
 
-
-                                        fs::path source_config = fs::path(temp_oci_dir) / "blobs" / "sha256" / config_hash;
-                                        fs::path dest_config = final_dest_dir / "config.json";
+                                        fs::path source_config{fs::path(temp_oci_dir) / "blobs" / "sha256" / config_hash};
+                                        fs::path dest_config{final_dest_dir.parent_path() / "config.json"};
                                         std::error_code ec;
                                         if (fs::exists(dest_config)) {
                                                 fs::permissions(dest_config, fs::perms::owner_write, fs::perm_options::add, ec);
@@ -1460,8 +1639,8 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
 
                                         fs::copy_file(source_config, dest_config, fs::copy_options::overwrite_existing);
 
-                                        std::cout << "[Quiver Build] Successfully embedded config.json.\n";
-                                        std::cout << "[Quiver Build] Build completed successfully!\n";
+                                        std::cout << "Successfully embedded config.json.\n";
+                                        std::cout << "Build completed successfully!\n";
                                 } catch (const std::exception& e) {
                                         std::cerr << "Warning: Rootfs built, but failed to process config metadata: " << e.what() << "\n";
                                 }
@@ -1478,5 +1657,500 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                 if (!temp_oci_dir.empty() && fs::exists(temp_oci_dir)) {
                         fs::remove_all(temp_oci_dir, ec);
                 }
+        }
+}
+
+auto CommandLineHandler::create(std::span<std::string> args) -> void {
+        if (args.empty()) [[unlikely]] {
+                std::cerr << "Error: No arguments provided.\n";
+                std::cerr << "Usage: quiver create [OPTIONS] IMAGE:TAG [COMMANDS...]\n";
+                return;
+        }
+
+        std::string json_path{};
+        std::string image_name{};
+        std::vector<std::string> custom_cmds{};
+        for (size_t i{0}; i < args.size(); ++i) {
+                const std::string& arg = args[i];
+
+                if (arg == "--from-json" || arg == "-j") {
+                        if (++i < args.size()) {
+                                json_path = args[i];
+                        } else {
+                                std::cerr << std::format("Error: {} requires a file path argument.\n", arg);
+                                return;
+                        }
+                }
+                else if (!arg.starts_with("-") && image_name.empty()) {
+                        image_name = arg;
+                }
+                else if (!image_name.empty()) {
+                        custom_cmds.push_back(arg);
+                }
+                else {
+                        std::cerr << std::format("Warning: Unknown flag '{}' ignored.\n", arg);
+                }
+        }
+
+        std::string container_id = std::format("qvr-{:x}", std::time(nullptr));
+
+        ContainerConfig config{};
+        if (!json_path.empty()) {
+                try {
+                        config = ConfigParser::parse_file(fs::absolute(json_path));
+                        if (config.container_id.empty()) {
+                                config.container_id = container_id;
+                        } else {
+                                container_id = config.container_id;
+                        }
+
+                        if (!image_name.empty()) {
+                                config.rootfs.path = Utils::get_image_path(image_name);
+                                config.rootfs.read_only = false;
+                        }
+                } catch (const std::exception& e) {
+                        std::cerr << "Error loading JSON config: " << e.what() << "\n";
+                        return;
+                }
+        } else {
+                if (image_name.empty()) {
+                        std::cerr << "Error: Image name is required when not using a complete JSON configuration.\n";
+                        std::cerr << "Usage: quiver create [OPTIONS] IMAGE:TAG [COMMANDS...]\n";
+                        return;
+                }
+                config = SpecGenerator::generate_default_rootless_spec(container_id, Utils::get_image_path(image_name));
+        }
+
+        if (!custom_cmds.empty()) {
+                config.args.value = custom_cmds;
+        }
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        ContainerDbObject db_object{};
+        db_object.config = std::move(config);
+        db_object.image = std::move(image_name);
+        db_object.name = std::format("quiver_{}", config.container_id.substr(0, 6));
+        db_object.status = "created";
+        db_object.boot_time = Utils::get_boot_time();
+        db_object.created_at = std::format("{}", std::chrono::system_clock::now());
+        container_db_manager.add_container(db_object);
+}
+
+auto CommandLineHandler::image(std::span<std::string> args) -> void {
+        auto& image_db_manager{ImageDbManager::get_instance()};
+        image_db_manager.init();
+        if (args.empty()) [[unlikely]] {
+                std::cerr << "Error: No arguments provided.\n";
+                std::cerr << "Usage: quiver create [OPTIONS] IMAGE:TAG [COMMANDS...]\n";
+                return;
+        }
+        if (args.front() == "ls") {
+                if (args.size() != 1) {
+                        std::cerr << "Error: ls only lists images no arguments needed\n";
+                        return;
+                }
+                auto images{image_db_manager.get_all_images()};
+                std::cout << std::format("{:<70} {:<25} {:<15} {:<15} {:<20}\n",
+                                         "IMAGE ID", "NAME", "TAG", "SIZE", "SOURCE");
+                for (const auto& image : images) {
+                        double size_mb{static_cast<double>(image.size_bytes) / (1024.0 * 1024.0)};
+                        std::string size_str{std::format("{:.2f} MB", size_mb)};
+                        std::cout << std::format("{:<70} {:<25} {:<15} {:<15} {:<20}\n", image.id, image.name, image.tag,
+                                        size_str, image.source);
+                }
+        }
+        else if (args.front() == "rm") {
+                if (args.size() < 2) [[unlikely]] {
+                        std::cerr << "Error: No image specified for removal.\n";
+                        std::cerr << "Usage: quiver rm IMAGE [IMAGE...]\n";
+                        return;
+                }
+                for (size_t i{1}; i < args.size(); ++i) {
+                        const std::string& target{args[i]};
+                        auto image{image_db_manager.get_image(target)};
+
+                        if (image) {
+                                fs::path dir{Utils::get_image_path(std::format("{}_{}", image->name, image->tag))};
+                                try {
+                                        if (fs::exists(dir)) {
+                                                Utils::remove_directory(dir);
+                                        }
+                                        image_db_manager.remove_image(target);
+                                        std::cout << "Deleted: " << target << '\n';
+                                }
+                                catch (const std::exception& e) {
+                                        std::cerr << std::format("Error: Failed to remove image '{}': {}\n", target, e.what());
+                                }
+                        } else {
+                                std::cerr << std::format("Error: No such image: {}\n", target);
+                        }
+                }
+        }
+        else if (args.front() == "load") {
+                if (args.size() != 3) {
+                        std::cerr << "Usage: quiver load IMAGE_NAME[:TAG] TAR_PATH\n";
+                        Utils::print_usage();
+                        return;
+                }
+
+                std::string image_name{};
+                std::string image_tag{};
+                auto index{args[1].find(':')};
+
+                if (index != std::string::npos) {
+                        image_name = args[1].substr(0, index);
+                        image_tag = args[1].substr(index + 1);
+                } else {
+                        image_name = args[1];
+                        image_tag = "latest";
+                }
+
+                if (image_tag.empty()) image_tag = "latest";
+
+                auto image_dir{Utils::get_image_path(std::format("{}_{}", image_name, image_tag))};
+                fs::path tar_path{args[2]};
+
+                if (!Utils::load_oci_tar(tar_path, image_dir)) [[unlikely]] {
+                        std::cerr << "Error: Unable to load tar file into image directory.\n";
+                        return;
+                }
+
+                ImageMetadata image_metadata{};
+                image_metadata.id = Utils::generate_id();
+                image_metadata.name = image_name;
+                image_metadata.tag = image_tag;
+                image_metadata.size_bytes = 0;
+
+                try {
+                        auto dir_opts = fs::directory_options::skip_permission_denied;
+                        std::set<std::pair<dev_t, ino_t>> seen_inodes{};
+
+                        for (const auto& entry : fs::recursive_directory_iterator(image_dir, dir_opts)) {
+                                if (entry.is_regular_file() && !entry.is_symlink()) {
+                                        struct stat st;
+                                        if (stat(entry.path().c_str(), &st) == 0) {
+                                                if (seen_inodes.insert({st.st_dev, st.st_ino}).second) {
+                                                        image_metadata.size_bytes += st.st_size;
+                                                }
+                                        }
+                                }
+                        }
+                } catch (const std::exception& e) {
+                        std::cerr << "Warning: Could not accurately calculate total image size: " << e.what() << "\n";
+                }
+
+                image_metadata.source = tar_path.filename().string();
+                image_db_manager.add_image(image_metadata);
+                double size_mb = static_cast<double>(image_metadata.size_bytes) / (1024.0 * 1024.0);
+                std::cout << std::format("Successfully loaded image {}:{} ({:.2f} MB)\n",
+                                         image_metadata.name, image_metadata.tag, size_mb);
+        }
+        else if (args.front() == "pull") {
+                if (args.size() < 2) {
+                        std::cerr << "Error: No image specified.\n";
+                        Utils::print_usage();
+                        return;
+                }
+                auto& image_manager{ImageManager::get_instance()};
+                image_manager.init();
+                for (size_t i{1}; i<args.size(); ++i) {
+                        fs::path image_dir{Utils::get_image_path(args[i])};
+                        if (fs::exists(image_dir / "config.json")) {
+                                std::cout << std::format("Image '{}' found locally\n", args[i]);
+                                continue;
+                        }
+                        std::string out_path{};
+                        std::string error{};
+                        image_manager.pull(args[i], out_path, error);
+                        if (!error.empty()) [[unlikely]] {
+                                std::cerr << error << '\n';
+                                continue;
+                        }
+                        std::string image_name{};
+                        std::string image_tag{};
+                        auto index{args[i].find(':')};
+                        if (index != std::string::npos) {
+                                image_name = args[i].substr(0, index);
+                                image_tag = args[i].substr(index + 1);
+                        } else {
+                                image_name = args[i];
+                                image_tag = "latest";
+                        }
+                        ImageMetadata image_metadata{};
+                        image_metadata.id = Utils::generate_id();
+                        image_metadata.name = std::move(image_name);
+                        image_metadata.tag = std::move(image_tag);
+                        image_metadata.size_bytes = 0;
+
+                        try {
+                                auto dir_opts = fs::directory_options::skip_permission_denied;
+                                std::set<std::pair<dev_t, ino_t>> seen_inodes{};
+
+                                for (const auto& entry : fs::recursive_directory_iterator(image_dir, dir_opts)) {
+                                        if (entry.is_regular_file() && !entry.is_symlink()) {
+                                                struct stat st;
+                                                if (stat(entry.path().c_str(), &st) == 0) {
+                                                        if (seen_inodes.insert({st.st_dev, st.st_ino}).second) {
+                                                                image_metadata.size_bytes += st.st_size;
+                                                        }
+                                                }
+                                        }
+                                }
+                        } catch (const std::exception& e) {
+                                std::cerr << "Warning: Could not accurately calculate total image size: " << e.what() << "\n";
+                        }
+
+                        image_metadata.source = "dockerhub";
+                        image_db_manager.add_image(image_metadata);
+                        std::cout << std::format("Successfully pulled Image '{}'\n", args[i]);
+                }
+        }
+        else {
+                if (args.size() != 1) {
+                        std::cerr << "Error: No or more than one image id specified.\n";
+                        Utils::print_usage();
+                        return;
+                }
+                auto image{image_db_manager.get_image(args[0])};
+                if (image) {
+                        double size_mb{static_cast<double>(image->size_bytes) / (1024.0 * 1024.0)};
+                        std::string size_str{std::format("{:.2f} MB", size_mb)};
+                        std::cout << std::format("{:<70} {:<25} {:<15} {:<15} {:<20}\n",
+                                        "IMAGE ID", "NAME", "TAG", "SIZE", "SOURCE");
+                        std::cout << std::format("{:<70} {:<25} {:<15} {:<15} {:<20}\n", image->id, image->name, image->tag,
+                                        size_str, image->source);
+                }
+                else {
+                        std::cerr << std::format("Error: No such image: {}\n", args[0]);
+                }
+        }
+}
+
+auto CommandLineHandler::restart(std::span<std::string> args) -> void {
+        if (args.empty()) [[unlikely]] {
+                std::cerr << "Error: No arguments provided\n";
+                Utils::print_usage();
+                return;
+        }
+        if (args.size() != 1) [[unlikely]] {
+                std::cerr << "Error: More than one argument provided\n";
+                Utils::print_usage();
+                return;
+        }
+        auto get_cgroup_path{[](pid_t pid) -> std::optional<fs::path> {
+                std::ifstream file(std::format("/proc/{}/cgroup", pid));
+                std::string line{};
+
+                while (std::getline(file, line)) {
+                        size_t first_colon = line.find(':');
+                        if (first_colon != std::string::npos) {
+                                size_t second_colon = line.find(':', first_colon + 1);
+                                if (second_colon != std::string::npos) {
+                                        std::string cg_path{line.substr(second_colon + 1)};
+                                        if (!cg_path.empty() && cg_path.front() == '/') {
+                                                cg_path.erase(0, 1);
+                                        }
+                                        return fs::path("/sys/fs/cgroup") / cg_path;
+                                }
+                        }
+                }
+                return std::nullopt;
+        }};
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+        auto& container_monitor{ContainerMonitor::get_instance()};
+        auto container{container_db_manager.get_container(args[0])};
+        if (container && container->status == "running") {
+                auto cgroup_base_opt{get_cgroup_path(container->config.pid)};
+                if (cgroup_base_opt) {
+                        fs::path cg_kill_path = cgroup_base_opt.value() / "cgroup.kill";
+                        if (fs::exists(cg_kill_path)) {
+                                std::ofstream kill_file(cg_kill_path);
+                                if (kill_file.is_open()) {
+                                        kill_file << "1";
+                                }
+                        }
+                } else {
+                        std::cerr << std::format("WARN: Could not resolve cgroup path for container '{}' via /proc.\n", args[0]);
+                }
+                if (kill(container->config.pid, SIGTERM) == 0) {
+                        bool stopped{false};
+                        for (int i{0}; i < 100; ++i) {
+                                if (!Utils::is_process_alive(container->config.pid, container->config.container_id)) {
+                                        stopped = true;
+                                        break;
+                                }
+                                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        }
+                        if (!stopped) {
+                                std::cerr << std::format("WARN: Container '{}' timed out. Sending SIGKILL...\n", args[0]);
+                                kill(container->config.pid, SIGKILL);
+                        }
+                        for (int i{0}; i < 50; ++i) {
+                                auto check_container = container_db_manager.get_container(args[0]);
+                                if (check_container && check_container->status == "exited") {
+                                        break;
+                                }
+                                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        }
+                }
+                auto fresh_container{container_db_manager.get_container(args[0])};
+                if (!fresh_container) {
+                        std::cerr << "Error: Container lost during restart.\n";
+                        return;
+                }
+                ContainerMonitor::Limits limits{};
+                limits.cpu_quota = fresh_container->cpu_quota;
+                limits.cpu_period = fresh_container->cpu_period;
+                limits.cpu_weight = fresh_container->cpu_weight;
+                limits.memory_max = fresh_container->memory_max;
+                limits.memory_swap = fresh_container->memory_max;
+                limits.pids_limit = fresh_container->pids_limit;
+                limits.cpuset_cpus = fresh_container->cpuset_cpus;
+                limits.cpuset_mems = fresh_container->cpuset_mems;
+                limits.io_max_updates = fresh_container->io_max_updates;
+                limits.io_weight_updates = fresh_container->io_weight_updates;
+
+                container_monitor.init(fresh_container->config, fresh_container->image, fresh_container->name, limits, false);
+                container_monitor.invoke_container();
+        }
+        else {
+                std::cerr << std::format("Error: Container '{}' not found or Container is not running\n", args[0]);
+        }
+}
+
+auto CommandLineHandler::volume(std::span<std::string> args) -> void {
+        if (args.empty()) [[unlikely]] {
+                std::cerr << "Error: No arguments provided\n";
+                Utils::print_usage();
+                return;
+        }
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+        if (args.front() == "ls") {
+                if (args.size() != 1) {
+                        std::cerr << "Error: ls only lists volumes no arguments needed\n";
+                }
+                auto containers{container_db_manager.get_all_container()};
+                constexpr int id_width{70};
+                constexpr int src_width{45};
+                constexpr int dest_width{45};
+                constexpr int type_width{15};
+
+                std::cout << std::format("{:<{}} {:<{}} {:<{}} {:<{}}\n",
+                                "CONTAINER ID", id_width,
+                                "SOURCE", src_width,
+                                "DESTINATION", dest_width,
+                                "TYPE", type_width);
+
+                for (const auto& container : containers) {
+                        for (const auto& mount : container.config.mounts) {
+                                std::cout << std::format("{:<{}} {:<{}} {:<{}} {:<{}}\n",
+                                                container.config.container_id, id_width,
+                                                mount.source, src_width,
+                                                mount.destination, dest_width,
+                                                mount.type, type_width);
+                        }
+                }
+        }
+        if (args.front() == "add") {
+                if (args.size() < 3) {
+                        std::cerr << "Error: Not enough arguments provided.\n";
+                        std::cerr << "Usage: quiver volume add <container_id> <host_path>:<container_path> [...]\n";
+                        return;
+                }
+
+                std::string target_id = args[1];
+
+                auto& container_db_manager{ContainerDbManager::get_instance()};
+                container_db_manager.init();
+
+                auto container{container_db_manager.get_container(target_id)};
+                if (!container) {
+                        std::cerr << std::format("Error: Container '{}' not found.\n", target_id);
+                        return;
+                }
+
+                if (container->status == "running") {
+                        std::cerr << std::format("Warning: Container '{}' is running. Volume changes will take effect on next restart.\n", target_id);
+                }
+
+                for (size_t i{2}; i < args.size(); ++i) {
+                        auto tokens = split_string(args[i], ':');
+                        if (tokens.size() < 2) {
+                                std::cerr << std::format("Warning: Invalid volume format '{}'. Expected <host_path>:<container_path>\n", args[i]);
+                                continue;
+                        }
+
+                        OCIRuntime::Mount mnt{};
+                        mnt.source = tokens[0];
+                        mnt.destination = tokens[1];
+                        mnt.type = "bind";
+                        mnt.options.push_back("rbind");
+
+                        if (tokens.size() >= 3) {
+                                if (tokens[2] == "ro") {
+                                        mnt.options.push_back("ro");
+                                } else if (tokens[2] == "rw") {
+                                        mnt.options.push_back("rw");
+                                }
+                        }
+                        container->config.mounts.push_back(std::move(mnt));
+                        std::cout << std::format("Added volume mapping {} -> {} to container '{}'\n",
+                                        tokens[0], tokens[1], target_id);
+                }
+
+                container_db_manager.update_container(target_id, container.value());
+                std::cout << "Successfully updated volume configurations.\n";
+        }
+        else if (args.front() == "rm") {
+                if (args.size() < 3) {
+                        std::cerr << "Error: Not enough arguments provided.\n";
+                        std::cerr << "Usage: quiver volume rm <container_id> <container_path> [...]\n";
+                        return;
+                }
+
+                std::string target_id{args[1]};
+
+                auto& container_db_manager{ContainerDbManager::get_instance()};
+                container_db_manager.init();
+
+                auto container{container_db_manager.get_container(target_id)};
+                if (!container) {
+                        std::cerr << std::format("Error: Container '{}' not found.\n", target_id);
+                        return;
+                }
+                if (container->status == "running") {
+                        std::cerr << std::format("Warning: Container '{}' is running. Volume changes will take effect on next restart.\n", target_id);
+                }
+                bool modified{false};
+
+                for (size_t i{2}; i < args.size(); ++i) {
+                        std::string target_dest = args[i];
+                        auto& mounts{container->config.mounts};
+
+                        auto it{std::remove_if(mounts.begin(), mounts.end(),
+                                [&target_dest](const OCIRuntime::Mount& mnt) {
+                                        return mnt.destination == target_dest;
+                                })};
+
+                        if (it != mounts.end()) {
+                                mounts.erase(it, mounts.end());
+                                std::cout << std::format("Removed volume mapping for '{}' from container '{}'\n",
+                                                         target_dest, target_id);
+                                modified = true;
+                        } else {
+                                std::cerr << std::format("Warning: No volume mounted at '{}' found in container '{}'\n",
+                                                         target_dest, target_id);
+                        }
+                }
+
+                if (modified) {
+                        container_db_manager.update_container(target_id, container.value());
+                        std::cout << "Successfully updated volume configurations.\n";
+                }
+        }
+        else {
+                std::cerr << std::format("quiver volume: '{}' is not a quiver volume command.\n", args.front());
+                Utils::print_usage();
         }
 }

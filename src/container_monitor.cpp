@@ -235,8 +235,6 @@ auto ContainerMonitor::invoke_container() -> void {
                                 std::cerr << "Fatal: Container crashed during initialization.\n";
                                 exit(EXIT_FAILURE);
                         }
-
-                        std::cout << m_container_config.container_id << "\n";
                         return;
                 }
                 int status{};

@@ -40,7 +40,6 @@ auto DatabaseJobProcessor::init() -> void {
         m_current_db = nullptr;
         Utils::ensure_dir(Utils::get_db_path("container"));
         Utils::ensure_dir(Utils::get_db_path("image"));
-        Utils::ensure_dir(Utils::get_db_path("layer_cache"));
         rocksdb::Options opts{};
         opts.create_if_missing = true;
         rocksdb::Status status{};
@@ -52,11 +51,6 @@ auto DatabaseJobProcessor::init() -> void {
         status = rocksdb::DB::Open(opts, Utils::get_db_path("image"), &m_image_db);
         if (!status.ok()) [[unlikely]] {
                 throw std::runtime_error(std::format("Database Job Error: Could not open image database -> '{}'.",
-                                        status.ToString()));
-        }
-        status = rocksdb::DB::Open(opts, Utils::get_db_path("layer_cache"), &m_layer_cache_db);
-        if (!status.ok()) [[unlikely]] {
-                throw std::runtime_error(std::format("Database Job Error: Could not open layer cache database -> '{}'.",
                                         status.ToString()));
         }
 }
@@ -93,8 +87,6 @@ auto DatabaseJobProcessor::route_job(const DatabaseJobData& job_data) -> void {
                         m_current_db = &m_container_db; break;
                 case TargetDB::IMAGE:
                         m_current_db = &m_image_db; break;
-                case TargetDB::LAYERCACHE:
-                        m_current_db = &m_layer_cache_db; break;
                 default:
                         m_current_db = nullptr;
                         log_event(std::format("[{}] Database Job Processor Error: Unknown target DB found.",

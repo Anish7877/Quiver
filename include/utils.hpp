@@ -45,7 +45,7 @@ namespace Utils {
         auto get_device_gid(const fs::path&) -> gid_t;
         auto get_gid_map_payload(const std::vector<OCIRuntime::Device>&) -> std::string;
         auto find_program_path(const std::string&) -> fs::path;
-        auto generate_container_id() -> std::string;
+        auto generate_id() -> std::string;
         auto spawn_new_consumer() -> pid_t;
         auto parse_subgid(const std::string&) -> std::vector<SubIDRange>;
         auto parse_subuid(const std::string&) -> std::vector<SubIDRange>;
@@ -68,6 +68,7 @@ namespace Utils {
 
         auto is_process_alive(pid_t, const std::string&) -> bool;
         [[nodiscard]] auto get_boot_time() -> long;
+        auto load_oci_tar(const fs::path&, const fs::path&) -> bool;
 }
 
 namespace PrintUtils {

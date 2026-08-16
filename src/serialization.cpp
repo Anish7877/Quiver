@@ -1,6 +1,5 @@
 #include "serialization.hpp"
 #include "container_metadata_generated.h"
-#include "layer_cache_generated.h"
 #include "types.hpp"
 #include <flatbuffers/buffer.h>
 
@@ -413,55 +412,22 @@ auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const Ima
         auto id_off           { builder.CreateString(obj.id) };
         auto name_off         { builder.CreateString(obj.name) };
         auto tag_off          { builder.CreateString(obj.tag) };
-        auto digest_off       { builder.CreateString(obj.digest) };
-        auto path_off         { builder.CreateString(obj.path) };
-        auto architecture_off { builder.CreateString(obj.architecture) };
         auto source_off       { builder.CreateString(obj.source) };
         FB::ImageMetadataBuilder fb_builder { builder };
         fb_builder.add_id(id_off);
         fb_builder.add_name(name_off);
         fb_builder.add_tag(tag_off);
-        fb_builder.add_digest(digest_off);
-        fb_builder.add_path(path_off);
         fb_builder.add_size_bytes(obj.size_bytes);
-        fb_builder.add_created_at(obj.created_at);
-        fb_builder.add_architecture(architecture_off);
         fb_builder.add_source(source_off);
         return fb_builder.Finish();
 }
 auto Serialization::deserialize(const FB::ImageMetadata* fb) -> ImageMetadata {
         ImageMetadata obj{};
         if (!fb) return obj;
-        if (fb->id())           obj.id           = fb->id()->str();
-        if (fb->name())         obj.name         = fb->name()->str();
-        if (fb->tag())          obj.tag          = fb->tag()->str();
-        if (fb->digest())       obj.digest       = fb->digest()->str();
-        if (fb->path())         obj.path         = fb->path()->str();
-        if (fb->architecture()) obj.architecture = fb->architecture()->str();
-        if (fb->source())       obj.source       = fb->source()->str();
+        if (fb->id()) obj.id = fb->id()->str();
+        if (fb->name()) obj.name = fb->name()->str();
+        if (fb->tag()) obj.tag = fb->tag()->str();
+        if (fb->source()) obj.source = fb->source()->str();
         obj.size_bytes = fb->size_bytes();
-        obj.created_at = fb->created_at();
         return obj;
 }
-
-//auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const LayerCache& obj) -> flatbuffers::Offset<FB::LayerCache> {
-//        auto hash_off { builder.CreateString(obj.hash) };
-//        auto diff_id_off { builder.CreateString(obj.diff_id) };
-//        auto lower_dir_off { builder.CreateString(obj.lower_dir) };
-//        FB::LayerCacheBuilder fb_builder { builder };
-//        fb_builder.add_hash(hash_off);
-//        fb_builder.add_diff_id(diff_id_off);
-//        fb_builder.add_lower_dir(lower_dir_off);
-//        fb_builder.add_blob_size(obj.blob_size);
-//        return fb_builder.Finish();
-//}
-//
-//auto Serialization::deserialize(const FB::LayerCache* fb) -> LayerCache {
-//        LayerCache obj{};
-//        if (!fb) return obj;
-//        if (fb->hash()) obj.hash = fb>hash()->str();
-//        if (fb->diff_id()) obj.diff_id = fb->diff_id()->str();
-//        if (fb->lower_dir()) obj.lower_dir = fb->lower_dir()->str();
-//        obj.blob_size = fb->blob_size();
-//        return obj;
-//}
