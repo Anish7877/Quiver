@@ -79,6 +79,7 @@ public:
     auto unpause_container(const QStringList& container_ids) -> void;
     auto start_container(const QStringList& container_ids) -> void;
     auto stop_container(const QStringList& container_ids) -> void;
+    auto restart_container(const QString& id) -> void;
     auto update_container(const Container& container) -> void;
     auto prune_containers() -> void;
 
@@ -86,6 +87,7 @@ public:
     auto add_image(const Image& img) -> void;
     auto delete_images(const QStringList& targets) -> void;
     auto pull_image(const QString& name, const QString& tag) -> void;
+    auto load_image(const QString& name, const QString& tag, const QString& tar_path) -> void;
 
     auto get_volumes() const -> std::vector<Volume>;
     auto add_volume(const QString& container_id, const QString& host_path, const QString& container_path, const QString& mode) -> void;

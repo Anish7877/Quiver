@@ -720,6 +720,7 @@ auto ContainersPage::refresh() -> void {
 
         if (c.status == "running") {
             h->addWidget(create_btn("pause", "Pause", "#f97316", [](const QStringList& ids){ Backend::get_instance().pause_container(ids); }));
+            h->addWidget(create_btn("refresh", "Restart", "#58a6ff", [](const QStringList& ids){ Backend::get_instance().restart_container(ids.first()); }));
             h->addWidget(create_btn("stop", "Stop", "#f85149", [](const QStringList& ids){ Backend::get_instance().stop_container(ids); }));
         } else if (c.status == "paused") {
             h->addWidget(create_btn("play", "Unpause", "#2ea043", [](const QStringList& ids){ Backend::get_instance().unpause_container(ids); }));

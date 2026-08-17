@@ -210,6 +210,14 @@ DeleteDialog::DeleteDialog(const QString& container_name, QWidget* parent)
     setObjectName("CreateDialog");
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
 
+    setStyleSheet(
+        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
+        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
+        "QLineEdit:focus { border: 1px solid #f97316; }"
+        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
+    );
+
+
     auto* layout { new QVBoxLayout(this) };
     layout->setContentsMargins(30, 30, 30, 30);
     layout->setSpacing(15);
@@ -261,6 +269,14 @@ BuildProgressDialog::BuildProgressDialog(const QStringList& build_args, QWidget*
     setWindowTitle("Building Image");
     setFixedSize(550, 400);
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+
+    setStyleSheet(
+        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
+        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
+        "QLineEdit:focus { border: 1px solid #f97316; }"
+        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
+    );
+
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(30, 30, 30, 30);
@@ -365,34 +381,126 @@ BuildProgressDialog::~BuildProgressDialog() {
 }
 
 
+#include <QGraphicsOpacityEffect>
+#include <QPropertyAnimation>
+#include <QFileDialog>
+#include <QStackedWidget>
+
 struct PullImageDialog::Impl {
+    QStackedWidget* stack_{};
+    
+    // Pull section
     QLineEdit* pull_name_{};
     QLineEdit* pull_tag_{};
+    
+    // Load section
+    QLineEdit* load_name_{};
+    QLineEdit* load_tag_{};
+    QLineEdit* load_path_{};
+    
+    // Controls
+    QPushButton* pull_btn_{};
+    QPushButton* load_btn_{};
+    QPushButton* confirm_btn_{};
+    
     QWidget* overlay_{};
     QLabel* loading_text_{};
+    
+    void switch_to(int index) {
+        if (stack_->currentIndex() == index) return;
+        
+        auto* current_widget = stack_->currentWidget();
+        auto* next_widget = stack_->widget(index);
+        
+        auto* current_effect = new QGraphicsOpacityEffect(current_widget);
+        current_widget->setGraphicsEffect(current_effect);
+        auto* fade_out = new QPropertyAnimation(current_effect, "opacity");
+        fade_out->setDuration(150);
+        fade_out->setStartValue(1.0);
+        fade_out->setEndValue(0.0);
+        
+        QObject::connect(fade_out, &QPropertyAnimation::finished, [=]() {
+            stack_->setCurrentIndex(index);
+            
+            auto* next_effect = new QGraphicsOpacityEffect(next_widget);
+            next_widget->setGraphicsEffect(next_effect);
+            auto* fade_in = new QPropertyAnimation(next_effect, "opacity");
+            fade_in->setDuration(150);
+            fade_in->setStartValue(0.0);
+            fade_in->setEndValue(1.0);
+            fade_in->start(QAbstractAnimation::DeleteWhenStopped);
+            
+            QObject::connect(fade_in, &QPropertyAnimation::finished, [=]() {
+                next_widget->setGraphicsEffect(nullptr);
+                current_widget->setGraphicsEffect(nullptr);
+            });
+        });
+        
+        fade_out->start(QAbstractAnimation::DeleteWhenStopped);
+    }
 };
 
 PullImageDialog::PullImageDialog(QWidget* parent)
     : QDialog(parent), pimpl_{std::make_unique<Impl>()}
 {
     setObjectName("CreateDialog");
-    setFixedSize(450, 240);
+    setFixedSize(450, 320); // slightly taller to accommodate tabs and load fields
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+
+    setStyleSheet(
+        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
+        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
+        "QLineEdit:focus { border: 1px solid #f97316; }"
+        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
+    );
+
     
     auto* main_layout = new QVBoxLayout(this);
     main_layout->setContentsMargins(28, 28, 28, 28);
     main_layout->setSpacing(20);
     
     auto* header = new QHBoxLayout;
-    auto* title = new QLabel("Pull Image");
+    auto* title = new QLabel("Image Options");
     title->setObjectName("PageTitle");
     header->addWidget(title);
     header->addStretch();
     main_layout->addLayout(header);
     
+    // Section Switcher
+    auto* tabs_layout = new QHBoxLayout;
+    tabs_layout->setSpacing(10);
+    
+    pimpl_->pull_btn_ = new QPushButton("Pull Image");
+    pimpl_->pull_btn_->setCursor(Qt::PointingHandCursor);
+    pimpl_->pull_btn_->setFixedHeight(32);
+    pimpl_->pull_btn_->setCheckable(true);
+    pimpl_->pull_btn_->setChecked(true);
+    pimpl_->pull_btn_->setStyleSheet(
+        "QPushButton { background: transparent; color: #a1a1aa; border: none; font-weight: bold; border-bottom: 2px solid transparent; }"
+        "QPushButton:checked { color: #f97316; border-bottom: 2px solid #f97316; }"
+    );
+    
+    pimpl_->load_btn_ = new QPushButton("Load Image");
+    pimpl_->load_btn_->setCursor(Qt::PointingHandCursor);
+    pimpl_->load_btn_->setFixedHeight(32);
+    pimpl_->load_btn_->setCheckable(true);
+    pimpl_->load_btn_->setStyleSheet(
+        "QPushButton { background: transparent; color: #a1a1aa; border: none; font-weight: bold; border-bottom: 2px solid transparent; }"
+        "QPushButton:checked { color: #f97316; border-bottom: 2px solid #f97316; }"
+    );
+    
+    tabs_layout->addWidget(pimpl_->pull_btn_);
+    tabs_layout->addWidget(pimpl_->load_btn_);
+    tabs_layout->addStretch();
+    main_layout->addLayout(tabs_layout);
+    
+    // Stacked Widget for forms
+    pimpl_->stack_ = new QStackedWidget;
+    
+    // 1. Pull Form
     auto* pull_page = new QWidget;
     auto* pull_layout = new QVBoxLayout(pull_page);
-    pull_layout->setContentsMargins(0, 0, 0, 0);
+    pull_layout->setContentsMargins(0, 10, 0, 0);
     pull_layout->setSpacing(14);
     
     auto* pull_row = new QHBoxLayout;
@@ -406,13 +514,59 @@ PullImageDialog::PullImageDialog(QWidget* parent)
     pimpl_->pull_tag_->setFixedHeight(36);
     
     pull_row->addWidget(pimpl_->pull_name_);
-    pull_row->addWidget(new QLabel(":"));
+    auto* colon1 = new QLabel(":"); colon1->setStyleSheet("color: #FAFAFA; font-weight: bold; font-size: 14px;"); pull_row->addWidget(colon1);
     pull_row->addWidget(pimpl_->pull_tag_);
-    
     pull_layout->addLayout(pull_row);
     pull_layout->addStretch();
+    pimpl_->stack_->addWidget(pull_page);
     
-    main_layout->addWidget(pull_page);
+    // 2. Load Form
+    auto* load_page = new QWidget;
+    auto* load_layout = new QVBoxLayout(load_page);
+    load_layout->setContentsMargins(0, 10, 0, 0);
+    load_layout->setSpacing(14);
+    
+    auto* load_row1 = new QHBoxLayout;
+    pimpl_->load_name_ = new QLineEdit;
+    pimpl_->load_name_->setPlaceholderText("Image Name (required)");
+    pimpl_->load_name_->setFixedHeight(36);
+    
+    pimpl_->load_tag_ = new QLineEdit;
+    pimpl_->load_tag_->setPlaceholderText("Tag (optional)");
+    pimpl_->load_tag_->setFixedWidth(100);
+    pimpl_->load_tag_->setFixedHeight(36);
+    
+    load_row1->addWidget(pimpl_->load_name_);
+    auto* colon2 = new QLabel(":"); colon2->setStyleSheet("color: #FAFAFA; font-weight: bold; font-size: 14px;"); load_row1->addWidget(colon2);
+    load_row1->addWidget(pimpl_->load_tag_);
+    load_layout->addLayout(load_row1);
+    
+    auto* load_row2 = new QHBoxLayout;
+    pimpl_->load_path_ = new QLineEdit;
+    pimpl_->load_path_->setPlaceholderText("Select Tarball Archive...");
+    pimpl_->load_path_->setFixedHeight(36);
+    pimpl_->load_path_->setReadOnly(true);
+    
+    auto* browse_btn = new QPushButton("Browse");
+    browse_btn->setObjectName("SecondaryBtn");
+    browse_btn->setCursor(Qt::PointingHandCursor);
+    browse_btn->setFixedSize(80, 36);
+    
+    connect(browse_btn, &QPushButton::clicked, this, [this]() {
+        QString path = QFileDialog::getOpenFileName(this, "Select Tarball", QDir::homePath(), "Tar Archives (*.tar);;All Files (*.*)");
+        if (!path.isEmpty()) {
+            pimpl_->load_path_->setText(path);
+        }
+    });
+    
+    load_row2->addWidget(pimpl_->load_path_);
+    load_row2->addWidget(browse_btn);
+    load_layout->addLayout(load_row2);
+    
+    load_layout->addStretch();
+    pimpl_->stack_->addWidget(load_page);
+    
+    main_layout->addWidget(pimpl_->stack_);
     
     auto* btns = new QHBoxLayout;
     auto* cancel = new QPushButton("Cancel");
@@ -420,14 +574,14 @@ PullImageDialog::PullImageDialog(QWidget* parent)
     cancel->setCursor(Qt::PointingHandCursor);
     cancel->setFixedSize(100, 36);
     
-    auto* confirm = new QPushButton("Pull");
-    confirm->setObjectName("PrimaryButton");
-    confirm->setCursor(Qt::PointingHandCursor);
-    confirm->setFixedSize(100, 36);
+    pimpl_->confirm_btn_ = new QPushButton("Pull");
+    pimpl_->confirm_btn_->setObjectName("PrimaryButton");
+    pimpl_->confirm_btn_->setCursor(Qt::PointingHandCursor);
+    pimpl_->confirm_btn_->setFixedSize(100, 36);
     
     btns->addStretch();
     btns->addWidget(cancel);
-    btns->addWidget(confirm);
+    btns->addWidget(pimpl_->confirm_btn_);
     main_layout->addLayout(btns);
     
     pimpl_->overlay_ = new QWidget(this);
@@ -441,7 +595,7 @@ PullImageDialog::PullImageDialog(QWidget* parent)
     auto* spinner_lbl = new QLabel;
     spinner_lbl->setStyleSheet("color: #F97316; font-size: 18px; font-weight: bold; background: transparent; border: none;");
     
-    pimpl_->loading_text_ = new QLabel("Pulling Image...");
+    pimpl_->loading_text_ = new QLabel("Processing...");
     pimpl_->loading_text_->setStyleSheet("color: #FAFAFA; font-size: 13px; font-weight: bold; background: transparent; border: none;");
     
     overlay_layout->addWidget(spinner_lbl);
@@ -458,28 +612,66 @@ PullImageDialog::PullImageDialog(QWidget* parent)
     pimpl_->overlay_->hide();
     
     // Connections
+    connect(pimpl_->pull_btn_, &QPushButton::clicked, this, [this]() {
+        pimpl_->pull_btn_->setChecked(true);
+        pimpl_->load_btn_->setChecked(false);
+        pimpl_->confirm_btn_->setText("Pull");
+        pimpl_->switch_to(0);
+    });
+    
+    connect(pimpl_->load_btn_, &QPushButton::clicked, this, [this]() {
+        pimpl_->load_btn_->setChecked(true);
+        pimpl_->pull_btn_->setChecked(false);
+        pimpl_->confirm_btn_->setText("Load");
+        pimpl_->switch_to(1);
+    });
+    
     connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
     
-    connect(confirm, &QPushButton::clicked, this, [this]() {
-        QString name = pimpl_->pull_name_->text().trimmed();
-        if (name.isEmpty()) return;
-        QString tag = pimpl_->pull_tag_->text().trimmed();
+    connect(pimpl_->confirm_btn_, &QPushButton::clicked, this, [this]() {
+        bool is_pull = (pimpl_->stack_->currentIndex() == 0);
         
-        pimpl_->overlay_->show();
-        pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 40);
-        pimpl_->overlay_->raise();
-        
-        QTimer::singleShot(50, this, [this, name, tag]() {
-            Backend::get_instance().pull_image(name, tag);
-            QTimer::singleShot(2500, this, [this]() {
-                pimpl_->overlay_->hide();
-                accept();
+        if (is_pull) {
+            QString name = pimpl_->pull_name_->text().trimmed();
+            if (name.isEmpty()) return;
+            QString tag = pimpl_->pull_tag_->text().trimmed();
+            
+            pimpl_->loading_text_->setText("Pulling Image...");
+            pimpl_->overlay_->show();
+            pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 40);
+            pimpl_->overlay_->raise();
+            
+            QTimer::singleShot(50, this, [this, name, tag]() {
+                Backend::get_instance().pull_image(name, tag);
+                QTimer::singleShot(2500, this, [this]() {
+                    pimpl_->overlay_->hide();
+                    accept();
+                });
             });
-        });
+        } else {
+            QString name = pimpl_->load_name_->text().trimmed();
+            QString path = pimpl_->load_path_->text().trimmed();
+            if (name.isEmpty() || path.isEmpty()) return;
+            QString tag = pimpl_->load_tag_->text().trimmed();
+            
+            pimpl_->loading_text_->setText("Loading Image...");
+            pimpl_->overlay_->show();
+            pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 40);
+            pimpl_->overlay_->raise();
+            
+            QTimer::singleShot(50, this, [this, name, tag, path]() {
+                Backend::get_instance().load_image(name, tag, path);
+                QTimer::singleShot(2500, this, [this]() {
+                    pimpl_->overlay_->hide();
+                    accept();
+                });
+            });
+        }
     });
 }
 
 PullImageDialog::~PullImageDialog() = default;
+
 
 struct BuildImageDialog::Impl {
     ToggleSwitch* output_toggle_{};
@@ -507,6 +699,14 @@ BuildImageDialog::BuildImageDialog(QWidget* parent)
     setWindowTitle("Build Image");
     setFixedSize(600, 750);
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+
+    setStyleSheet(
+        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
+        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
+        "QLineEdit:focus { border: 1px solid #f97316; }"
+        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
+    );
+
 
     auto* main { new QVBoxLayout(this) };
     main->setContentsMargins(30, 30, 30, 30);
@@ -848,6 +1048,14 @@ CreateDialog::CreateDialog(QWidget* parent)
     setWindowTitle("Create Container");
     setFixedSize(600, 820);
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+
+    setStyleSheet(
+        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
+        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
+        "QLineEdit:focus { border: 1px solid #f97316; }"
+        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
+    );
+
 
     auto* main { new QVBoxLayout(this) };
     main->setContentsMargins(30, 30, 30, 30);
@@ -1405,6 +1613,14 @@ auto CreateDialog::on_add_port() -> void {
     d.setWindowTitle("Add Port Mapping");
     d.setFixedSize(360, 240);
     d.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+
+    setStyleSheet(
+        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
+        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
+        "QLineEdit:focus { border: 1px solid #f97316; }"
+        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
+    );
+
     d.setAttribute(Qt::WA_TranslucentBackground);
     auto* base_l { new QVBoxLayout(&d) };
     base_l->setContentsMargins(10, 10, 10, 10);
@@ -1471,6 +1687,14 @@ CustomAlert::CustomAlert(Type type, const QString& title, const QString& message
     : QDialog(parent), pimpl_{std::make_unique<Impl>()}
 {
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+
+    setStyleSheet(
+        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
+        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
+        "QLineEdit:focus { border: 1px solid #f97316; }"
+        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
+    );
+
     setFixedSize(400, 200);
     setObjectName("CreateDialog");
 
@@ -1608,6 +1832,14 @@ UpdateDialog::UpdateDialog(const Quiver::Container& c, QWidget* parent)
     setWindowTitle("Update Container: " + c.name);
     setFixedSize(600, 750);
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+
+    setStyleSheet(
+        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
+        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
+        "QLineEdit:focus { border: 1px solid #f97316; }"
+        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
+    );
+
 
     auto* main = new QVBoxLayout(this);
     main->setContentsMargins(30, 30, 30, 30);

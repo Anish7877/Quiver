@@ -296,6 +296,17 @@ auto Backend::stop_container(const QStringList& container_ids) -> void {
     }
 }
 
+auto Backend::restart_container(const QString& id) -> void {
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        QStringList args;
+        args << "restart" << id;
+        qDebug() << "Executing Quiver CLI for restart:" << cli_path << args;
+        QProcess::startDetached(cli_path, args);
+    }
+}
+
+
 auto Backend::prune_containers() -> void {
     QString cli_path = resolve_cli_path();
     if (QFile::exists(cli_path)) {
@@ -371,6 +382,20 @@ auto Backend::pull_image(const QString& name, const QString& tag) -> void {
         QStringList args;
         args << "image" << "pull" << target;
         qDebug() << "Executing Quiver CLI for pull image:" << cli_path << args;
+        QProcess::startDetached(cli_path, args);
+    }
+}
+
+auto Backend::load_image(const QString& name, const QString& tag, const QString& tar_path) -> void {
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        QString target = name;
+        if (!tag.isEmpty()) {
+            target += ":" + tag;
+        }
+        QStringList args;
+        args << "image" << "load" << target << tar_path;
+        qDebug() << "Executing Quiver CLI for load image:" << cli_path << args;
         QProcess::startDetached(cli_path, args);
     }
 }
