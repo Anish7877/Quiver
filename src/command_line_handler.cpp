@@ -2018,7 +2018,7 @@ auto CommandLineHandler::restart(std::span<std::string> args) -> void {
         }
 }
 
-auto CommandLineHandler::volume(std::span<std::string> args) -> void {
+auto CommandLineHandler::mount(std::span<std::string> args) -> void {
         if (args.empty()) [[unlikely]] {
                 std::cerr << "Error: No arguments provided\n";
                 Utils::print_usage();
@@ -2028,7 +2028,7 @@ auto CommandLineHandler::volume(std::span<std::string> args) -> void {
         container_db_manager.init();
         if (args.front() == "ls") {
                 if (args.size() != 1) {
-                        std::cerr << "Error: ls only lists volumes no arguments needed\n";
+                        std::cerr << "Error: ls only lists mounts no arguments needed\n";
                 }
                 auto containers{container_db_manager.get_all_container()};
                 constexpr int id_width{70};
@@ -2052,10 +2052,10 @@ auto CommandLineHandler::volume(std::span<std::string> args) -> void {
                         }
                 }
         }
-        if (args.front() == "add") {
+        else if (args.front() == "add") {
                 if (args.size() < 3) {
                         std::cerr << "Error: Not enough arguments provided.\n";
-                        std::cerr << "Usage: quiver volume add <container_id> <host_path>:<container_path> [...]\n";
+                        std::cerr << "Usage: quiver mount add <container_id> <host_path>:<container_path> [...]\n";
                         return;
                 }
 
@@ -2077,7 +2077,7 @@ auto CommandLineHandler::volume(std::span<std::string> args) -> void {
                 for (size_t i{2}; i < args.size(); ++i) {
                         auto tokens = split_string(args[i], ':');
                         if (tokens.size() < 2) {
-                                std::cerr << std::format("Warning: Invalid volume format '{}'. Expected <host_path>:<container_path>\n", args[i]);
+                                std::cerr << std::format("Warning: Invalid mount format '{}'. Expected <host_path>:<container_path>\n", args[i]);
                                 continue;
                         }
 
@@ -2095,17 +2095,17 @@ auto CommandLineHandler::volume(std::span<std::string> args) -> void {
                                 }
                         }
                         container->config.mounts.emplace_back(mnt);
-                        std::cout << std::format("Added volume mapping {} -> {} to container '{}'\n",
+                        std::cout << std::format("Added mount mapping {} -> {} to container '{}'\n",
                                         tokens[0], tokens[1], target_id);
                 }
 
                 container_db_manager.update_container(target_id, container.value());
-                std::cout << "Successfully updated volume configurations.\n";
+                std::cout << "Successfully updated mount configurations.\n";
         }
         else if (args.front() == "rm") {
                 if (args.size() < 3) {
                         std::cerr << "Error: Not enough arguments provided.\n";
-                        std::cerr << "Usage: quiver volume rm <container_id> <container_path> [...]\n";
+                        std::cerr << "Usage: quiver mount rm <container_id> <container_path> [...]\n";
                         return;
                 }
 
@@ -2135,22 +2135,22 @@ auto CommandLineHandler::volume(std::span<std::string> args) -> void {
 
                         if (it != mounts.end()) {
                                 mounts.erase(it, mounts.end());
-                                std::cout << std::format("Removed volume mapping for '{}' from container '{}'\n",
+                                std::cout << std::format("Removed mount mapping for '{}' from container '{}'\n",
                                                          target_dest, target_id);
                                 modified = true;
                         } else {
-                                std::cerr << std::format("Warning: No volume mounted at '{}' found in container '{}'\n",
+                                std::cerr << std::format("Warning: No mount mounted at '{}' found in container '{}'\n",
                                                          target_dest, target_id);
                         }
                 }
 
                 if (modified) {
                         container_db_manager.update_container(target_id, container.value());
-                        std::cout << "Successfully updated volume configurations.\n";
+                        std::cout << "Successfully updated mount configurations.\n";
                 }
         }
         else {
-                std::cerr << std::format("quiver volume: '{}' is not a quiver volume command.\n", args.front());
+                std::cerr << std::format("quiver mount: '{}' is not a quiver mount command.\n", args.front());
                 Utils::print_usage();
         }
 }

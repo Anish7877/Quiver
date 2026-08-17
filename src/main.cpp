@@ -63,8 +63,8 @@ int main(int argc, char* argv[]) {
                         CommandLineHandler::image(args);
                 } else if (command == "restart") {
                         CommandLineHandler::restart(args);
-                } else if (command == "volume") {
-                        CommandLineHandler::volume(args);
+                } else if (command == "mount") {
+                        CommandLineHandler::mount(args);
                 } else {
                         std::cerr << "quiver: '" << command << "' is not a quiver command.\n"
                                 << "See 'quiver --help'.\n";

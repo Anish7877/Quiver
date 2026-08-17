@@ -23,5 +23,5 @@ namespace CommandLineHandler {
         auto create(std::span<std::string>) -> void;
         auto image(std::span<std::string>) -> void;
         auto restart(std::span<std::string>) -> void;
-        auto volume(std::span<std::string>) -> void;
+        auto mount(std::span<std::string>) -> void;
 }
