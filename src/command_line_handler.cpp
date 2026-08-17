@@ -177,7 +177,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
         std::string outpath{Utils::get_image_path(image_name).string()};
         std::string error{};
 
-        if (!Utils::file_exists(fs::path(outpath) / "config.json")) {
+        if (!fs::exists(fs::path(outpath) / "config.json")) {
                 std::cout << std::format("Unable to find image '{}' locally. Pulling...\n", image_name);
                 image_manager.pull(image_name, outpath, error);
                 if (!error.empty()) {
@@ -188,7 +188,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                 auto index{image_name.find(':')};
                 if (index != std::string::npos) {
                         metadata_image_name = image_name.substr(0, index);
-                        metadata_image_name = image_name.substr(index + 1);
+                        metadata_image_tag = image_name.substr(index + 1);
                 } else {
                         metadata_image_name = image_name;
                         metadata_image_tag = "latest";
@@ -1288,7 +1288,7 @@ auto CommandLineHandler::top(std::span<std::string> args) -> void {
                                         info.cmd = full_cmd;
                                 }
                         }
-                        processes.push_back(std::move(info));
+                        processes.emplace_back(info);
                 }
         }
         std::cout << std::format("{:<12} {:<10} {:<6} {}\n", "UID", "PID", "STAT", "CMD");
@@ -1726,8 +1726,8 @@ auto CommandLineHandler::create(std::span<std::string> args) -> void {
         }
         auto& container_db_manager{ContainerDbManager::get_instance()};
         ContainerDbObject db_object{};
-        db_object.config = std::move(config);
-        db_object.image = std::move(image_name);
+        db_object.config = config;
+        db_object.image = image_name;
         db_object.name = std::format("quiver_{}", config.container_id.substr(0, 6));
         db_object.status = "created";
         db_object.boot_time = Utils::get_boot_time();
@@ -1877,8 +1877,8 @@ auto CommandLineHandler::image(std::span<std::string> args) -> void {
                         }
                         ImageMetadata image_metadata{};
                         image_metadata.id = Utils::generate_id();
-                        image_metadata.name = std::move(image_name);
-                        image_metadata.tag = std::move(image_tag);
+                        image_metadata.name = image_name;
+                        image_metadata.tag = image_tag;
                         image_metadata.size_bytes = 0;
 
                         try {
@@ -2094,7 +2094,7 @@ auto CommandLineHandler::volume(std::span<std::string> args) -> void {
                                         mnt.options.push_back("rw");
                                 }
                         }
-                        container->config.mounts.push_back(std::move(mnt));
+                        container->config.mounts.emplace_back(mnt);
                         std::cout << std::format("Added volume mapping {} -> {} to container '{}'\n",
                                         tokens[0], tokens[1], target_id);
                 }
