@@ -32,19 +32,17 @@ struct Container {
 
 struct Image {
     QString id {};
-    QString repository {};
+    QString name {};
     QString tag {};
     QString size {};
-    QString created {};
-    QString status {};
+    QString source {};
 };
 
 struct Volume {
-    QString name {};
-    QString driver {};
-    QString mount_point {};
-    QString size {};
-    QString status {};
+    QString container_id {};
+    QString source {};
+    QString destination {};
+    QString type {};
 };
 
 struct PortMapping {
@@ -86,11 +84,12 @@ public:
 
     auto get_images() const -> std::vector<Image>;
     auto add_image(const Image& img) -> void;
-    auto delete_image(const QString& image_id) -> void;
+    auto delete_images(const QStringList& targets) -> void;
+    auto pull_image(const QString& name, const QString& tag) -> void;
 
     auto get_volumes() const -> std::vector<Volume>;
-    auto add_volume(const Volume& vol) -> void;
-    auto delete_volume(const QString& volume_name) -> void;
+    auto add_volume(const QString& container_id, const QString& host_path, const QString& container_path, const QString& mode) -> void;
+    auto delete_volumes(const QMap<QString, QStringList>& targets) -> void;
 
     auto get_ports() const -> std::vector<PortMapping>;
     auto add_port(const PortMapping& port) -> void;

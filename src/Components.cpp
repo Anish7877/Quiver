@@ -364,6 +364,123 @@ BuildProgressDialog::~BuildProgressDialog() {
     }
 }
 
+
+struct PullImageDialog::Impl {
+    QLineEdit* pull_name_{};
+    QLineEdit* pull_tag_{};
+    QWidget* overlay_{};
+    QLabel* loading_text_{};
+};
+
+PullImageDialog::PullImageDialog(QWidget* parent)
+    : QDialog(parent), pimpl_{std::make_unique<Impl>()}
+{
+    setObjectName("CreateDialog");
+    setFixedSize(450, 240);
+    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+    
+    auto* main_layout = new QVBoxLayout(this);
+    main_layout->setContentsMargins(28, 28, 28, 28);
+    main_layout->setSpacing(20);
+    
+    auto* header = new QHBoxLayout;
+    auto* title = new QLabel("Pull Image");
+    title->setObjectName("PageTitle");
+    header->addWidget(title);
+    header->addStretch();
+    main_layout->addLayout(header);
+    
+    auto* pull_page = new QWidget;
+    auto* pull_layout = new QVBoxLayout(pull_page);
+    pull_layout->setContentsMargins(0, 0, 0, 0);
+    pull_layout->setSpacing(14);
+    
+    auto* pull_row = new QHBoxLayout;
+    pimpl_->pull_name_ = new QLineEdit;
+    pimpl_->pull_name_->setPlaceholderText("e.g. nginx");
+    pimpl_->pull_name_->setFixedHeight(36);
+    
+    pimpl_->pull_tag_ = new QLineEdit;
+    pimpl_->pull_tag_->setPlaceholderText("latest");
+    pimpl_->pull_tag_->setFixedWidth(100);
+    pimpl_->pull_tag_->setFixedHeight(36);
+    
+    pull_row->addWidget(pimpl_->pull_name_);
+    pull_row->addWidget(new QLabel(":"));
+    pull_row->addWidget(pimpl_->pull_tag_);
+    
+    pull_layout->addLayout(pull_row);
+    pull_layout->addStretch();
+    
+    main_layout->addWidget(pull_page);
+    
+    auto* btns = new QHBoxLayout;
+    auto* cancel = new QPushButton("Cancel");
+    cancel->setObjectName("SecondaryBtn");
+    cancel->setCursor(Qt::PointingHandCursor);
+    cancel->setFixedSize(100, 36);
+    
+    auto* confirm = new QPushButton("Pull");
+    confirm->setObjectName("PrimaryButton");
+    confirm->setCursor(Qt::PointingHandCursor);
+    confirm->setFixedSize(100, 36);
+    
+    btns->addStretch();
+    btns->addWidget(cancel);
+    btns->addWidget(confirm);
+    main_layout->addLayout(btns);
+    
+    pimpl_->overlay_ = new QWidget(this);
+    pimpl_->overlay_->setFixedSize(180, 40);
+    pimpl_->overlay_->setStyleSheet("background-color: #27272A; border: 1px solid #3F3F46; border-radius: 20px;");
+    
+    auto* overlay_layout = new QHBoxLayout(pimpl_->overlay_);
+    overlay_layout->setContentsMargins(20, 0, 20, 0);
+    overlay_layout->setSpacing(10);
+    
+    auto* spinner_lbl = new QLabel;
+    spinner_lbl->setStyleSheet("color: #F97316; font-size: 18px; font-weight: bold; background: transparent; border: none;");
+    
+    pimpl_->loading_text_ = new QLabel("Pulling Image...");
+    pimpl_->loading_text_->setStyleSheet("color: #FAFAFA; font-size: 13px; font-weight: bold; background: transparent; border: none;");
+    
+    overlay_layout->addWidget(spinner_lbl);
+    overlay_layout->addWidget(pimpl_->loading_text_);
+    
+    auto* timer = new QTimer(pimpl_->overlay_);
+    connect(timer, &QTimer::timeout, pimpl_->overlay_, [spinner_lbl]() {
+        static int frame = 0;
+        const QString frames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+        spinner_lbl->setText(frames[frame]);
+        frame = (frame + 1) % 10;
+    });
+    timer->start(80);
+    pimpl_->overlay_->hide();
+    
+    // Connections
+    connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
+    
+    connect(confirm, &QPushButton::clicked, this, [this]() {
+        QString name = pimpl_->pull_name_->text().trimmed();
+        if (name.isEmpty()) return;
+        QString tag = pimpl_->pull_tag_->text().trimmed();
+        
+        pimpl_->overlay_->show();
+        pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 40);
+        pimpl_->overlay_->raise();
+        
+        QTimer::singleShot(50, this, [this, name, tag]() {
+            Backend::get_instance().pull_image(name, tag);
+            QTimer::singleShot(2500, this, [this]() {
+                pimpl_->overlay_->hide();
+                accept();
+            });
+        });
+    });
+}
+
+PullImageDialog::~PullImageDialog() = default;
+
 struct BuildImageDialog::Impl {
     ToggleSwitch* output_toggle_{};
     QWidget*      image_widget_{};

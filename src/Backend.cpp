@@ -31,20 +31,9 @@ struct Backend::BackendImpl {
     QNetworkAccessManager network_; 
     std::vector<Container> containers_ {};
 
-    std::vector<Image> images_ {
-        {"a1b2c3", "nginx",      "alpine",  "23.4 MB",  "2 days ago",  "available"},
-        {"d4e5f6", "redis",      "6.2",     "113 MB",   "5 days ago",  "available"},
-        {"g7h8i9", "postgres",   "14",      "376 MB",   "1 week ago",  "available"},
-        {"j0k1l2", "ubuntu",     "22.04",   "77.8 MB",  "2 weeks ago", "unused"},
-        {"m3n4o5", "alpine",     "latest",  "7.05 MB",  "3 weeks ago", "unused"}
-    };
+    std::vector<Image> images_ {};
 
-    std::vector<Volume> volumes_ {
-        {"pgdata",        "local",   "/var/lib/docker/volumes/pgdata/_data",   "512 MB",  "mounted"},
-        {"redis-data",    "local",   "/var/lib/docker/volumes/redis-data/_data","128 MB", "mounted"},
-        {"nginx-config",  "local",   "/var/lib/docker/volumes/nginx-config/_data","2 MB", "unmounted"},
-        {"app-logs",      "local",   "/var/lib/docker/volumes/app-logs/_data",  "64 MB",  "unmounted"}
-    };
+    std::vector<Volume> volumes_ {};
 
     std::vector<PortMapping> ports_ {};
 
@@ -317,20 +306,137 @@ auto Backend::prune_containers() -> void {
     }
 }
 
-auto Backend::get_images() const -> std::vector<Image> { return pimpl_->images_; }
+auto Backend::get_images() const -> std::vector<Image> {
+    std::vector<Image> result;
+    QString cli_path = resolve_cli_path();
+    if (!QFile::exists(cli_path)) return result;
+
+    QProcess process;
+    process.start(cli_path, QStringList() << "image" << "ls");
+    if (!process.waitForFinished(10000)) {
+        process.kill();
+        process.waitForFinished(500);
+        return result;
+    }
+
+    QString output = process.readAllStandardOutput();
+    QStringList lines = output.split('\n', Qt::SkipEmptyParts);
+    
+    // Skip header line
+    for (int i = 1; i < lines.size(); ++i) {
+        QString line = lines[i].trimmed();
+        
+        // Truncate if we hit usage errors
+        if (line.startsWith("Usage:") || line.startsWith("quiver image:")) {
+            break; 
+        }
+        
+        QStringList parts = line.split(QRegularExpression("\\s{2,}"), Qt::SkipEmptyParts);
+        // Fallback to single space if double space parsing yields too few parts
+        if (parts.size() < 5) {
+            parts = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        }
+        
+        if (parts.size() >= 5) {
+            Image img;
+            img.id = parts[0];
+            img.name = parts[1]; // CLI Name
+            img.tag = parts[2];  // CLI Tag
+            img.size = parts[3];
+            img.source = parts[4];
+            result.push_back(img);
+        }
+    }
+    return result;
+}
 auto Backend::add_image(const Image& img) -> void { pimpl_->images_.push_back(img); }
-auto Backend::delete_image(const QString& image_id) -> void {
-    auto& v { pimpl_->images_ };
-    v.erase(std::remove_if(v.begin(), v.end(),
-        [&image_id](const Image& x){ return x.id == image_id; }), v.end());
+auto Backend::delete_images(const QStringList& targets) -> void {
+    if (targets.isEmpty()) return;
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        QStringList args;
+        args << "image" << "rm" << targets;
+        qDebug() << "Executing Quiver CLI for delete images:" << cli_path << args;
+        QProcess::startDetached(cli_path, args);
+    }
 }
 
-auto Backend::get_volumes() const -> std::vector<Volume> { return pimpl_->volumes_; }
-auto Backend::add_volume(const Volume& vol) -> void { pimpl_->volumes_.push_back(vol); }
-auto Backend::delete_volume(const QString& volume_name) -> void {
-    auto& v { pimpl_->volumes_ };
-    v.erase(std::remove_if(v.begin(), v.end(),
-        [&volume_name](const Volume& x){ return x.name == volume_name; }), v.end());
+auto Backend::pull_image(const QString& name, const QString& tag) -> void {
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        QString target = name;
+        if (!tag.isEmpty()) {
+            target += ":" + tag;
+        }
+        QStringList args;
+        args << "image" << "pull" << target;
+        qDebug() << "Executing Quiver CLI for pull image:" << cli_path << args;
+        QProcess::startDetached(cli_path, args);
+    }
+}
+
+auto Backend::get_volumes() const -> std::vector<Volume> {
+    std::vector<Volume> result;
+    QString cli_path = resolve_cli_path();
+    if (!QFile::exists(cli_path)) return result;
+
+    QProcess process;
+    process.start(cli_path, QStringList() << "volume" << "ls");
+    if (!process.waitForFinished(10000)) {
+        process.kill();
+        process.waitForFinished(500);
+        return result;
+    }
+
+    QString output = process.readAllStandardOutput();
+    QStringList lines = output.split('\n', Qt::SkipEmptyParts);
+    
+    // Skip header line
+    for (int i = 1; i < lines.size(); ++i) {
+        QString line = lines[i].trimmed();
+        
+        // Truncate if we hit "Usage:" or "quiver volume:" error messages
+        if (line.startsWith("Usage:") || line.startsWith("quiver volume:")) {
+            break; 
+        }
+        
+        QStringList parts = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        // Only parse if it looks like a valid row with at least 4 parts and first part is long hash
+        if (parts.size() >= 4 && parts[0].length() >= 12) {
+            Volume v;
+            v.container_id = parts[0];
+            v.source = parts[1];
+            v.destination = parts[2];
+            v.type = parts[3];
+            result.push_back(v);
+        }
+    }
+    return result;
+}
+auto Backend::add_volume(const QString& container_id, const QString& host_path, const QString& container_path, const QString& mode) -> void {
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        QString mapping = host_path + ":" + container_path;
+        if (!mode.isEmpty()) mapping += ":" + mode;
+        QStringList args;
+        args << "volume" << "add" << container_id << mapping;
+        qDebug() << "Executing Quiver CLI for add volume:" << cli_path << args;
+        QProcess::startDetached(cli_path, args);
+    }
+}
+auto Backend::delete_volumes(const QMap<QString, QStringList>& targets) -> void {
+    QString cli_path = resolve_cli_path();
+    if (QFile::exists(cli_path)) {
+        for (auto it = targets.constBegin(); it != targets.constEnd(); ++it) {
+            QString container_id = it.key();
+            QStringList paths = it.value();
+            QStringList args;
+            args << "volume" << "rm" << container_id;
+            args.append(paths);
+            qDebug() << "Executing Quiver CLI for rm volume:" << cli_path << args;
+            QProcess::startDetached(cli_path, args);
+        }
+    }
 }
 
 auto Backend::get_ports() const -> std::vector<PortMapping> {

@@ -89,6 +89,18 @@ private:
     std::unique_ptr<Impl> pimpl_ {};
 };
 
+
+class PullImageDialog : public QDialog {
+    Q_OBJECT
+public:
+    explicit PullImageDialog(QWidget* parent = nullptr);
+    ~PullImageDialog() override;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pimpl_ {};
+};
+
 class BuildImageDialog : public QDialog {
     Q_OBJECT
 public:

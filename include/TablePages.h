@@ -23,6 +23,8 @@ public:
                  const QString&     action_obj_name = QString()) -> void;
 
     auto table() -> QTableWidget*;
+    auto set_action_column_width(int width) -> void;
+    auto clear_rows() -> void;
     auto header_layout() -> QHBoxLayout*;
 
 signals:
@@ -38,6 +40,9 @@ class ImagesPage : public QWidget {
 public:
     explicit ImagesPage(QWidget* parent = nullptr);
     ~ImagesPage() override;
+    auto refresh() -> void;
+protected:
+    void resizeEvent(QResizeEvent* event) override;
 private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_ {};
@@ -67,6 +72,9 @@ class VolumesPage : public QWidget {
 public:
     explicit VolumesPage(QWidget* parent = nullptr);
     ~VolumesPage() override;
+    auto refresh() -> void;
+protected:
+    void resizeEvent(QResizeEvent* event) override;
 private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_ {};

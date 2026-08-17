@@ -803,7 +803,35 @@ auto ContainersPage::refresh() -> void {
     pimpl_->update_bulk_actions_visibility();
 }
 
-struct ImagesPage::Impl { TablePage* page_ {}; };
+struct ImagesPage::Impl {
+    TablePage* page_ {};
+    QWidget* overlay_ {};
+    QLabel* loading_text_ {};
+    QWidget* bulk_widget_ {};
+    
+    QMap<QString, QStringList> get_selected_images() {
+        QMap<QString, QStringList> res;
+        for (int r = 0; r < page_->table()->rowCount(); ++r) {
+            auto* cell = page_->table()->cellWidget(r, 0);
+            if (!cell) continue;
+            auto* cb = cell->findChild<QPushButton*>("SelectCheckbox");
+            if (cb && cb->isChecked()) {
+                auto* name_item = page_->table()->item(r, 2);
+                auto* tag_item = page_->table()->item(r, 3);
+                if (name_item && tag_item) {
+                    res[name_item->text()].append(tag_item->text());
+                }
+            }
+        }
+        return res;
+    }
+    
+    void update_bulk_actions_visibility() {
+        if (bulk_widget_) {
+            bulk_widget_->setVisible(!get_selected_images().isEmpty());
+        }
+    }
+};
 
 ImagesPage::ImagesPage(QWidget* parent)
     : QWidget(parent), pimpl_{ std::make_unique<Impl>() }
@@ -812,17 +840,55 @@ ImagesPage::ImagesPage(QWidget* parent)
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
 
-    make_stat_row(
-        "TOTAL IMAGES", "6",
-        "AVAILABLE",    "4", "#4ade80",
-        "UNUSED",       "2", "#fb7185",
-        root);
-
     pimpl_->page_ = new TablePage(
         "Images",
-        { "REPOSITORY", "TAG",  "SIZE", "CREATED" },
+        { "SELECT", "IMAGE ID", "NAME", "TAG", "SIZE", "SOURCE" },
         this);
 
+    pimpl_->page_->table()->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
+    pimpl_->page_->table()->setColumnWidth(0, 60);
+
+    pimpl_->bulk_widget_ = new QWidget;
+    auto* bulk_row = new QHBoxLayout(pimpl_->bulk_widget_);
+    bulk_row->setContentsMargins(0, 0, 0, 0);
+    bulk_row->setSpacing(10);
+    
+    auto* bulk_del_btn = new HoverIconButton("Delete", "delete", "#f85149");
+    bulk_del_btn->setObjectName("BulkActionBtn_delete");
+    bulk_del_btn->setIconSize(QSize(14, 14));
+    bulk_del_btn->setFixedSize(100, 30);
+    bulk_del_btn->setCursor(Qt::PointingHandCursor);
+    
+    connect(bulk_del_btn, &QPushButton::clicked, this, [this]() {
+        auto selected = pimpl_->get_selected_images();
+        if (selected.isEmpty()) return;
+        
+        CustomAlert alert(CustomAlert::Question, "Confirm Delete", "Are you sure you want to delete the selected images?", this);
+        if (alert.exec() != QDialog::Accepted) {
+            return;
+        }
+        
+        pimpl_->overlay_->show();
+        pimpl_->overlay_->raise();
+        QTimer::singleShot(50, this, [this, selected]() {
+            QStringList targets;
+            for (auto it = selected.constBegin(); it != selected.constEnd(); ++it) {
+                QString name = it.key();
+                for (const QString& tag : it.value()) {
+                    targets << (name + ":" + tag);
+                }
+            }
+            Backend::get_instance().delete_images(targets);
+            QTimer::singleShot(2500, this, [this]() {
+                refresh();
+                pimpl_->overlay_->hide();
+            });
+        });
+    });
+    
+    bulk_row->addWidget(bulk_del_btn);
+    pimpl_->bulk_widget_->hide(); // Hidden by default
+    
     auto* build_btn = new QPushButton("Build Image");
     build_btn->setStyleSheet(
         "QPushButton { background: #f97316; color: #ffffff; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; }"
@@ -830,63 +896,189 @@ ImagesPage::ImagesPage(QWidget* parent)
     );
     build_btn->setFixedSize(120, 36);
     build_btn->setCursor(Qt::PointingHandCursor);
-    
     connect(build_btn, &QPushButton::clicked, this, [this]() {
         BuildImageDialog dialog(this);
         dialog.exec();
     });
-
+    
     pimpl_->page_->header_layout()->addStretch();
+    pimpl_->page_->header_layout()->addWidget(pimpl_->bulk_widget_);
     pimpl_->page_->header_layout()->addWidget(build_btn);
-
-    auto add = [&](const QStringList& d) {
-        pimpl_->page_->add_row(d, "Delete", "TableDangerBtn");
-    };
-    add({ "nginx",       "alpine",     "23.5 MB", "2 days ago"  });
-    add({ "redis",       "6.2",      "113 MB",  "1 week ago"  });
-    add({ "postgres",   "14",       "376 MB",  "3 days ago"  });
-    add({ "ubuntu",    "22.04",      "77.8 MB", "5 days ago"  });
-    add({ "node",        "18-alpine",  "168 MB",  "1 day ago"   });
-    add({ "python",    "3.11-slim",  "125 MB",  "4 days ago"  });
-
+    
     connect(pimpl_->page_, &TablePage::add_clicked, this, [this]() {
-        QDialog d(this);
-        d.setObjectName("CreateDialog");
-        d.setFixedSize(400, 180);
-        d.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
-        auto* l { new QVBoxLayout(&d) };
-        l->setContentsMargins(28, 28, 28, 28); l->setSpacing(14);
-        auto* title { new QLabel("Pull Image") }; title->setObjectName("PageTitle"); l->addWidget(title);
-        auto* r { new QHBoxLayout };
-        auto* name_in { new QLineEdit }; name_in->setPlaceholderText("e.g. nginx"); name_in->setFixedHeight(34);
-        auto* tag_in  { new QLineEdit }; tag_in->setPlaceholderText("latest"); tag_in->setFixedWidth(90); tag_in->setFixedHeight(34);
-        r->addWidget(name_in); r->addWidget(new QLabel(":")); r->addWidget(tag_in);
-        l->addLayout(r); l->addStretch();
-        auto* btns { new QHBoxLayout };
-        auto* cancel { new QPushButton("Cancel") }; 
-        cancel->setObjectName("SecondaryBtn"); 
-        cancel->setCursor(Qt::PointingHandCursor);
-        cancel->setFixedSize(85, 34);
-        connect(cancel, &QPushButton::clicked, &d, &QDialog::reject);
-        auto* pull { new QPushButton("Pull") };
-         pull->setObjectName("PrimaryButton"); 
-        pull->setCursor(Qt::PointingHandCursor);
-        pull->setFixedSize(85, 34);
-        connect(pull, &QPushButton::clicked, &d, &QDialog::accept);
-        btns->addStretch(); btns->addWidget(cancel); btns->addWidget(pull);
-        l->addLayout(btns);
-        if (d.exec() == QDialog::Accepted) {
-            QString name { name_in->text().trimmed() };
-            if (name.isEmpty()) return;
-            QString tag { tag_in->text().trimmed() };
+        PullImageDialog dialog(this);
+        if (dialog.exec() == QDialog::Accepted) {
+            refresh();
         }
     });
 
+    pimpl_->page_->set_action_column_width(120);
+
+    pimpl_->overlay_ = new QWidget(this);
+    pimpl_->overlay_->setFixedSize(160, 40);
+    pimpl_->overlay_->setStyleSheet("background-color: #27272A; border: 1px solid #3F3F46; border-radius: 20px;");
+    
+    auto* overlay_layout = new QHBoxLayout(pimpl_->overlay_);
+    overlay_layout->setContentsMargins(20, 0, 20, 0);
+    overlay_layout->setSpacing(10);
+    
+    auto* spinner_lbl = new QLabel;
+    spinner_lbl->setStyleSheet("color: #F97316; font-size: 18px; font-weight: bold; background: transparent; border: none;");
+    
+    pimpl_->loading_text_ = new QLabel("Processing...");
+    pimpl_->loading_text_->setStyleSheet("color: #FAFAFA; font-size: 13px; font-weight: bold; background: transparent; border: none;");
+    
+    overlay_layout->addWidget(spinner_lbl);
+    overlay_layout->addWidget(pimpl_->loading_text_);
+    
+    auto* timer = new QTimer(pimpl_->overlay_);
+    connect(timer, &QTimer::timeout, pimpl_->overlay_, [spinner_lbl]() {
+        static int frame = 0;
+        const QString frames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+        spinner_lbl->setText(frames[frame]);
+        frame = (frame + 1) % 10;
+    });
+    timer->start(80);
+    
+    pimpl_->overlay_->hide();
+
     root->addWidget(pimpl_->page_, 1);
+    
+    QTimer::singleShot(100, this, &ImagesPage::refresh);
 }
 ImagesPage::~ImagesPage() = default;
 
-struct VolumesPage::Impl { TablePage* page_ {}; };
+auto ImagesPage::refresh() -> void {
+    int v_scroll = pimpl_->page_->table()->verticalScrollBar()->value();
+    
+    QSet<QString> checked_ids;
+    for (int r = 0; r < pimpl_->page_->table()->rowCount(); ++r) {
+        auto* cell = pimpl_->page_->table()->cellWidget(r, 0);
+        if (cell) {
+            auto* cb = cell->findChild<QPushButton*>("SelectCheckbox");
+            if (cb && cb->isChecked()) {
+                auto* name_item = pimpl_->page_->table()->item(r, 2);
+                auto* tag_item = pimpl_->page_->table()->item(r, 3);
+                if (name_item && tag_item) {
+                    checked_ids.insert(name_item->text() + "|" + tag_item->text());
+                }
+            }
+        }
+    }
+
+    pimpl_->page_->table()->setRowCount(0);
+    std::vector<Quiver::Image> images = Backend::get_instance().get_images();
+    
+    for (const auto& img : images) {
+        int row = pimpl_->page_->table()->rowCount();
+        pimpl_->page_->table()->insertRow(row);
+        
+        auto* cb_cell = new QWidget;
+        auto* cb_layout = new QHBoxLayout(cb_cell);
+        cb_layout->setContentsMargins(0, 0, 0, 0);
+        cb_layout->setAlignment(Qt::AlignCenter);
+        
+        auto* cb = new QPushButton;
+        cb->setObjectName("SelectCheckbox");
+        cb->setCheckable(true);
+        cb->setFixedSize(16, 16);
+        cb->setCursor(Qt::PointingHandCursor);
+        cb->setStyleSheet(
+            "QPushButton { border: 1px solid #71717a; border-radius: 4px; background: transparent; color: transparent; font-weight: bold; font-size: 11px; padding-bottom: 2px; } "
+            "QPushButton:checked { background: #f97316; border: 1px solid #f97316; color: black; }"
+        );
+        
+        QString id_key = img.name + "|" + img.tag;
+        if (checked_ids.contains(id_key)) {
+            cb->setChecked(true);
+            cb->setText("✓");
+        }
+        connect(cb, &QPushButton::toggled, cb, [cb](bool checked) {
+            cb->setText(checked ? "✓" : "");
+        });
+        connect(cb, &QPushButton::toggled, this, [this]() {
+            pimpl_->update_bulk_actions_visibility();
+        });
+        
+        cb_layout->addWidget(cb);
+        pimpl_->page_->table()->setCellWidget(row, 0, cb_cell);
+        
+        pimpl_->page_->table()->setItem(row, 1, make_item(img.id, true));
+        pimpl_->page_->table()->setItem(row, 2, make_item(img.name));
+        pimpl_->page_->table()->setItem(row, 3, make_item(img.tag));
+        pimpl_->page_->table()->setItem(row, 4, make_item(img.size));
+        pimpl_->page_->table()->setItem(row, 5, make_item(img.source));
+        
+        auto* cell = new QWidget;
+        auto* h = new QHBoxLayout(cell);
+        h->setContentsMargins(5, 0, 5, 0);
+        h->setSpacing(5);
+        h->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+        
+        auto* del_btn = new HoverIconButton("", "delete", "#f85149");
+        del_btn->setObjectName("RowActionBtn_delete");
+        del_btn->setIconSize(QSize(14, 14));
+        del_btn->setToolTip("Delete Image");
+        del_btn->setCursor(Qt::PointingHandCursor);
+        del_btn->setFixedSize(30, 28);
+        
+        QString target_name = img.name + ":" + img.tag;
+        
+        connect(del_btn, &QPushButton::clicked, this, [this, target_name]() {
+            CustomAlert alert(CustomAlert::Question, "Confirm", "Are you sure you want to delete this image?", this);
+            if (alert.exec() != QDialog::Accepted) {
+                return;
+            }
+            pimpl_->overlay_->show();
+            pimpl_->overlay_->raise();
+            QTimer::singleShot(50, this, [this, target_name]() {
+                QStringList targets;
+                targets << target_name;
+                Backend::get_instance().delete_images(targets);
+                QTimer::singleShot(2500, this, [this]() {
+                    refresh();
+                    pimpl_->overlay_->hide();
+                });
+            });
+        });
+        h->addWidget(del_btn);
+        
+        pimpl_->page_->table()->setCellWidget(row, 6, cell);
+    }
+    
+    pimpl_->page_->table()->verticalScrollBar()->setValue(v_scroll);
+    pimpl_->update_bulk_actions_visibility();
+}
+
+struct VolumesPage::Impl {
+    TablePage* page_ {};
+    QWidget* overlay_ {};
+    QLabel* loading_text_ {};
+    QWidget* bulk_widget_ {};
+    
+    QMap<QString, QStringList> get_selected_volumes() {
+        QMap<QString, QStringList> res;
+        for (int r = 0; r < page_->table()->rowCount(); ++r) {
+            auto* cell = page_->table()->cellWidget(r, 0);
+            if (!cell) continue;
+            auto* cb = cell->findChild<QPushButton*>("SelectCheckbox");
+            if (cb && cb->isChecked()) {
+                auto* cid_item = page_->table()->item(r, 1);
+                auto* dest_item = page_->table()->item(r, 3);
+                if (cid_item && dest_item) {
+                    res[cid_item->text()].append(dest_item->text());
+                }
+            }
+        }
+        return res;
+    }
+    
+    void update_bulk_actions_visibility() {
+        if (bulk_widget_) {
+            bulk_widget_->setVisible(!get_selected_volumes().isEmpty());
+        }
+    }
+};
 
 VolumesPage::VolumesPage(QWidget* parent)
     : QWidget(parent), pimpl_{ std::make_unique<Impl>() }
@@ -895,60 +1087,244 @@ VolumesPage::VolumesPage(QWidget* parent)
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
 
-    make_stat_row(
-        "TOTAL VOLUMES", "4",
-        "MOUNTED",       "3", "#4ade80",
-        "UNMOUNTED",     "1", "#fb7185",
-        root);
-
     pimpl_->page_ = new TablePage(
         "Volumes",
-        { "NAME", "DRIVER", "MOUNT POINT", "SIZE", "CREATED" },
+        { "SELECT", "CONTAINER ID", "SOURCE", "DESTINATION", "TYPE" },
         this);
 
-    auto add = [&](const QStringList& d) {
-        pimpl_->page_->add_row(d);
-    };
-    add({ "postgres_data",   "local", "/var/lib/docker/volumes/postgres_data", "2.3 GB",  "3 days ago" });
-    add({ "redis_cache",    "local", "/var/lib/docker/volumes/redis_cache",   "128 MB",  "1 week ago" });
-    add({ "nginx_conf",     "local", "/var/lib/docker/volumes/nginx_conf",    "4.2 MB",  "5 days ago" });
-    add({ "app_uploads",    "nfs",   "/mnt/nfs/uploads",                      "14.7 GB", "2 days ago" });
+    pimpl_->page_->table()->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
+    pimpl_->page_->table()->setColumnWidth(0, 60);
+
+    pimpl_->bulk_widget_ = new QWidget;
+    auto* bulk_row = new QHBoxLayout(pimpl_->bulk_widget_);
+    bulk_row->setContentsMargins(0, 0, 0, 0);
+    bulk_row->setSpacing(10);
+    
+    auto* bulk_del_btn = new HoverIconButton("Delete", "delete", "#f85149");
+    bulk_del_btn->setObjectName("BulkActionBtn_delete");
+    bulk_del_btn->setIconSize(QSize(14, 14));
+    bulk_del_btn->setFixedSize(100, 30);
+    bulk_del_btn->setCursor(Qt::PointingHandCursor);
+    
+    connect(bulk_del_btn, &QPushButton::clicked, this, [this]() {
+        auto selected = pimpl_->get_selected_volumes();
+        if (selected.isEmpty()) return;
+        
+        CustomAlert alert(CustomAlert::Question, "Confirm Delete", "Are you sure you want to delete the selected volumes?", this);
+        if (alert.exec() != QDialog::Accepted) {
+            return;
+        }
+        
+        pimpl_->overlay_->show();
+        pimpl_->overlay_->raise();
+        QTimer::singleShot(50, this, [this, selected]() {
+            Backend::get_instance().delete_volumes(selected);
+            QTimer::singleShot(2500, this, [this]() {
+                refresh();
+                pimpl_->overlay_->hide();
+            });
+        });
+    });
+    
+    bulk_row->addWidget(bulk_del_btn);
+    pimpl_->bulk_widget_->hide(); // Hidden by default
+    pimpl_->page_->header_layout()->addStretch();
+    pimpl_->page_->header_layout()->addWidget(pimpl_->bulk_widget_);
 
     connect(pimpl_->page_, &TablePage::add_clicked, this, [this]() {
         QDialog d(this);
         d.setObjectName("CreateDialog");
-        d.setFixedSize(400, 200);
+        d.setFixedSize(450, 240);
         d.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
         auto* l { new QVBoxLayout(&d) };
         l->setContentsMargins(28, 28, 28, 28); l->setSpacing(14);
-        auto* title { new QLabel("Create Volume") }; title->setObjectName("PageTitle"); l->addWidget(title);
-        auto* name_in { new QLineEdit }; name_in->setPlaceholderText("volume-name"); name_in->setFixedHeight(34); l->addWidget(name_in);
-        auto* driver { new QComboBox }; driver->addItems({"local", "nfs", "tmpfs"}); driver->setFixedHeight(34); l->addWidget(driver);
+        auto* title { new QLabel("Add Volume") }; title->setObjectName("PageTitle"); l->addWidget(title);
+        
+        auto* cid_in { new QLineEdit }; cid_in->setPlaceholderText("Container ID or Name"); cid_in->setFixedHeight(34); l->addWidget(cid_in);
+        
+        auto* r { new QHBoxLayout };
+        auto* host_in { new QLineEdit }; host_in->setPlaceholderText("Host Path"); host_in->setFixedHeight(34);
+        auto* dest_in { new QLineEdit }; dest_in->setPlaceholderText("Container Path"); dest_in->setFixedHeight(34);
+        r->addWidget(host_in); r->addWidget(new QLabel(":")); r->addWidget(dest_in);
+        l->addLayout(r);
+        
+        auto* mode_cb { new QComboBox }; mode_cb->addItems({"rw", "ro"}); mode_cb->setFixedHeight(34); l->addWidget(mode_cb);
+        
         l->addStretch();
         auto* btns { new QHBoxLayout };
         auto* cancel { new QPushButton("Cancel") }; 
         cancel->setObjectName("SecondaryBtn"); cancel->setCursor(Qt::PointingHandCursor);
         cancel->setFixedSize(85, 34);
         connect(cancel, &QPushButton::clicked, &d, &QDialog::reject);
-        auto* create { new QPushButton("Create") }; create->setObjectName("PrimaryButton"); create->setCursor(Qt::PointingHandCursor);
-        create->setFixedSize(85, 34);
-        connect(create, &QPushButton::clicked, &d, &QDialog::accept);
-        btns->addStretch(); btns->addWidget(cancel); btns->addWidget(create);
+        auto* add_btn { new QPushButton("Add") }; add_btn->setObjectName("PrimaryButton"); add_btn->setCursor(Qt::PointingHandCursor);
+        add_btn->setFixedSize(85, 34);
+        connect(add_btn, &QPushButton::clicked, &d, &QDialog::accept);
+        btns->addStretch(); btns->addWidget(cancel); btns->addWidget(add_btn);
         l->addLayout(btns);
+        
         if (d.exec() == QDialog::Accepted) {
-            QString name { name_in->text().trimmed() };
-            if (name.isEmpty()) return;
-            pimpl_->page_->add_row(
-                { name, "mounted", driver->currentText(),
-                 "/var/lib/docker/volumes/" + name, "0 B", "just now" },
-                "Unmount", "TableDangerBtn");
+            QString cid { cid_in->text().trimmed() };
+            QString host { host_in->text().trimmed() };
+            QString dest { dest_in->text().trimmed() };
+            QString mode { mode_cb->currentText() };
+            if (cid.isEmpty() || host.isEmpty() || dest.isEmpty()) return;
+            
+            pimpl_->overlay_->show();
+            pimpl_->overlay_->raise();
+            QTimer::singleShot(50, this, [this, cid, host, dest, mode]() {
+                Backend::get_instance().add_volume(cid, host, dest, mode);
+                QTimer::singleShot(2500, this, [this]() {
+                    refresh();
+                    pimpl_->overlay_->hide();
+                });
+            });
         }
     });
 
+    pimpl_->page_->set_action_column_width(120);
+
+    pimpl_->overlay_ = new QWidget(this);
+    pimpl_->overlay_->setFixedSize(160, 40);
+    pimpl_->overlay_->setStyleSheet("background-color: #27272A; border: 1px solid #3F3F46; border-radius: 20px;");
+    
+    auto* overlay_layout = new QHBoxLayout(pimpl_->overlay_);
+    overlay_layout->setContentsMargins(20, 0, 20, 0);
+    overlay_layout->setSpacing(10);
+    
+    auto* spinner_lbl = new QLabel;
+    spinner_lbl->setStyleSheet("color: #F97316; font-size: 18px; font-weight: bold; background: transparent; border: none;");
+    
+    pimpl_->loading_text_ = new QLabel("Processing...");
+    pimpl_->loading_text_->setStyleSheet("color: #FAFAFA; font-size: 13px; font-weight: bold; background: transparent; border: none;");
+    
+    overlay_layout->addWidget(spinner_lbl);
+    overlay_layout->addWidget(pimpl_->loading_text_);
+    
+    auto* timer = new QTimer(pimpl_->overlay_);
+    connect(timer, &QTimer::timeout, pimpl_->overlay_, [spinner_lbl]() {
+        static int frame = 0;
+        const QString frames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+        spinner_lbl->setText(frames[frame]);
+        frame = (frame + 1) % 10;
+    });
+    timer->start(80);
+    
+    pimpl_->overlay_->hide();
+
     root->addWidget(pimpl_->page_, 1);
+    
+    QTimer::singleShot(100, this, &VolumesPage::refresh);
 }
 VolumesPage::~VolumesPage() = default;
 
+void VolumesPage::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    if (pimpl_->overlay_) {
+        pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 40);
+    }
+}
+
+auto VolumesPage::refresh() -> void {
+    int v_scroll = pimpl_->page_->table()->verticalScrollBar()->value();
+    
+    // Remember checked rows based on dest path
+    QSet<QString> checked_ids;
+    for (int r = 0; r < pimpl_->page_->table()->rowCount(); ++r) {
+        auto* cell = pimpl_->page_->table()->cellWidget(r, 0);
+        if (cell) {
+            auto* cb = cell->findChild<QPushButton*>("SelectCheckbox");
+            if (cb && cb->isChecked()) {
+                auto* cid_item = pimpl_->page_->table()->item(r, 1);
+                auto* dest_item = pimpl_->page_->table()->item(r, 3);
+                if (cid_item && dest_item) {
+                    checked_ids.insert(cid_item->text() + "|" + dest_item->text());
+                }
+            }
+        }
+    }
+
+    pimpl_->page_->table()->setRowCount(0);
+    std::vector<Quiver::Volume> volumes = Backend::get_instance().get_volumes();
+    
+    for (const auto& v : volumes) {
+        int row = pimpl_->page_->table()->rowCount();
+        pimpl_->page_->table()->insertRow(row);
+        
+        auto* cb_cell = new QWidget;
+        auto* cb_layout = new QHBoxLayout(cb_cell);
+        cb_layout->setContentsMargins(0, 0, 0, 0);
+        cb_layout->setAlignment(Qt::AlignCenter);
+        
+        auto* cb = new QPushButton;
+        cb->setObjectName("SelectCheckbox");
+        cb->setCheckable(true);
+        cb->setFixedSize(16, 16);
+        cb->setCursor(Qt::PointingHandCursor);
+        cb->setStyleSheet(
+            "QPushButton { border: 1px solid #71717a; border-radius: 4px; background: transparent; color: transparent; font-weight: bold; font-size: 11px; padding-bottom: 2px; } "
+            "QPushButton:checked { background: #f97316; border: 1px solid #f97316; color: black; }"
+        );
+        
+        QString id_key = v.container_id + "|" + v.destination;
+        if (checked_ids.contains(id_key)) {
+            cb->setChecked(true);
+            cb->setText("✓");
+        }
+        connect(cb, &QPushButton::toggled, cb, [cb](bool checked) {
+            cb->setText(checked ? "✓" : "");
+        });
+        connect(cb, &QPushButton::toggled, this, [this]() {
+            pimpl_->update_bulk_actions_visibility();
+        });
+        
+        cb_layout->addWidget(cb);
+        pimpl_->page_->table()->setCellWidget(row, 0, cb_cell);
+        
+        pimpl_->page_->table()->setItem(row, 1, make_item(v.container_id, true));
+        pimpl_->page_->table()->setItem(row, 2, make_item(v.source));
+        pimpl_->page_->table()->setItem(row, 3, make_item(v.destination));
+        pimpl_->page_->table()->setItem(row, 4, make_item(v.type));
+        
+        auto* cell = new QWidget;
+        auto* h = new QHBoxLayout(cell);
+        h->setContentsMargins(5, 0, 5, 0);
+        h->setSpacing(5);
+        h->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+        
+        auto* del_btn = new HoverIconButton("", "delete", "#f85149");
+        del_btn->setObjectName("RowActionBtn_delete");
+        del_btn->setIconSize(QSize(14, 14));
+        del_btn->setToolTip("Delete Volume");
+        del_btn->setCursor(Qt::PointingHandCursor);
+        del_btn->setFixedSize(30, 28);
+        
+        QString cid = v.container_id;
+        QString dest = v.destination;
+        connect(del_btn, &QPushButton::clicked, this, [this, cid, dest]() {
+            CustomAlert alert(CustomAlert::Question, "Confirm", "Are you sure you want to delete this volume mapping?", this);
+            if (alert.exec() != QDialog::Accepted) {
+                return;
+            }
+            pimpl_->overlay_->show();
+            pimpl_->overlay_->raise();
+            QTimer::singleShot(50, this, [this, cid, dest]() {
+                QMap<QString, QStringList> targets;
+                targets[cid].append(dest);
+                Backend::get_instance().delete_volumes(targets);
+                QTimer::singleShot(2500, this, [this]() {
+                    refresh();
+                    pimpl_->overlay_->hide();
+                });
+            });
+        });
+        h->addWidget(del_btn);
+        
+        pimpl_->page_->table()->setCellWidget(row, 5, cell);
+    }
+    
+    pimpl_->page_->table()->verticalScrollBar()->setValue(v_scroll);
+    pimpl_->update_bulk_actions_visibility();
+}
 
 struct PortsPage::Impl { 
     TablePage* page_ {}; 
@@ -1384,5 +1760,17 @@ connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this, [save
     layout->addStretch();
 }
 SettingsPage::~SettingsPage() = default;
+
+
+void TablePage::set_action_column_width(int width) {
+    if (table()->columnCount() > 0) {
+        table()->horizontalHeader()->setSectionResizeMode(table()->columnCount() - 1, QHeaderView::Fixed);
+        table()->setColumnWidth(table()->columnCount() - 1, width);
+    }
+}
+
+void ImagesPage::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+}
 
 }
