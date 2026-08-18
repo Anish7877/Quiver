@@ -174,9 +174,7 @@ auto ContainerRuntime::execute_container_init() -> void {
         jail_process();
         setup_standard_symlinks();
         apply_rlimits();
-        if (!m_container_config.allow_checkpointing) {
-                setup_security_paths();
-        }
+        setup_security_paths();
         setup_environment_variables();
         try {
                 Schedular::apply_opts(m_container_config.schedular_opts);
@@ -188,7 +186,7 @@ auto ContainerRuntime::execute_container_init() -> void {
                                 _exit(EXIT_FAILURE);
                         }
                 }
-                if (m_seccomp_profile_manager && !m_container_config.allow_checkpointing) {
+                if (m_seccomp_profile_manager) {
                         m_seccomp_profile_manager->apply();
                 }
                 if (m_container_config.oom_score.value >= -1000 && m_container_config.oom_score.value <= 1000) {

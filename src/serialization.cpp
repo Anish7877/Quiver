@@ -135,7 +135,6 @@ auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const Con
         fb_builder.add_pid(obj.config.pid);
         fb_builder.add_net_pid(obj.config.net_pid);
         fb_builder.add_vfs(obj.config.vfs);
-        fb_builder.add_allow_checkpointing(obj.config.allow_checkpointing);
         fb_builder.add_rootfs(rootfs_off);
         fb_builder.add_rootfs_propagation(rootfs_prop_off);
         fb_builder.add_cgroups_path(cgroups_path_off);
@@ -253,7 +252,6 @@ auto Serialization::deserialize(const FB::ContainerMetadata* fb) -> ContainerDbO
         obj.config.pid           = fb_conf->pid();
         obj.config.net_pid       = fb_conf->net_pid();
         obj.config.vfs           = fb_conf->vfs();
-        obj.config.allow_checkpointing = fb_conf->allow_checkpointing();
         if (fb_conf->container_id())   obj.config.container_id   = fb_conf->container_id()->str();
         if (fb_conf->hostname())       obj.config.hostname        = fb_conf->hostname()->str();
         if (fb_conf->domain_name())    obj.config.domain_name     = fb_conf->domain_name()->str();

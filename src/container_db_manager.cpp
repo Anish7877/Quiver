@@ -283,10 +283,6 @@ auto ContainerDbManager::get_all_container() -> std::vector<ContainerDbObject> {
 auto ContainerDbManager::inspect_container(const std::string& key) -> void {
         auto metadata{get_container(key)};
         if (metadata) {
-                if (!Utils::is_process_alive(metadata->config.pid, key)) {
-                        metadata->status = "killed";
-                        update_container(key, metadata.value());
-                }
                 PrintUtils::print_container_config(metadata->config);
                 PrintUtils::print_field("Boot Time", metadata->boot_time);
                 PrintUtils::print_field("CPU Quota", metadata->cpu_quota);
