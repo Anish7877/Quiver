@@ -51,8 +51,7 @@ LDFLAGS := \
 	   -lsystemd \
 	   -lseccomp \
 	   -lutil \
-	   -lacl \
-	   -lcriu
+	   -lacl
 
 FLATC_CC := flatc
 FLATC_CCFLAGS := --cpp
