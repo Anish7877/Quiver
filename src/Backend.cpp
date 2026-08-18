@@ -148,7 +148,7 @@ auto Backend::get_container_top(const QString& id) const -> QString {
     
     return out;
 }
-auto Backend::add_container(const Container& container) -> void { 
+auto Backend::add_container(const Container& container) -> QProcess* { 
     // We do not modify the hardcoded vector anymore, the CLI is the source of truth
     
     QString cli_path = resolve_cli_path();
@@ -205,8 +205,10 @@ auto Backend::add_container(const Container& container) -> void {
         
         qDebug() << "Executing Quiver CLI:" << cli_path << args;
         process->start(cli_path, args);
+        return process;
     } else {
         qDebug() << "Quiver CLI not found at" << cli_path << ". Cannot start container.";
+        return nullptr;
     }
 }
 auto Backend::delete_container(const QStringList& container_ids) -> void {

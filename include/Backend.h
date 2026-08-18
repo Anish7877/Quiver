@@ -1,6 +1,9 @@
 #pragma once
 #include "common_header.hpp"
+#include <vector>
 #include <QString>
+#include <QStringList>
+#include <QProcess>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 
@@ -73,7 +76,7 @@ public:
     auto get_containers() const -> std::vector<Container>;
     auto get_container_inspect(const QString& id) const -> QString;
     auto get_container_top(const QString& id) const -> QString;
-    auto add_container(const Container& container) -> void;
+    auto add_container(const Container& container) -> QProcess*;
     auto delete_container(const QStringList& container_ids) -> void;
     auto pause_container(const QStringList& container_ids) -> void;
     auto unpause_container(const QStringList& container_ids) -> void;

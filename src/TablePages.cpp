@@ -25,6 +25,9 @@
 #include <QTimer>
 #include <QProcess>
 #include <QFileInfo>
+#include <QtConcurrent>
+#include <QFutureWatcher>
+#include <QProgressBar>
 #include "include/Components.h"
 #include "include/AuthManager.h"
 #include <QScrollArea>
@@ -367,6 +370,7 @@ struct ContainersPage::Impl {
     QWidget* overlay_ {};
     QLabel* loading_text_ {};
     QWidget* bulk_widget_ {};
+    QProgressBar* progress_bar_ {};
     Quiver::StatCard* stat_total_ {};
     Quiver::StatCard* stat_running_ {};
     Quiver::StatCard* stat_stopped_ {};
@@ -460,7 +464,7 @@ ContainersPage::ContainersPage(QWidget* parent)
             pimpl_->overlay_->raise();
             QTimer::singleShot(50, this, [this, ids, func]() {
                 func(ids);
-                QTimer::singleShot(2500, this, [this]() {
+                QTimer::singleShot(500, this, [this]() {
                     refresh();
                     pimpl_->overlay_->hide();
                 });
@@ -522,7 +526,7 @@ ContainersPage::ContainersPage(QWidget* parent)
         pimpl_->overlay_->raise();
         QTimer::singleShot(50, this, [this]() {
             Backend::get_instance().prune_containers();
-            QTimer::singleShot(2500, this, [this]() {
+            QTimer::singleShot(500, this, [this]() {
                 refresh();
                 pimpl_->overlay_->hide();
             });
@@ -536,12 +540,16 @@ ContainersPage::ContainersPage(QWidget* parent)
 
     // Create the overlay for loading
     pimpl_->overlay_ = new QWidget(this);
-    pimpl_->overlay_->setFixedSize(160, 40);
-    pimpl_->overlay_->setStyleSheet("background-color: #27272A; border: 1px solid #3F3F46; border-radius: 20px;");
+    pimpl_->overlay_->setFixedSize(250, 60);
+    pimpl_->overlay_->setStyleSheet("background-color: #27272A; border: 1px solid #3F3F46; border-radius: 10px;");
     
-    auto* overlay_layout = new QHBoxLayout(pimpl_->overlay_);
-    overlay_layout->setContentsMargins(20, 0, 20, 0);
-    overlay_layout->setSpacing(10);
+    auto* overlay_layout = new QVBoxLayout(pimpl_->overlay_);
+    overlay_layout->setContentsMargins(15, 10, 15, 10);
+    overlay_layout->setSpacing(5);
+    
+    auto* top_row = new QHBoxLayout;
+    top_row->setContentsMargins(0, 0, 0, 0);
+    top_row->setSpacing(10);
     
     auto* spinner_lbl = new QLabel;
     spinner_lbl->setStyleSheet("color: #F97316; font-size: 18px; font-weight: bold; background: transparent; border: none;");
@@ -549,8 +557,20 @@ ContainersPage::ContainersPage(QWidget* parent)
     pimpl_->loading_text_ = new QLabel("Processing...");
     pimpl_->loading_text_->setStyleSheet("color: #FAFAFA; font-size: 13px; font-weight: bold; background: transparent; border: none;");
     
-    overlay_layout->addWidget(spinner_lbl);
-    overlay_layout->addWidget(pimpl_->loading_text_);
+    top_row->addWidget(spinner_lbl);
+    top_row->addWidget(pimpl_->loading_text_);
+    top_row->addStretch();
+    
+    pimpl_->progress_bar_ = new QProgressBar;
+    pimpl_->progress_bar_->setRange(0, 100);
+    pimpl_->progress_bar_->setValue(0);
+    pimpl_->progress_bar_->setFixedHeight(8);
+    pimpl_->progress_bar_->setTextVisible(false);
+    pimpl_->progress_bar_->setStyleSheet("QProgressBar { background: #3F3F46; border: none; border-radius: 4px; } QProgressBar::chunk { background: #F97316; border-radius: 4px; }");
+    pimpl_->progress_bar_->hide();
+    
+    overlay_layout->addLayout(top_row);
+    overlay_layout->addWidget(pimpl_->progress_bar_);
     
     auto* timer = new QTimer(pimpl_->overlay_);
     connect(timer, &QTimer::timeout, pimpl_->overlay_, [spinner_lbl]() {
@@ -599,8 +619,32 @@ auto ContainersPage::open_create_dialog() -> void {
         c.io_weight = d.get_io_weight();
         c.io_max = d.get_io_max();
         
-        Backend::get_instance().add_container(c);
-        refresh();
+        QProcess* process = Backend::get_instance().add_container(c);
+        if (!process) {
+            refresh();
+            return;
+        }
+        
+        pimpl_->overlay_->show();
+        pimpl_->overlay_->raise();
+        pimpl_->progress_bar_->setRange(0, 0);
+        pimpl_->progress_bar_->show();
+        pimpl_->loading_text_->setText("Creating Container...");
+        
+        auto read_output = [] (QProcess* p) {
+            p->readAll();
+        };
+        
+        connect(process, &QProcess::readyReadStandardError, this, [process, read_output]() { read_output(process); });
+        connect(process, &QProcess::readyReadStandardOutput, this, [process, read_output]() { read_output(process); });
+        
+        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this]() {
+            pimpl_->progress_bar_->hide();
+            pimpl_->progress_bar_->setRange(0, 100);
+            pimpl_->loading_text_->setText("Processing...");
+            pimpl_->overlay_->hide();
+            refresh();
+        });
     }
 }
 
@@ -609,7 +653,14 @@ ContainersPage::~ContainersPage() = default;
 void ContainersPage::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     if (pimpl_->overlay_) {
-        pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 40);
+        pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 30);
+    }
+}
+
+void ContainersPage::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    if (pimpl_->overlay_) {
+        pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 30);
     }
 }
 
@@ -627,29 +678,32 @@ auto ContainersPage::refresh() -> void {
         }
     }
 
-    pimpl_->page_->table()->setRowCount(0);
-    
-    auto containers = Backend::get_instance().get_containers();
-    QString error_msg = Backend::get_instance().get_last_error();
-    if (!error_msg.isEmpty()) {
-        static bool showing_error = false;
-        if (!showing_error) {
-            showing_error = true;
-            CustomAlert alert(CustomAlert::Warning, "Backend Error", error_msg, this);
-            alert.exec();
-            showing_error = false;
+    auto* watcher = new QFutureWatcher<std::vector<Quiver::Container>>(this);
+    connect(watcher, &QFutureWatcher<std::vector<Quiver::Container>>::finished, this, [this, watcher, v_scroll, checked_ids]() {
+        auto containers = watcher->result();
+        
+        QString error_msg = Backend::get_instance().get_last_error();
+        if (!error_msg.isEmpty()) {
+            static bool showing_error = false;
+            if (!showing_error) {
+                showing_error = true;
+                CustomAlert alert(CustomAlert::Warning, "Backend Error", error_msg, this);
+                alert.exec();
+                showing_error = false;
+            }
         }
-    }
-    
-    int total = containers.size();
-    int running = 0;
-    int stopped = 0;
-    int paused = 0;
-    
-    for (const auto& c : containers) {
-        if (c.status == "running") running++;
-        else if (c.status == "paused") paused++;
-        else stopped++;
+        
+        pimpl_->page_->table()->setRowCount(0);
+        
+        int total = containers.size();
+        int running = 0;
+        int stopped = 0;
+        int paused = 0;
+        
+        for (const auto& c : containers) {
+            if (c.status == "running") running++;
+            else if (c.status == "paused") paused++;
+            else stopped++;
         
         int row = pimpl_->page_->table()->rowCount();
         pimpl_->page_->table()->insertRow(row);
@@ -714,7 +768,7 @@ auto ContainersPage::refresh() -> void {
                 QTimer::singleShot(50, this, [this, c, func]() {
                     func(QStringList() << c.id);
                     // refresh after command finishes (allow 2.5s for async execution)
-                    QTimer::singleShot(2500, this, [this]() {
+                    QTimer::singleShot(500, this, [this]() {
                         refresh();
                         pimpl_->overlay_->hide();
                     });
@@ -799,14 +853,21 @@ auto ContainersPage::refresh() -> void {
 
         pimpl_->page_->table()->setCellWidget(row, 5, cell);
     }
+        
+        pimpl_->stat_total_->set_value(QString::number(total));
+        pimpl_->stat_running_->set_value(QString::number(running));
+        pimpl_->stat_stopped_->set_value(QString::number(stopped));
+        pimpl_->stat_paused_->set_value(QString::number(paused));
+        
+        pimpl_->page_->table()->verticalScrollBar()->setValue(v_scroll);
+        pimpl_->update_bulk_actions_visibility();
+        watcher->deleteLater();
+    });
     
-    pimpl_->stat_total_->set_value(QString::number(total));
-    pimpl_->stat_running_->set_value(QString::number(running));
-    pimpl_->stat_stopped_->set_value(QString::number(stopped));
-    pimpl_->stat_paused_->set_value(QString::number(paused));
-    
-    pimpl_->page_->table()->verticalScrollBar()->setValue(v_scroll);
-    pimpl_->update_bulk_actions_visibility();
+    QFuture<std::vector<Quiver::Container>> future = QtConcurrent::run([]() {
+        return Backend::get_instance().get_containers();
+    });
+    watcher->setFuture(future);
 }
 
 struct ImagesPage::Impl {
@@ -815,17 +876,16 @@ struct ImagesPage::Impl {
     QLabel* loading_text_ {};
     QWidget* bulk_widget_ {};
     
-    QMap<QString, QStringList> get_selected_images() {
-        QMap<QString, QStringList> res;
+    QStringList get_selected_images() {
+        QStringList res;
         for (int r = 0; r < page_->table()->rowCount(); ++r) {
             auto* cell = page_->table()->cellWidget(r, 0);
             if (!cell) continue;
             auto* cb = cell->findChild<QPushButton*>("SelectCheckbox");
             if (cb && cb->isChecked()) {
-                auto* name_item = page_->table()->item(r, 2);
-                auto* tag_item = page_->table()->item(r, 3);
-                if (name_item && tag_item) {
-                    res[name_item->text()].append(tag_item->text());
+                auto* id_item = page_->table()->item(r, 1);
+                if (id_item) {
+                    res.append(id_item->text());
                 }
             }
         }
@@ -877,15 +937,8 @@ ImagesPage::ImagesPage(QWidget* parent)
         pimpl_->overlay_->show();
         pimpl_->overlay_->raise();
         QTimer::singleShot(50, this, [this, selected]() {
-            QStringList targets;
-            for (auto it = selected.constBegin(); it != selected.constEnd(); ++it) {
-                QString name = it.key();
-                for (const QString& tag : it.value()) {
-                    targets << (name + ":" + tag);
-                }
-            }
-            Backend::get_instance().delete_images(targets);
-            QTimer::singleShot(2500, this, [this]() {
+            Backend::get_instance().delete_images(selected);
+            QTimer::singleShot(500, this, [this]() {
                 refresh();
                 pimpl_->overlay_->hide();
             });
@@ -951,6 +1004,10 @@ ImagesPage::ImagesPage(QWidget* parent)
     root->addWidget(pimpl_->page_, 1);
     
     QTimer::singleShot(100, this, &ImagesPage::refresh);
+    
+    auto* refresh_timer = new QTimer(this);
+    connect(refresh_timer, &QTimer::timeout, this, &ImagesPage::refresh);
+    refresh_timer->start(3000);
 }
 ImagesPage::~ImagesPage() = default;
 
@@ -963,21 +1020,23 @@ auto ImagesPage::refresh() -> void {
         if (cell) {
             auto* cb = cell->findChild<QPushButton*>("SelectCheckbox");
             if (cb && cb->isChecked()) {
-                auto* name_item = pimpl_->page_->table()->item(r, 2);
-                auto* tag_item = pimpl_->page_->table()->item(r, 3);
-                if (name_item && tag_item) {
-                    checked_ids.insert(name_item->text() + "|" + tag_item->text());
+                auto* id_item = pimpl_->page_->table()->item(r, 1);
+                if (id_item) {
+                    checked_ids.insert(id_item->text());
                 }
             }
         }
     }
 
-    pimpl_->page_->table()->setRowCount(0);
-    std::vector<Quiver::Image> images = Backend::get_instance().get_images();
-    
-    for (const auto& img : images) {
-        int row = pimpl_->page_->table()->rowCount();
-        pimpl_->page_->table()->insertRow(row);
+    auto* watcher = new QFutureWatcher<std::vector<Quiver::Image>>(this);
+    connect(watcher, &QFutureWatcher<std::vector<Quiver::Image>>::finished, this, [this, watcher, v_scroll, checked_ids]() {
+        std::vector<Quiver::Image> images = watcher->result();
+        
+        pimpl_->page_->table()->setRowCount(0);
+        
+        for (const auto& img : images) {
+            int row = pimpl_->page_->table()->rowCount();
+            pimpl_->page_->table()->insertRow(row);
         
         auto* cb_cell = new QWidget;
         auto* cb_layout = new QHBoxLayout(cb_cell);
@@ -994,7 +1053,7 @@ auto ImagesPage::refresh() -> void {
             "QPushButton:checked { background: #f97316; border: 1px solid #f97316; color: black; }"
         );
         
-        QString id_key = img.name + "|" + img.tag;
+        QString id_key = img.id;
         if (checked_ids.contains(id_key)) {
             cb->setChecked(true);
             cb->setText("✓");
@@ -1028,7 +1087,7 @@ auto ImagesPage::refresh() -> void {
         del_btn->setCursor(Qt::PointingHandCursor);
         del_btn->setFixedSize(30, 28);
         
-        QString target_name = img.name + ":" + img.tag;
+        QString target_name = img.id;
         
         connect(del_btn, &QPushButton::clicked, this, [this, target_name]() {
             CustomAlert alert(CustomAlert::Question, "Confirm", "Are you sure you want to delete this image?", this);
@@ -1041,7 +1100,7 @@ auto ImagesPage::refresh() -> void {
                 QStringList targets;
                 targets << target_name;
                 Backend::get_instance().delete_images(targets);
-                QTimer::singleShot(2500, this, [this]() {
+                QTimer::singleShot(500, this, [this]() {
                     refresh();
                     pimpl_->overlay_->hide();
                 });
@@ -1050,10 +1109,16 @@ auto ImagesPage::refresh() -> void {
         h->addWidget(del_btn);
         
         pimpl_->page_->table()->setCellWidget(row, 6, cell);
-    }
+        }
+        
+        pimpl_->page_->table()->verticalScrollBar()->setValue(v_scroll);
+        pimpl_->update_bulk_actions_visibility();
+        watcher->deleteLater();
+    });
     
-    pimpl_->page_->table()->verticalScrollBar()->setValue(v_scroll);
-    pimpl_->update_bulk_actions_visibility();
+    watcher->setFuture(QtConcurrent::run([]() {
+        return Backend::get_instance().get_images();
+    }));
 }
 
 struct VolumesPage::Impl {
@@ -1125,7 +1190,7 @@ VolumesPage::VolumesPage(QWidget* parent)
         pimpl_->overlay_->raise();
         QTimer::singleShot(50, this, [this, selected]() {
             Backend::get_instance().delete_volumes(selected);
-            QTimer::singleShot(2500, this, [this]() {
+            QTimer::singleShot(500, this, [this]() {
                 refresh();
                 pimpl_->overlay_->hide();
             });
@@ -1179,7 +1244,7 @@ VolumesPage::VolumesPage(QWidget* parent)
             pimpl_->overlay_->raise();
             QTimer::singleShot(50, this, [this, cid, host, dest, mode]() {
                 Backend::get_instance().add_volume(cid, host, dest, mode);
-                QTimer::singleShot(2500, this, [this]() {
+                QTimer::singleShot(500, this, [this]() {
                     refresh();
                     pimpl_->overlay_->hide();
                 });
@@ -1220,13 +1285,26 @@ VolumesPage::VolumesPage(QWidget* parent)
     root->addWidget(pimpl_->page_, 1);
     
     QTimer::singleShot(100, this, &VolumesPage::refresh);
+    
+    auto* refresh_timer = new QTimer(this);
+    connect(refresh_timer, &QTimer::timeout, this, &VolumesPage::refresh);
+    refresh_timer->start(3000);
 }
 VolumesPage::~VolumesPage() = default;
 
 void VolumesPage::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     if (pimpl_->overlay_) {
-        pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 40);
+        pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 30);
+    }
+}
+
+
+
+void VolumesPage::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    if (pimpl_->overlay_) {
+        pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 30);
     }
 }
 
@@ -1249,10 +1327,13 @@ auto VolumesPage::refresh() -> void {
         }
     }
 
-    pimpl_->page_->table()->setRowCount(0);
-    std::vector<Quiver::Volume> volumes = Backend::get_instance().get_volumes();
-    
-    for (const auto& v : volumes) {
+    auto* watcher = new QFutureWatcher<std::vector<Quiver::Volume>>(this);
+    connect(watcher, &QFutureWatcher<std::vector<Quiver::Volume>>::finished, this, [this, watcher, v_scroll, checked_ids]() {
+        std::vector<Quiver::Volume> volumes = watcher->result();
+        
+        pimpl_->page_->table()->setRowCount(0);
+        
+        for (const auto& v : volumes) {
         int row = pimpl_->page_->table()->rowCount();
         pimpl_->page_->table()->insertRow(row);
         
@@ -1317,7 +1398,7 @@ auto VolumesPage::refresh() -> void {
                 QMap<QString, QStringList> targets;
                 targets[cid].append(dest);
                 Backend::get_instance().delete_volumes(targets);
-                QTimer::singleShot(2500, this, [this]() {
+                QTimer::singleShot(500, this, [this]() {
                     refresh();
                     pimpl_->overlay_->hide();
                 });
@@ -1326,10 +1407,17 @@ auto VolumesPage::refresh() -> void {
         h->addWidget(del_btn);
         
         pimpl_->page_->table()->setCellWidget(row, 5, cell);
-    }
+        }
+        
+        pimpl_->page_->table()->verticalScrollBar()->setValue(v_scroll);
+        pimpl_->update_bulk_actions_visibility();
+        watcher->deleteLater();
+    });
     
-    pimpl_->page_->table()->verticalScrollBar()->setValue(v_scroll);
-    pimpl_->update_bulk_actions_visibility();
+    QFuture<std::vector<Quiver::Volume>> future = QtConcurrent::run([]() {
+        return Backend::get_instance().get_volumes();
+    });
+    watcher->setFuture(future);
 }
 
 struct PortsPage::Impl { 
@@ -1404,40 +1492,62 @@ PortsPage::PortsPage(QWidget* parent)
     root->addWidget(pimpl_->page_, 1);
     
     QTimer::singleShot(100, this, &PortsPage::refresh);
+    auto* refresh_timer = new QTimer(this);
+    connect(refresh_timer, &QTimer::timeout, this, &PortsPage::refresh);
+    refresh_timer->start(3000);
 }
 PortsPage::~PortsPage() = default;
 
+void PortsPage::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+}
+
+void PortsPage::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+}
+
 auto PortsPage::refresh() -> void {
-    while (pimpl_->page_->table()->rowCount() > 0) {
-        pimpl_->page_->table()->removeRow(0);
-    }
+    int v_scroll = pimpl_->page_->table()->verticalScrollBar()->value();
     
-    auto ports = Backend::get_instance().get_ports();
-    
-    int total = ports.size();
-    int open = 0;
-    int closed = 0;
-    
-    for (const auto& p : ports) {
-        if (!p.tcp.isEmpty() || !p.udp.isEmpty()) open++;
-        else closed++;
+    auto* watcher = new QFutureWatcher<std::vector<Quiver::PortMapping>>(this);
+    connect(watcher, &QFutureWatcher<std::vector<Quiver::PortMapping>>::finished, this, [this, watcher, v_scroll]() {
+        auto ports = watcher->result();
         
-        int row = pimpl_->page_->table()->rowCount();
-        pimpl_->page_->table()->insertRow(row);
+        pimpl_->page_->table()->setRowCount(0);
         
-        pimpl_->page_->table()->setItem(row, 0, make_item(p.id, true));
-        if (p.tcp.isEmpty() && p.udp.isEmpty()) {
-            pimpl_->page_->table()->setItem(row, 1, make_item("no ports forwarded"));
-            pimpl_->page_->table()->setItem(row, 2, make_item("no ports forwarded"));
-        } else {
-            pimpl_->page_->table()->setItem(row, 1, make_item(p.tcp));
-            pimpl_->page_->table()->setItem(row, 2, make_item(p.udp));
+        int total = ports.size();
+        int open = 0;
+        int closed = 0;
+        
+        for (const auto& p : ports) {
+            if (!p.tcp.isEmpty() || !p.udp.isEmpty()) open++;
+            else closed++;
+            
+            int row = pimpl_->page_->table()->rowCount();
+            pimpl_->page_->table()->insertRow(row);
+            
+            pimpl_->page_->table()->setItem(row, 0, make_item(p.id, true));
+            if (p.tcp.isEmpty() && p.udp.isEmpty()) {
+                pimpl_->page_->table()->setItem(row, 1, make_item("no ports forwarded"));
+                pimpl_->page_->table()->setItem(row, 2, make_item("no ports forwarded"));
+            } else {
+                pimpl_->page_->table()->setItem(row, 1, make_item(p.tcp));
+                pimpl_->page_->table()->setItem(row, 2, make_item(p.udp));
+            }
         }
-    }
+        
+        pimpl_->stat_total_->set_value(QString::number(total));
+        pimpl_->stat_open_->set_value(QString::number(open));
+        pimpl_->stat_closed_->set_value(QString::number(closed));
+        
+        pimpl_->page_->table()->verticalScrollBar()->setValue(v_scroll);
+        watcher->deleteLater();
+    });
     
-    pimpl_->stat_total_->set_value(QString::number(total));
-    pimpl_->stat_open_->set_value(QString::number(open));
-    pimpl_->stat_closed_->set_value(QString::number(closed));
+    QFuture<std::vector<Quiver::PortMapping>> future = QtConcurrent::run([]() -> std::vector<Quiver::PortMapping> {
+        return Backend::get_instance().get_ports();
+    });
+    watcher->setFuture(future);
 }
 
 struct DevicesPage::Impl { TablePage* page_ {}; };
@@ -1777,6 +1887,16 @@ void TablePage::set_action_column_width(int width) {
 
 void ImagesPage::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
+    if (pimpl_->overlay_) {
+        pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 30);
+    }
+}
+
+void ImagesPage::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    if (pimpl_->overlay_) {
+        pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 30);
+    }
 }
 
 }

@@ -42,6 +42,7 @@ public:
     ~ImagesPage() override;
     auto refresh() -> void;
 protected:
+    void showEvent(QShowEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 private:
     struct Impl;
@@ -61,6 +62,7 @@ signals:
     void container_info_requested(const QString& container_id);
 
 protected:
+    void showEvent(QShowEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 private:
     struct Impl;
@@ -74,6 +76,7 @@ public:
     ~VolumesPage() override;
     auto refresh() -> void;
 protected:
+    void showEvent(QShowEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 private:
     struct Impl;
@@ -87,6 +90,9 @@ public:
     ~PortsPage() override;
     
     auto refresh() -> void;
+protected:
+    void showEvent(QShowEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_ {};
