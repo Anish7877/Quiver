@@ -66,7 +66,7 @@ ContainerRuntime::ContainerRuntime(const ContainerConfig& config) : m_container_
 }
 
 
-auto ContainerRuntime::run_container() -> void {
+auto ContainerRuntime::run_container(int sync_pipe_fd) -> void {
         pid_t container_init{fork()};
         if (container_init == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: fork failed for container init.\n",
@@ -74,9 +74,16 @@ auto ContainerRuntime::run_container() -> void {
                 _exit(EXIT_FAILURE);
         }
         else if (container_init == 0) {
+                if (sync_pipe_fd != -1) close(sync_pipe_fd);
                 execute_container_init();
         }
         else {
+                if (sync_pipe_fd != -1) {
+                        if (write(sync_pipe_fd, &container_init, sizeof(container_init)) == -1) [[unlikely]] {
+                                log_event("Container Runtime Warning: Failed to send payload PID back to monitor.\n");
+                        }
+                        close(sync_pipe_fd);
+                }
                 supervise_container(container_init);
         }
 }
@@ -127,6 +134,7 @@ auto ContainerRuntime::execute_container_init() -> void {
                 }
         }
 
+
         passwd* pw{getpwuid(m_container_config.user.uid)};
         if (!pw) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: getpwuid failed.\n",
@@ -148,7 +156,6 @@ auto ContainerRuntime::execute_container_init() -> void {
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
-
         if (sethostname(m_container_config.hostname.c_str(), m_container_config.hostname.length()) == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: sethostname failed.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
@@ -167,7 +174,9 @@ auto ContainerRuntime::execute_container_init() -> void {
         jail_process();
         setup_standard_symlinks();
         apply_rlimits();
-        setup_security_paths();
+        if (!m_container_config.allow_checkpointing) {
+                setup_security_paths();
+        }
         setup_environment_variables();
         try {
                 Schedular::apply_opts(m_container_config.schedular_opts);
@@ -179,7 +188,7 @@ auto ContainerRuntime::execute_container_init() -> void {
                                 _exit(EXIT_FAILURE);
                         }
                 }
-                if (m_seccomp_profile_manager) {
+                if (m_seccomp_profile_manager && !m_container_config.allow_checkpointing) {
                         m_seccomp_profile_manager->apply();
                 }
                 if (m_container_config.oom_score.value >= -1000 && m_container_config.oom_score.value <= 1000) {
@@ -648,7 +657,7 @@ auto ContainerRuntime::setup_security_paths() -> void {
 }
 
 auto ContainerRuntime::supervise_container(pid_t pid) -> void {
-        static pid_t s_target_child = pid;
+        static pid_t s_target_child{pid};
 
         struct sigaction sa{};
         sa.sa_handler = [](int sig) {

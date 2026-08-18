@@ -17,7 +17,7 @@ class ContainerRuntime {
                 auto operator=(const ContainerRuntime&&) -> ContainerRuntime& = delete;
                 auto operator=(ContainerRuntime&&) -> ContainerRuntime& = delete;
 
-                auto run_container() -> void;
+                auto run_container(int sync_pipe_fd) -> void;
         private:
                 auto exec_commands() -> void;
                 auto execute_container_init() -> void;

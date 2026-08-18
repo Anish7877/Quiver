@@ -12,6 +12,7 @@ struct ContainerConfig {
         pid_t pid{};
         pid_t net_pid{};
         bool vfs{};
+        bool rm{false};
         OCIRuntime::Root rootfs{};
         OCIRuntime::Terminal terminal{};
         OCIRuntime::Detach detach{};

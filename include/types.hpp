@@ -92,6 +92,7 @@ struct ContainerDbObject {
         std::string image{};
         std::string status{};
         std::string created_at{};
+        int exit_code{-1};
         pid_t pid{};
         long boot_time{};
         int cpu_quota{-1};

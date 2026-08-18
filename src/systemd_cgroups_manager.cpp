@@ -1,4 +1,5 @@
 #include "systemd_cgroups_manager.hpp"
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <stdexcept>
@@ -7,7 +8,8 @@
 using SystemdProperty = sdbus::Struct<std::string, sdbus::Variant>;
 
 auto SystemdCGroupsManager::attach_process(pid_t pid) -> void {
-        const std::string unit_name{std::format("quiver-{}.scope", m_container_id)};
+        const std::string unit_name{std::format("quiver_{}_{}.scope", m_container_id,
+                        std::chrono::system_clock::now().time_since_epoch().count())};
 
         try {
                 auto connection{sdbus::createSessionBusConnection()};
@@ -188,7 +190,8 @@ auto SystemdCGroupsManager::set_cpuset_mems(const std::string& mems) -> void {
 }
 
 auto SystemdCGroupsManager::set_freeze(const std::string& bit) -> void {
-        const std::string unit_name{std::format("quiver-{}.scope", m_container_id)};
+        const std::string unit_name{std::format("quiver_{}_{}.scope", m_container_id,
+                        std::chrono::system_clock::now().time_since_epoch().count())};
 
         try {
                 auto connection{sdbus::createSessionBusConnection()};
@@ -219,7 +222,8 @@ auto SystemdCGroupsManager::set_freeze(const std::string& bit) -> void {
 }
 
 auto SystemdCGroupsManager::stop() -> void {
-        const std::string unit_name{std::format("quiver-{}.scope", m_container_id)};
+        const std::string unit_name{std::format("quiver_{}_{}.scope", m_container_id,
+                        std::chrono::system_clock::now().time_since_epoch().count())};
         try {
                 auto connection{sdbus::createSessionBusConnection()};
                 auto systemd_proxy{sdbus::createProxy(*connection,
@@ -235,7 +239,8 @@ auto SystemdCGroupsManager::stop() -> void {
 }
 
 auto SystemdCGroupsManager::update_dbus_property(const std::string& property_name, const sdbus::Variant& value) -> void {
-        const std::string unit_name{std::format("quiver-{}.scope", m_container_id)};
+        const std::string unit_name{std::format("quiver_{}_{}.scope", m_container_id,
+                        std::chrono::system_clock::now().time_since_epoch().count())};
 
         try {
                 auto connection{sdbus::createSessionBusConnection()};

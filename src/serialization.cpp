@@ -135,6 +135,7 @@ auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const Con
         fb_builder.add_pid(obj.config.pid);
         fb_builder.add_net_pid(obj.config.net_pid);
         fb_builder.add_vfs(obj.config.vfs);
+        fb_builder.add_allow_checkpointing(obj.config.allow_checkpointing);
         fb_builder.add_rootfs(rootfs_off);
         fb_builder.add_rootfs_propagation(rootfs_prop_off);
         fb_builder.add_cgroups_path(cgroups_path_off);
@@ -189,8 +190,10 @@ auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const Con
         meta_builder.add_name(name_off);
         meta_builder.add_image(image_off);
         meta_builder.add_status(status_off);
+        meta_builder.add_exit_code(obj.exit_code);
         meta_builder.add_created_at(created_at_off);
         meta_builder.add_final_filesystem(final_filesystem_off);
+        meta_builder.add_monitor_pid(obj.pid);
         meta_builder.add_boot_time(obj.boot_time);
         meta_builder.add_cpu_quota(obj.cpu_quota);
         meta_builder.add_cpu_period(obj.cpu_period);
@@ -208,6 +211,7 @@ auto Serialization::deserialize(const FB::ContainerMetadata* fb) -> ContainerDbO
         if (!fb) return obj;
         if (fb->name()) obj.name = fb->name()->str();
         if (fb->image()) obj.image = fb->image()->str();
+        if (fb->monitor_pid()) obj.pid = fb->monitor_pid();
         if (fb->status()) obj.status = fb->status()->str();
         if (fb->boot_time()) obj.boot_time = fb->boot_time();
         if (fb->created_at()) obj.created_at = fb->created_at()->str();
@@ -249,6 +253,7 @@ auto Serialization::deserialize(const FB::ContainerMetadata* fb) -> ContainerDbO
         obj.config.pid           = fb_conf->pid();
         obj.config.net_pid       = fb_conf->net_pid();
         obj.config.vfs           = fb_conf->vfs();
+        obj.config.allow_checkpointing = fb_conf->allow_checkpointing();
         if (fb_conf->container_id())   obj.config.container_id   = fb_conf->container_id()->str();
         if (fb_conf->hostname())       obj.config.hostname        = fb_conf->hostname()->str();
         if (fb_conf->domain_name())    obj.config.domain_name     = fb_conf->domain_name()->str();

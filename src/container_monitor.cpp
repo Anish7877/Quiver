@@ -118,6 +118,14 @@ auto ContainerMonitor::start_logging() -> void {
                                                 }
                                         }
                                         if (fds[0].fd != -1 && (fds[0].revents & POLLHUP)) {
+                                                char buffer[4096];
+                                                ssize_t bytes_read;
+                                                while ((bytes_read = read(fds[0].fd, buffer, sizeof(buffer))) > 0) {
+                                                        std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
+                                                                        chrono::system_clock::now(), m_container_config.container_id,
+                                                                        std::string_view(buffer, bytes_read))};
+                                                        this->log_event(log_data, TargetLog::CONTAINERLOG);
+                                                }
                                                 fds[0].fd = -1;
                                                 --open_pipes;
                                         }
@@ -132,6 +140,14 @@ auto ContainerMonitor::start_logging() -> void {
                                                 }
                                         }
                                         if (fds[1].fd != -1 && (fds[1].revents & POLLHUP)) {
+                                                char buffer[4096];
+                                                ssize_t bytes_read;
+                                                while ((bytes_read = read(fds[1].fd, buffer, sizeof(buffer))) > 0) {
+                                                        std::string log_data{std::format("[{}] [{}] [STDERR] {}.\n",
+                                                                        chrono::system_clock::now(), m_container_config.container_id,
+                                                                        std::string_view(buffer, bytes_read))};
+                                                        this->log_event(log_data, TargetLog::CONTAINERLOG);
+                                                }
                                                 fds[1].fd = -1;
                                                 --open_pipes;
                                         }
@@ -180,7 +196,15 @@ auto ContainerMonitor::foreground_logging() -> void {
                 }
 
                 if (fds[0].fd != -1 && (fds[0].revents & (POLLHUP | POLLERR))) {
-
+                        char buffer[4096];
+                        ssize_t bytes_read;
+                        while ((bytes_read = read(fds[0].fd, buffer, sizeof(buffer))) > 0) {
+                                if (!Utils::write_all(STDOUT_FILENO, buffer, bytes_read)) break;
+                                std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
+                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                std::string_view(buffer, bytes_read))};
+                                this->log_event(log_data, TargetLog::CONTAINERLOG);
+                        }
                         close(fds[0].fd);
                         fds[0].fd = -1;
                         --open_pipes;
@@ -195,7 +219,7 @@ auto ContainerMonitor::foreground_logging() -> void {
                                 if (!Utils::write_all(STDERR_FILENO, buffer, bytes_read)) {
                                         return;
                                 }
-                                std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
+                                std::string log_data{std::format("[{}] [{}] [STDERR] {}.\n",
                                                 chrono::system_clock::now(), m_container_config.container_id,
                                                 std::string_view(buffer, bytes_read))};
                                 this->log_event(log_data, TargetLog::CONTAINERLOG);
@@ -203,7 +227,15 @@ auto ContainerMonitor::foreground_logging() -> void {
                 }
 
                 if (fds[1].fd != -1 && (fds[1].revents & (POLLHUP | POLLERR))) {
-
+                        char buffer[4096];
+                        ssize_t bytes_read;
+                        while ((bytes_read = read(fds[1].fd, buffer, sizeof(buffer))) > 0) {
+                                if (!Utils::write_all(STDERR_FILENO, buffer, bytes_read)) break;
+                                std::string log_data{std::format("[{}] [{}] [STDERR] {}.\n",
+                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                std::string_view(buffer, bytes_read))};
+                                this->log_event(log_data, TargetLog::CONTAINERLOG);
+                        }
                         close(fds[1].fd);
                         fds[1].fd = -1;
                         --open_pipes;
@@ -319,8 +351,6 @@ auto ContainerMonitor::run_container_child() -> void {
                 close(m_container_to_monitor_fd[1]);
                 _exit(EXIT_FAILURE);
         }
-        close(m_container_to_monitor_fd[1]);
-
         char go{};
         if (read(m_monitor_to_container_fd[0], &go, 1) != 1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: read failed from monitor_to_container_fd.\n",
@@ -347,7 +377,7 @@ auto ContainerMonitor::run_container_child() -> void {
                 }
         }
         m_runtime = std::make_unique<ContainerRuntime>(m_container_config);
-        m_runtime->run_container();
+        m_runtime->run_container(m_container_to_monitor_fd[1]);
         _exit(EXIT_FAILURE);
 }
 
@@ -360,8 +390,6 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                 close(m_container_to_monitor_fd[0]);
                 _exit(EXIT_FAILURE);
         }
-        close(m_container_to_monitor_fd[0]);
-
         try {
                 setup_usernamespace();
         }
@@ -435,6 +463,11 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                 _exit(EXIT_FAILURE);
         }
         close(m_monitor_to_container_fd[1]);
+        pid_t payload_pid{-1};
+        if (read(m_container_to_monitor_fd[0], &payload_pid, sizeof(payload_pid)) != sizeof(payload_pid)) {
+                std::cerr << "[Monitor Error] Failed to read payload PID from supervisor.\n";
+        }
+        close(m_container_to_monitor_fd[0]);
 
         int master_fd{-1};
         if (m_container_config.terminal.value) {
@@ -469,7 +502,8 @@ auto ContainerMonitor::run_monitor_parent() -> void {
 
         auto container{m_container_db_manager->get_container(m_container_config.container_id)};
         if (container) {
-                container->config.pid = m_container_pid;
+                container->config.pid = payload_pid;
+                container->pid = m_container_pid;
                 container->config.final_filesystem = m_container_config.vfs ? Utils::get_vfs_path(m_container_config.container_id).string() :
                         std::format("{}/filesystems/quiver_{}", Utils::get_base_dir().string(), m_container_config.container_id);
                 container->boot_time = Utils::get_boot_time();
@@ -542,7 +576,6 @@ auto ContainerMonitor::run_monitor_parent() -> void {
         if (WIFEXITED(status)) {
                 final_exit_code = WEXITSTATUS(status);
         } else if (WIFSIGNALED(status)) {
-                int sig{WTERMSIG(status)};
                 final_exit_code = 128 + WTERMSIG(status);
         }
 
@@ -561,7 +594,12 @@ auto ContainerMonitor::run_monitor_parent() -> void {
         auto end_container{m_container_db_manager->get_container(m_container_config.container_id)};
         if (end_container) {
                 end_container->status = std::move(db_status);
+                end_container->exit_code = final_exit_code;
                 m_container_db_manager->update_container(m_container_config.container_id, end_container.value());
+        }
+
+        if (m_log_worker.joinable()) {
+                m_log_worker.join();
         }
 
         _exit(final_exit_code);
@@ -943,10 +981,10 @@ auto ContainerMonitor::exec_mapping_tool(const char* binary_path, const std::str
 
 auto ContainerMonitor::attach_to_stdio() -> bool {
         if (m_container_config.terminal.value) {
-                if (socketpair(AF_UNIX, SOCK_STREAM, 0, m_control_sock) == -1) [[unlikely]] return false;
+                if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, m_control_sock) == -1) [[unlikely]] return false;
         }
         else {
-                if (pipe(m_std_out_fd) == -1 || pipe(m_std_err_fd) == -1) [[unlikely]]  return false;
+                if (pipe2(m_std_out_fd, O_CLOEXEC) == -1 || pipe2(m_std_err_fd, O_CLOEXEC) == -1) [[unlikely]]  return false;
         }
         return true;
 }

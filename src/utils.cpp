@@ -118,6 +118,20 @@ auto Utils::copy_directory(const fs::path& source, const fs::path& destination) 
 
 auto Utils::remove_directory(const fs::path& path) -> void {
         std::error_code error_code{};
+
+        fs::path merged_dir{path / "merged_dir"};
+        if (fs::exists(merged_dir)) {
+                pid_t umount_pid{fork()};
+                if (umount_pid == 0) {
+                        std::string cmd = std::format("fusermount3 -u -z '{}' 2>/dev/null || fusermount -u -z '{}' 2>/dev/null || umount -l '{}' 2>/dev/null", merged_dir.string(), merged_dir.string(), merged_dir.string());
+                        execlp("sh", "sh", "-c", cmd.c_str(), nullptr);
+                        _exit(EXIT_FAILURE);
+                } else if (umount_pid > 0) {
+                        waitpid(umount_pid, nullptr, 0);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+        }
+
         if (fs::exists(path)) {
                 fs::permissions(path, fs::perms::all, fs::perm_options::add, error_code);
                 for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)) {
@@ -125,19 +139,23 @@ auto Utils::remove_directory(const fs::path& path) -> void {
                 }
         }
         fs::remove_all(path, error_code);
-        if (error_code == std::errc::permission_denied) {
+
+        if (error_code) {
                 pid_t pid{fork()};
                 if (pid == 0) {
-                        if (unshare(CLONE_NEWUSER) == 0) {
-                                std::error_code ec{};
-                                fs::remove_all(path, ec);
-                        }
-                        _exit(0);
+                        std::string cmd = std::format("rootlesskit rm -rf '{}' 2>/dev/null || rm -rf '{}'", path.string(), path.string());
+                        execlp("sh", "sh", "-c", cmd.c_str(), nullptr);
+                        _exit(EXIT_FAILURE);
                 } else if (pid > 0) {
-                        waitpid(pid, nullptr, 0);
-                        error_code.clear();
+                        int status{};
+                        waitpid(pid, &status, 0);
+
+                        if (WIFEXITED(status) && WEXITSTATUS(status) == 0 && !fs::exists(path)) {
+                                error_code.clear();
+                        }
                 }
         }
+
         if (error_code) [[unlikely]] {
                 throw std::runtime_error(std::format("Directory Error: couldn't remove '{}' - {}\n", path.string(), error_code.message()));
         }
@@ -706,7 +724,7 @@ auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string
 
 
         int flags{ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL | ARCHIVE_EXTRACT_FFLAGS |
-                  ARCHIVE_EXTRACT_SECURE_SYMLINKS};
+                ARCHIVE_EXTRACT_SECURE_SYMLINKS};
         int r;
 
         a = archive_read_new();
@@ -907,32 +925,74 @@ auto Utils::sha256_file(const fs::path& file) -> std::string {
 }
 
 auto Utils::print_usage() -> void { std::cout << "Usage: quiver <command> [options] [arguments]\n\n" << "Commands:\n"
-                << "  run [options] -i <image> [cmd]   Create and start a new container\n"
-                << "      -i, --image <name>           Image to use (required)\n"
+        << "  run [options] <image> [command] [arg...]  Create and start a new container\n"
+                << "    General Options:\n"
                 << "      -n, --name <name>            Assign a name to the container\n"
-                << "      -p, --port <host:cont>       Publish a container's port(s) to the host\n"
-                << "      -v, --volume <host:cont>     Bind mount a volume\n"
-                << "      --vfs                        Use VFS (copy) instead of OverlayFS for package manager related\n"
-                << "      --no-remove                  Do not remove the filesystem after exit\n\n"
-
+                << "      -d, --detach                 Run container in background and print container ID\n"
+                << "      -i, --interactive            Keep STDIN open even if not attached\n"
+                << "      -t, --tty                    Allocate a pseudo-TTY\n"
+                << "      -u, --user <uid[:gid]>       Username or UID (format: <uid|user>[:<gid|group>])\n"
+                << "      -w, --workdir <dir>          Working directory inside the container\n"
+                << "      -e, --env <key=value>        Set environment variables\n"
+                << "      --env-file <file>            Read in a file of environment variables\n"
+                << "      --hostname <name>            Container host name\n"
+                << "      --domainname <name>          Container NIS domain name\n"
+                << "    Filesystem & Mounts:\n"
+                << "      -v, --volume, --mount <v>    Bind mount a volume (format: host_dir:container_dir[:ro|rw])\n"
+                << "      --tmpfs <dir>                Mount a tmpfs directory\n"
+                << "      --read-only                  Mount the container's root filesystem as read only\n"
+                << "      --read-only-path <path>      Make a specific path read-only\n"
+                << "      --mask <path>                Mask a path inside the container\n"
+                << "      --rootfs-propagation <mode>  Mount propagation mode\n"
+                << "    Network & Ports:\n"
+                << "      -p, --publish <port>         Publish a container's port(s) to the host\n"
+                << "      -P, --publish-all            Publish all exposed ports to random ports\n"
+                << "    Security & Capabilities:\n"
+                << "      --cap-add <cap>              Add Linux capabilities\n"
+                << "      --cap-drop <cap>             Drop Linux capabilities\n"
+                << "      --security-opt <opt>         Security Options (e.g. seccomp=profile.json, no-new-privileges)\n"
+                << "      --device, --cdi <device>     Add a host device to the container\n"
+                << "    Resources & Limits:\n"
+                << "      --ulimit <type=soft:hard>    Ulimit options\n"
+                << "      --oom-score-adj <num>        Tune host's OOM preferences (-1000 to 1000)\n"
+                << "      --cgroup-path <path>         Path to cgroups\n"
+                << "      --cpu-quota <num>            Limit CPU CFS (Completely Fair Scheduler) quota\n"
+                << "      --cpu-period <num>           Limit CPU CFS (Completely Fair Scheduler) period\n"
+                << "      --cpu-weight <num>           CPU weight (relative weight)\n"
+                << "      --memory-max <bytes>         Memory limit\n"
+                << "      --memory-swap <bytes>        Swap limit equal to memory plus swap\n"
+                << "      --pids-limit <num>           Tune container pids limit\n"
+                << "      --cpuset-cpus <cpus>         CPUs in which to allow execution (0-3, 0,1)\n"
+                << "      --set-cpuset-mems <mems>     MEMs in which to allow execution (0-3, 0,1)\n"
+                << "      --set-io-max <limits>        Set IO max limits (MAJOR:MINOR:RBPS:WBPS:RIOPS:WIOPS)\n"
+                << "      --set-io-weight <weight>     Set IO weight (MAJOR:MINOR:WEIGHT)\n"
+                << "    Namespaces & IPC:\n"
+                << "      --pid, --net, --ipc, --uts, --mount-ns, --time, --cgroup <path>\n"
+                << "                                   Join existing namespaces\n"
+                << "      --time-offset <type=secs>    Set time namespace offset\n"
+                << "    Scheduler & Terminal:\n"
+                << "      --cpu-policy <policy>        Set CPU scheduling policy\n"
+                << "      --cpu-priority <num>         Set CPU scheduling priority\n"
+                << "      --cpu-nice <num>             Set CPU nice value\n"
+                << "      --cpu-rt-runtime <num>       Set CPU real-time runtime\n"
+                << "      --cpu-rt-period <num>        Set CPU real-time period\n"
+                << "      --cpu-scheduler-flags <flag> Set CPU scheduler flags\n"
+                << "      --console-width <num>        Set console width\n"
+                << "      --console-height <num>       Set console height\n\n"
                 << "  start <container_id> ...         Start one or more stopped containers\n"
                 << "  stop <container_id> ...          Stop one or more running containers\n"
                 << "  rm <container_id> ...            Remove one or more containers\n"
                 << "  attach <container_id>            Attach local standard input, output, and error to a running container\n\n"
-
                 << "  ps [-a]                          List containers\n"
                 << "      -a                           Show all containers (default shows just running)\n\n"
-
                 << "  pull <image_name>                Pull an image from a registry\n\n"
                 << "  image <subcommand>               Manage images\n"
                 << "      ls                           List available images\n"
                 << "      rm <image:tag>               Remove an image\n"
                 << "      cls <image_name>             List containers using a specific image\n\n"
-
                 << "  volume <subcommand>              Manage volumes\n"
                 << "      ls                           List all volumes\n"
                 << "      rm <volume_id> ...           remove one or more volume links\n\n"
-
                 << "  network <subcommand>             Manage networks\n"
                 << "      ls                           List all network port mappings\n"
                 << "      rm <network_id> ...          remove one or more network links\n"
@@ -942,7 +1002,9 @@ auto Utils::print_usage() -> void { std::cout << "Usage: quiver <command> [optio
                 << "      volume <container_id> [args]                 \n"
                 << "                  <host:cont> ...  Create a volume link for container\n\n"
                 << "  vfs rm <container_id>            remove vfs for a container\n\n"
-                << "  help                             Show this help message\n";
+                << "  help                             Show this help message\n"
+                << "  logs <container_id>              Fetch the logs of a container\n"
+                << "  clear-logs                       Clear all cached logs\n";
 }
 
 
@@ -1207,26 +1269,26 @@ auto Utils::create_connection(std::string_view path) -> int {
 
 auto Utils::is_process_alive(pid_t pid, const std::string& container_id) -> bool {
         auto check_cgroups{[](pid_t pid, const std::string& expected_container_id) -> bool {
-                        std::string cgroup_path{"/proc/" + std::to_string(pid) + "/cgroup"};
-                        std::string expected_scope{"quiver-" + expected_container_id + ".scope"};
+                std::string cgroup_path{"/proc/" + std::to_string(pid) + "/cgroup"};
+                std::string expected_scope{"quiver-" + expected_container_id + ".scope"};
 
-                        int fd{open(cgroup_path.c_str(), O_RDONLY | O_CLOEXEC)};
-                        if (fd == -1) {
-                                return false;
-                        }
-                        char buffer[4096];
-                        ssize_t bytes_read{read(fd, buffer, sizeof(buffer) - 1)};
-                        close(fd);
-                        if (bytes_read <= 0) {
-                                return false;
-                        }
-                        buffer[bytes_read] = '\0';
-                        if (strstr(buffer, expected_scope.c_str()) != nullptr) {
-                                return true;
-                        }
-
+                int fd{open(cgroup_path.c_str(), O_RDONLY | O_CLOEXEC)};
+                if (fd == -1) {
                         return false;
                 }
+                char buffer[4096];
+                ssize_t bytes_read{read(fd, buffer, sizeof(buffer) - 1)};
+                close(fd);
+                if (bytes_read <= 0) {
+                        return false;
+                }
+                buffer[bytes_read] = '\0';
+                if (strstr(buffer, expected_scope.c_str()) != nullptr) {
+                        return true;
+                }
+
+                return false;
+        }
         };
         if (kill(pid, 0) == 0) {
                 return true;

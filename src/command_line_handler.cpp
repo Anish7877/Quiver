@@ -31,6 +31,9 @@
 #include <pwd.h>
 #include <chrono>
 #include <set>
+#include <pty.h>
+#include <termios.h>
+#include <poll.h>
 
 static std::vector<std::string> split_string(const std::string& str, char delimiter) {
         std::vector<std::string> tokens;
@@ -159,7 +162,9 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                     arg == "--memory-max" || arg == "--memory-swap" || arg == "--pids-limit" ||
                     arg == "--cpuset-cpus" || arg == "--set-cpuset-mems" ||
                     arg == "--set-io-max" || arg == "--set-io-weight") {
-                        ++i;
+                        if (++i >= args.size()) {
+                                throw std::runtime_error("Missing argument for option: " + arg);
+                        }
                 }
         }
 
@@ -169,7 +174,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                         commands.push_back(args[i]);
                 }
         } else {
-                image_name = args.back();
+                throw std::runtime_error("Image name not found");
         }
 
         auto& image_manager{ImageManager::get_instance()};
@@ -220,13 +225,12 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
 
         for (size_t i{0}; i < positional_start; ++i) {
                 const auto& arg = args[i];
-
+                try {
                 if (arg == "--name") {
                         if (++i < positional_start) {
                                 container_name = args[i];
                         }
-                }
-                else if (arg == "-i" || arg == "--interactive" || arg == "-t" || arg == "--tty") {
+                } else if (arg == "-i" || arg == "--interactive" || arg == "-t" || arg == "--tty") {
                         container_config.terminal.value = true;
                 } else if (arg == "-d" || arg == "--detach") {
                         container_config.detach.value = true;
@@ -243,6 +247,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                 } else if (arg == "--env-file") {
                         if (++i < positional_start) {
                                 std::ifstream file(args[i]);
+                                if (!file) throw std::runtime_error("Could not open env-file: " + args[i]);
                                 std::string line;
                                 while (std::getline(file, line)) {
                                         if (!line.empty() && line[0] != '#') container_config.env.value.push_back(line);
@@ -252,9 +257,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                         if (++i < positional_start) container_config.hostname = args[i];
                 } else if (arg == "--domainname") {
                         if (++i < positional_start) container_config.domain_name = args[i];
-                }
-
-                else if (arg == "-v" || arg == "--volume" || arg == "--mount") {
+                } else if (arg == "-v" || arg == "--volume" || arg == "--mount") {
                         if (++i < positional_start) {
                                 auto tokens = split_string(args[i], ':');
                                 if (tokens.size() >= 2) {
@@ -338,6 +341,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                                 auto tokens = split_string(args[i], '=');
                                 if (tokens.size() == 2) {
                                         auto limits = split_string(tokens[1], ':');
+                                        if (limits.empty()) throw std::runtime_error("Invalid format for --ulimit");
                                         OCIRuntime::RLimit rlimit;
                                         rlimit.name = tokens[0];
                                         rlimit.soft_limit = std::stoull(limits[0]);
@@ -435,6 +439,11 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                 } else {
                         throw std::runtime_error("Unknown option: " + arg);
                 }
+                } catch (const std::invalid_argument& e) {
+                        throw std::runtime_error("Invalid numeric argument for option: " + arg);
+                } catch (const std::out_of_range& e) {
+                        throw std::runtime_error("Numeric argument out of range for option: " + arg);
+                }
         }
 
         fs::path config_path{fs::path(outpath) / "config.json"};
@@ -452,7 +461,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                         auto& process_cfg = img_config["process"];
 
                         if (process_cfg.contains("terminal") && process_cfg["terminal"].is_boolean()) {
-                                if (!container_config.terminal.value) {
+                                if (!container_config.terminal.value && !container_config.detach.value) {
                                         container_config.terminal.value = process_cfg["terminal"].get<bool>();
                                 }
                         }
@@ -867,9 +876,9 @@ auto CommandLineHandler::stop(std::span<std::string> args) -> void {
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(arg)};
                 if (container && container->status == "running") {
-                        auto cgroup_base_opt{get_cgroup_path(container->config.pid)};
+                        auto cgroup_base_opt{get_cgroup_path(container->pid)};
                         if (cgroup_base_opt) {
-                                fs::path cg_kill_path = cgroup_base_opt.value() / "cgroup.kill";
+                                fs::path cg_kill_path{cgroup_base_opt.value() / "cgroup.kill"};
                                 if (fs::exists(cg_kill_path)) {
                                         std::ofstream kill_file(cg_kill_path);
                                         if (kill_file.is_open()) {
@@ -880,7 +889,7 @@ auto CommandLineHandler::stop(std::span<std::string> args) -> void {
                                 std::cerr << std::format("WARN: Could not resolve cgroup path for container '{}' via /proc.\n", arg);
                         }
 
-                        if (kill(container->config.pid, SIGTERM) == 0) {
+                        if (::kill(container->config.pid, SIGTERM) == 0) {
                                 bool stopped{false};
                                 for (int i{0}; i < 100; ++i) {
                                         if (!Utils::is_process_alive(container->config.pid, container->config.container_id)) {
@@ -891,7 +900,7 @@ auto CommandLineHandler::stop(std::span<std::string> args) -> void {
                                 }
                                 if (!stopped) {
                                         std::cerr << std::format("WARN: Container '{}' timed out. Sending SIGKILL...\n", arg);
-                                        kill(container->config.pid, SIGKILL);
+                                        ::kill(container->config.pid, SIGKILL);
                                 }
                                 container->status = "stopped";
                                 container_db_manager.update_container(arg, container.value());
@@ -1465,8 +1474,11 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                 return;
         }
 
+        auto& image_db_manager{ImageDbManager::get_instance()};
+        image_db_manager.init();
+
         std::vector<std::string> tags{};
-        std::string dockerfile_path{};
+        std::string quiver_filepath{};
         std::vector<std::string> build_args{};
         std::string target{};
         std::string output_path{};
@@ -1480,7 +1492,7 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                 if (arg == "-t" || arg == "--tag") {
                         if (++i < args.size()) tags.push_back(args[i]);
                 } else if (arg == "-f" || arg == "--file") {
-                        if (++i < args.size()) dockerfile_path = args[i];
+                        if (++i < args.size()) quiver_filepath = args[i];
                 } else if (arg == "-o" || arg == "--output") {
                         if (++i < args.size()) output_path = args[i];
                 } else if (arg == "--build-arg") {
@@ -1503,11 +1515,11 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                 return;
         }
 
-        if (dockerfile_path.empty()) {
-                dockerfile_path = (fs::path(context_path) / "Quiverfile").string();
+        if (quiver_filepath.empty()) {
+                quiver_filepath = (fs::path(context_path) / "Quiverfile").string();
         }
 
-        fs::path df_full_path{fs::absolute(dockerfile_path)};
+        fs::path df_full_path{fs::absolute(quiver_filepath)};
         fs::path ctx_full_path{fs::absolute(context_path)};
 
         if (!fs::exists(df_full_path)) [[unlikely]] {
@@ -1558,18 +1570,37 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
 
 
         if (!tags.empty()) {
-                const char* home_dir = std::getenv("HOME");
+                const char* home_dir{std::getenv("HOME")};
                 if (home_dir == nullptr) {
                         struct passwd* pw = getpwuid(getuid());
                         if (pw) home_dir = pw->pw_dir;
                 }
 
-                std::string primary_tag = tags[0];
+                std::string primary_tag{tags[0]};
+                bool image_tag_found{false};
+                size_t idx{0};
                 for (char& c : primary_tag) {
-                        if (c == ':' || c == '/') c = '_';
+                        if (c == ':') {
+                                c = '_';
+                                image_tag_found = true;
+                                idx++;
+                                break;
+                        }
+                }
+                if (image_tag_found && idx == primary_tag.size()-1) {
+                        primary_tag += "latest";
+                        tags[0] += "latest";
+                }
+                else if (!image_tag_found) {
+                        primary_tag += "_latest";
+                        tags[0] += ":latest";
                 }
 
                 final_dest_dir = fs::path(home_dir) / ".quiver" / "images" / primary_tag / "rootfs";
+                if (fs::exists(final_dest_dir.parent_path() / "config.json")) {
+                        std::cerr << std::format("Error: Image already exist with '{}'\n", tags[0]);
+                        return;
+                }
                 fs::create_directories(final_dest_dir);
 
 
@@ -1639,6 +1670,34 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
 
                                         fs::copy_file(source_config, dest_config, fs::copy_options::overwrite_existing);
 
+                                        fs::path image_dir{Utils::get_image_path(tags[0])};
+                                        auto index{tags[0].find(':')};
+                                        ImageMetadata image_metadata{};
+                                        image_metadata.id = Utils::generate_id();
+                                        image_metadata.name = tags[0].substr(0, index);
+                                        image_metadata.tag = tags[0].substr(index+1);
+                                        image_metadata.size_bytes = 0;
+
+                                        try {
+                                                auto dir_opts{fs::directory_options::skip_permission_denied};
+                                                std::set<std::pair<dev_t, ino_t>> seen_inodes{};
+
+                                                for (const auto& entry : fs::recursive_directory_iterator(image_dir, dir_opts)) {
+                                                        if (entry.is_regular_file() && !entry.is_symlink()) {
+                                                                struct stat st;
+                                                                if (stat(entry.path().c_str(), &st) == 0) {
+                                                                        if (seen_inodes.insert({st.st_dev, st.st_ino}).second) {
+                                                                                image_metadata.size_bytes += st.st_size;
+                                                                        }
+                                                                }
+                                                        }
+                                                }
+                                        } catch (const std::exception& e) {
+                                                std::cerr << "Warning: Could not accurately calculate total image size: " << e.what() << "\n";
+                                        }
+
+                                        image_metadata.source = fs::absolute(quiver_filepath);
+                                        image_db_manager.add_image(image_metadata);
                                         std::cout << "Successfully embedded config.json.\n";
                                         std::cout << "Build completed successfully!\n";
                                 } catch (const std::exception& e) {
@@ -1960,7 +2019,7 @@ auto CommandLineHandler::restart(std::span<std::string> args) -> void {
         auto& container_monitor{ContainerMonitor::get_instance()};
         auto container{container_db_manager.get_container(args[0])};
         if (container && container->status == "running") {
-                auto cgroup_base_opt{get_cgroup_path(container->config.pid)};
+                auto cgroup_base_opt{get_cgroup_path(container->pid)};
                 if (cgroup_base_opt) {
                         fs::path cg_kill_path = cgroup_base_opt.value() / "cgroup.kill";
                         if (fs::exists(cg_kill_path)) {
@@ -1972,7 +2031,7 @@ auto CommandLineHandler::restart(std::span<std::string> args) -> void {
                 } else {
                         std::cerr << std::format("WARN: Could not resolve cgroup path for container '{}' via /proc.\n", args[0]);
                 }
-                if (kill(container->config.pid, SIGTERM) == 0) {
+                if (::kill(container->config.pid, SIGTERM) == 0) {
                         bool stopped{false};
                         for (int i{0}; i < 100; ++i) {
                                 if (!Utils::is_process_alive(container->config.pid, container->config.container_id)) {
@@ -1983,7 +2042,7 @@ auto CommandLineHandler::restart(std::span<std::string> args) -> void {
                         }
                         if (!stopped) {
                                 std::cerr << std::format("WARN: Container '{}' timed out. Sending SIGKILL...\n", args[0]);
-                                kill(container->config.pid, SIGKILL);
+                                ::kill(container->config.pid, SIGKILL);
                         }
                         for (int i{0}; i < 50; ++i) {
                                 auto check_container = container_db_manager.get_container(args[0]);
@@ -2152,5 +2211,337 @@ auto CommandLineHandler::mount(std::span<std::string> args) -> void {
         else {
                 std::cerr << std::format("quiver mount: '{}' is not a quiver mount command.\n", args.front());
                 Utils::print_usage();
+        }
+}
+
+auto CommandLineHandler::exec(std::span<std::string> args) -> void {
+        bool allocate_pty{false};
+        std::string container_id;
+        std::vector<std::string> cmd_args;
+
+        for (const auto& arg : args) {
+                if (arg == "-t" || arg == "-it" || arg == "-i") {
+                        allocate_pty = true;
+                } else if (container_id.empty()) {
+                        container_id = arg;
+                } else {
+                        cmd_args.push_back(arg);
+                }
+        }
+
+        if (container_id.empty() || cmd_args.empty()) {
+                std::cerr << "Usage: quiver exec [-t|-it] <container_id> <command> [args...]\n";
+                return;
+        }
+
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+        auto container{container_db_manager.get_container(container_id)};
+
+        if (!container || container->status != "running") {
+                std::cerr << "Error: Container not found or not running.\n";
+                return;
+        }
+
+        pid_t target_pid = container->config.pid;
+
+        int master_fd{-1}, slave_fd{-1};
+        if (allocate_pty) {
+                struct winsize ws{};
+                if (isatty(STDIN_FILENO)) {
+                        if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == -1) {
+                                std::cerr << "Warning: Failed to get host terminal size\n";
+                                ws.ws_row = 24;
+                                ws.ws_col = 80;
+                        }
+                } else {
+                        ws.ws_row = 24;
+                        ws.ws_col = 80;
+                }
+                if (openpty(&master_fd, &slave_fd, nullptr, nullptr, &ws) == -1) {
+                        std::cerr << "Error: Failed to allocate PTY\n";
+                        return;
+                }
+        }
+
+        pid_t worker_pid = fork();
+        if (worker_pid < 0) [[unlikely]] {
+                std::cerr << "Error: Failed to fork worker process\n";
+                return;
+        }
+
+        if (worker_pid == 0) {
+                if (allocate_pty) {
+                        close(master_fd);
+                }
+
+                std::string target_root = std::format("/proc/{}/root", target_pid);
+                int root_fd = open(target_root.c_str(), O_RDONLY | O_DIRECTORY);
+
+                const std::vector<std::string> namespaces = {"user", "ipc", "uts", "net", "pid", "mnt"};
+                for (const auto& ns : namespaces) {
+                        std::string ns_path = std::format("/proc/{}/ns/{}", target_pid, ns);
+                        int fd = open(ns_path.c_str(), O_RDONLY | O_CLOEXEC);
+
+                        if (fd >= 0) {
+                                if (setns(fd, 0) == -1) {
+                                        std::cerr << std::format("Error: Failed to join {} namespace. Are you the owner of this container?\n", ns);
+                                        _exit(EXIT_FAILURE);
+                                }
+                                close(fd);
+                        } else {
+                                std::cerr << std::format("Error: Cannot open {} namespace. Check permissions.\n", ns);
+                                _exit(EXIT_FAILURE);
+                        }
+                }
+
+                if (root_fd >= 0) {
+                        fchdir(root_fd);
+                        chroot(".");
+                        close(root_fd);
+                }
+
+                setuid(0);
+                setgid(0);
+
+                pid_t exec_pid{fork()};
+                if (exec_pid == 0) {
+                        if (allocate_pty) {
+                                setsid();
+                                if (ioctl(slave_fd, TIOCSCTTY, 0) == -1) {
+                                        std::cerr << "Warning: Failed to set controlling terminal\n";
+                                }
+
+                                dup2(slave_fd, STDIN_FILENO);
+                                dup2(slave_fd, STDOUT_FILENO);
+                                dup2(slave_fd, STDERR_FILENO);
+                                close(slave_fd);
+                        } else {
+                                int null_fd = open("/dev/null", O_RDONLY);
+                                if (null_fd >= 0) {
+                                        dup2(null_fd, STDIN_FILENO);
+                                        close(null_fd);
+                                }
+                        }
+
+                        std::vector<char*> c_args;
+                        c_args.reserve(cmd_args.size() + 1);
+                        for (auto& str : cmd_args) {
+                                c_args.push_back(str.data());
+                        }
+                        c_args.push_back(nullptr);
+
+                        if (clearenv() != 0) [[unlikely]] {
+                                std::cerr << "Error: clearenv failed in exec.\n";
+                                _exit(EXIT_FAILURE);
+                        }
+
+                        for (const auto& env : container->config.env.value) {
+                                auto it{env.find('=')};
+                                if (it != std::string::npos && it > 0) {
+                                        std::string name{env.substr(0, it)};
+                                        std::string value{env.substr(it+1)};
+                                        if (setenv(name.c_str(), value.c_str(), 1) != 0) [[unlikely]] {
+                                                std::cerr << std::format("Warning: setenv failed for -> {}\n", env);
+                                        }
+                                }
+                                else [[unlikely]] {
+                                        std::cerr << std::format("Warning: Invalid env format ignored -> {}\n", env);
+                                }
+                        }
+
+                        setenv("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", 0);
+                        if (allocate_pty) {
+                                setenv("TERM", "xterm-256color", 1);
+                        }
+
+                        execvp(c_args[0], c_args.data());
+                        std::cerr << std::format("exec failed: {}\n", strerror(errno));
+                        _exit(EXIT_FAILURE);
+                }
+
+                if (allocate_pty) close(slave_fd);
+                int status{};
+                waitpid(exec_pid, &status, 0);
+                _exit(WIFEXITED(status) ? WEXITSTATUS(status) : EXIT_FAILURE);
+        }
+
+        if (allocate_pty) {
+                close(slave_fd);
+
+                struct termios orig_termios{}, raw_termios{};
+                tcgetattr(STDIN_FILENO, &orig_termios);
+                raw_termios = orig_termios;
+                cfmakeraw(&raw_termios);
+                tcsetattr(STDIN_FILENO, TCSANOW, &raw_termios);
+
+                struct pollfd fds[2];
+                fds[0].fd = STDIN_FILENO;
+                fds[0].events = POLLIN;
+                fds[1].fd = master_fd;
+                fds[1].events = POLLIN;
+
+                char buf[8192];
+                while (true) {
+                        if (poll(fds, 2, -1) <= 0) break;
+
+                        if (fds[0].revents & POLLIN) {
+                                ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
+                                if (n > 0) {
+                                        write(master_fd, buf, n);
+                                } else {
+                                        break;
+                                }
+                        }
+
+                        if (fds[0].revents & (POLLHUP | POLLERR)) {
+                                break;
+                        }
+
+                        if (fds[1].revents & POLLIN) {
+                                ssize_t n = read(master_fd, buf, sizeof(buf));
+                                if (n > 0) {
+                                        write(STDOUT_FILENO, buf, n);
+                                } else {
+                                        break;
+                                }
+                        }
+
+                        if (fds[1].revents & (POLLHUP | POLLERR)) {
+                                break;
+                        }
+                }
+
+                tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
+                close(master_fd);
+        }
+        int status{};
+        waitpid(worker_pid, &status, 0);
+}
+
+auto CommandLineHandler::wait(std::span<std::string> args) -> void {
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+
+        if (args.empty()) [[unlikely]] {
+                std::cerr << "Error: No arguments provided. Please specify at least one container ID.\n";
+                Utils::print_usage();
+                return;
+        }
+
+        for (const auto& arg : args) {
+                while (true) {
+                        auto container{container_db_manager.get_container(arg)};
+                        if (!container) {
+                                std::cerr << std::format("Error: Container '{}' not found.\n", arg);
+                                break;
+                        }
+
+                        if (container->status == "exited" || container->status == "stopped") {
+                                break;
+                        }
+
+                        if (container->status == "running" && container->config.pid > 0) {
+                                if (!Utils::is_process_alive(container->config.pid, container->config.container_id)) {
+                                        container->status = "exited";
+                                        container->exit_code = 137;
+                                        container_db_manager.update_container(arg, container.value());
+                                        break;
+                                }
+                        }
+
+                        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                }
+        }
+}
+
+auto CommandLineHandler::kill(std::span<std::string> args) -> void {
+        auto parse_signal{[](std::string sig_str) -> int {
+                std::transform(sig_str.begin(), sig_str.end(), sig_str.begin(), ::toupper);
+
+
+                if (sig_str.starts_with("SIG")) {
+                        sig_str = sig_str.substr(3);
+                }
+
+                const std::pair<std::string, int> sig_map[] = {
+                        {"HUP", 1}, {"INT", 2}, {"QUIT", 3}, {"ILL", 4}, {"TRAP", 5},
+                        {"ABRT", 6}, {"BUS", 7}, {"FPE", 8}, {"KILL", 9}, {"USR1", 10},
+                        {"SEGV", 11}, {"USR2", 12}, {"PIPE", 13}, {"ALRM", 14}, {"TERM", 15},
+                        {"CHLD", 17}, {"CONT", 18}, {"STOP", 19}, {"TSTP", 20}, {"TTIN", 21},
+                        {"TTOU", 22}
+                };
+
+                for (const auto& [name, num] : sig_map) {
+                        if (sig_str == name) return num;
+                }
+
+
+                try {
+                        int sig{std::stoi(sig_str)};
+                        if (sig > 0 && sig <= 64) return sig;
+                } catch (...) {}
+
+                return -1;
+        }};
+
+        int signal_to_send{9};
+        std::vector<std::string> target_containers{};
+
+        for (size_t i{0}; i < args.size(); ++i) {
+                if (args[i] == "-s" || args[i] == "--signal") {
+                        if (++i < args.size()) {
+                                signal_to_send = parse_signal(args[i]);
+                                if (signal_to_send == -1) [[unlikely]] {
+                                        std::cerr << std::format("Error: Invalid signal '{}' specified.\n", args[i]);
+                                        return;
+                                }
+                        } else [[unlikely]] {
+                                std::cerr << std::format("Error: Signal not provided after '{}'.\n", args[i - 1]);
+                                return;
+                        }
+                } else if (!args[i].starts_with("-")) {
+                        target_containers.push_back(args[i]);
+                } else {
+                        std::cerr << std::format("Warning: Unknown flag '{}' ignored.\n", args[i]);
+                }
+        }
+
+        if (target_containers.empty()) [[unlikely]] {
+                std::cerr << "Error: No container ID specified.\n";
+                Utils::print_usage();
+                return;
+        }
+
+        auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
+
+        for (const auto& arg : target_containers) {
+                auto container{container_db_manager.get_container(arg)};
+
+                if (!container) {
+                        std::cerr << std::format("Error: Container '{}' not found.\n", arg);
+                        continue;
+                }
+
+                if (container->status != "running" && container->status != "paused") {
+                        std::cerr << std::format("Error: Container '{}' is not running.\n", arg);
+                        continue;
+                }
+
+                if (container->config.pid <= 0) [[unlikely]] {
+                        std::cerr << std::format("Error: Invalid PID ({}) in database. Marking container '{}' as exited.\n",
+                                                 container->config.pid, arg);
+                        container->status = "exited";
+                        container_db_manager.update_container(arg, container.value());
+                        continue;
+                }
+
+                if (::kill(container->config.pid, signal_to_send) == 0) {
+                        std::cout << arg << '\n';
+                } else {
+                        std::cerr << std::format("Error: Failed to send signal to container '{}' -> {}\n",
+                                                 arg, std::strerror(errno));
+                }
         }
 }

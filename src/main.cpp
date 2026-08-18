@@ -65,6 +65,12 @@ int main(int argc, char* argv[]) {
                         CommandLineHandler::restart(args);
                 } else if (command == "mount") {
                         CommandLineHandler::mount(args);
+                } else if (command == "exec") {
+                        CommandLineHandler::exec(args);
+                } else if (command == "wait") {
+                        CommandLineHandler::wait(args);
+                } else if (command == "kill") {
+                        CommandLineHandler::kill(args);
                 } else {
                         std::cerr << "quiver: '" << command << "' is not a quiver command.\n"
                                 << "See 'quiver --help'.\n";

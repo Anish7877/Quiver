@@ -24,4 +24,7 @@ namespace CommandLineHandler {
         auto image(std::span<std::string>) -> void;
         auto restart(std::span<std::string>) -> void;
         auto mount(std::span<std::string>) -> void;
+        auto exec(std::span<std::string>) -> void;
+        auto wait(std::span<std::string>) -> void;
+        auto kill(std::span<std::string>) -> void;
 }

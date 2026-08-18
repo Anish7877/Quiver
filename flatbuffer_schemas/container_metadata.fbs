@@ -159,6 +159,7 @@ table ContainerConfig {
 	pid            : int32;
 	net_pid        : int32;
 	vfs            : bool;
+        allow_checkpointing : bool;
 
 	rootfs             : FB.OCIRuntime.Root;
 	rootfs_propagation : FB.OCIRuntime.RootfsPropagation;
@@ -210,6 +211,8 @@ table IOWeightUpdate {
 
 table ContainerMetadata {
         config           : ContainerConfig;
+        monitor_pid      : int;
+        exit_code        : int;
         name             : string;
         image            : string;
         status           : string;
