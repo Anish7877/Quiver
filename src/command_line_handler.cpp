@@ -1946,7 +1946,7 @@ auto CommandLineHandler::image(std::span<std::string> args) -> void {
                         image_metadata.size_bytes = 0;
 
                         try {
-                                auto dir_opts = fs::directory_options::skip_permission_denied;
+                                auto dir_opts{fs::directory_options::skip_permission_denied};
                                 std::set<std::pair<dev_t, ino_t>> seen_inodes{};
 
                                 for (const auto& entry : fs::recursive_directory_iterator(image_dir, dir_opts)) {
