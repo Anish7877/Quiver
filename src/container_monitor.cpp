@@ -28,6 +28,7 @@
 #include <pwd.h>
 #include <sched.h>
 #include <stdexcept>
+#include <string>
 #include <sys/ioctl.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
@@ -50,7 +51,6 @@ auto ContainerMonitor::init(const ContainerConfig& config, const std::string& im
         m_log_cmd_queue = &LoggerCommandQueue::get_instance();
         m_pty_session_manager = &PtySessionManager::get_instance();
         m_container_db_manager = &ContainerDbManager::get_instance();
-        m_cgroups_manager = CGroupsManagerCreator::create_cgourps_manager(m_container_config.container_id, m_container_config.cgroups_path);
         m_value_heap->map_buffer(Utils::get_value_heap_buf_name(), ValueHeap::VALUE_HEAP_SIZE, false);
         if (!m_value_heap->ok()) [[unlikely]] {
                 throw std::runtime_error(m_value_heap->get_error());
@@ -398,6 +398,8 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                 _exit(EXIT_FAILURE);
         }
         try {
+                m_cgroups_manager = CGroupsManagerCreator::create_cgourps_manager(std::to_string(m_container_pid),
+                                m_container_config.cgroups_path);
                 m_cgroups_manager->attach_process(m_container_pid);
                 if (m_limits.cpu_quota > 0) {
                         m_cgroups_manager->set_cpu_limit(m_limits.cpu_quota, m_limits.cpu_period);

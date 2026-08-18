@@ -4,7 +4,7 @@
 
 class SystemdCGroupsManager : public CGroupsManagerInterface {
         public:
-                explicit SystemdCGroupsManager(const std::string& container_id) : m_container_id{container_id} {}
+                explicit SystemdCGroupsManager(const std::string& pid) : m_container_id{pid} {}
                 ~SystemdCGroupsManager() = default;
                 SystemdCGroupsManager(const SystemdCGroupsManager&) = delete;
                 SystemdCGroupsManager(SystemdCGroupsManager&&) = delete;

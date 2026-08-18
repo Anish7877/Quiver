@@ -8,8 +8,7 @@
 using SystemdProperty = sdbus::Struct<std::string, sdbus::Variant>;
 
 auto SystemdCGroupsManager::attach_process(pid_t pid) -> void {
-        const std::string unit_name{std::format("quiver_{}_{}.scope", m_container_id,
-                        std::chrono::system_clock::now().time_since_epoch().count())};
+        const std::string unit_name{std::format("quiver_{}.scope", m_container_id)};
 
         try {
                 auto connection{sdbus::createSessionBusConnection()};
@@ -190,8 +189,7 @@ auto SystemdCGroupsManager::set_cpuset_mems(const std::string& mems) -> void {
 }
 
 auto SystemdCGroupsManager::set_freeze(const std::string& bit) -> void {
-        const std::string unit_name{std::format("quiver_{}_{}.scope", m_container_id,
-                        std::chrono::system_clock::now().time_since_epoch().count())};
+        const std::string unit_name{std::format("quiver_{}.scope", m_container_id)};
 
         try {
                 auto connection{sdbus::createSessionBusConnection()};
@@ -222,8 +220,7 @@ auto SystemdCGroupsManager::set_freeze(const std::string& bit) -> void {
 }
 
 auto SystemdCGroupsManager::stop() -> void {
-        const std::string unit_name{std::format("quiver_{}_{}.scope", m_container_id,
-                        std::chrono::system_clock::now().time_since_epoch().count())};
+        const std::string unit_name{std::format("quiver_{}.scope", m_container_id)};
         try {
                 auto connection{sdbus::createSessionBusConnection()};
                 auto systemd_proxy{sdbus::createProxy(*connection,
@@ -239,8 +236,7 @@ auto SystemdCGroupsManager::stop() -> void {
 }
 
 auto SystemdCGroupsManager::update_dbus_property(const std::string& property_name, const sdbus::Variant& value) -> void {
-        const std::string unit_name{std::format("quiver_{}_{}.scope", m_container_id,
-                        std::chrono::system_clock::now().time_since_epoch().count())};
+        const std::string unit_name{std::format("quiver_{}.scope", m_container_id)};
 
         try {
                 auto connection{sdbus::createSessionBusConnection()};

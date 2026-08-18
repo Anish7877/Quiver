@@ -708,7 +708,8 @@ auto CommandLineHandler::pause(std::span<std::string> args) -> void {
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(args.front())};
                 if (container && container->status == "running") {
-                        auto cgroup_manager{CGroupsManagerCreator::create_cgourps_manager(arg, container->config.cgroups_path)};
+                        auto cgroup_manager{CGroupsManagerCreator::create_cgourps_manager(std::to_string(container->pid),
+                                        container->config.cgroups_path)};
                         cgroup_manager->set_freeze("1");
                         container->status = "paused";
                         container_db_manager.update_container(container->config.container_id, container.value());
@@ -730,7 +731,8 @@ auto CommandLineHandler::unpause(std::span<std::string> args) -> void {
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(args.front())};
                 if (container && container->status == "paused") {
-                        auto cgroup_manager{CGroupsManagerCreator::create_cgourps_manager(arg, container->config.cgroups_path)};
+                        auto cgroup_manager{CGroupsManagerCreator::create_cgourps_manager(std::to_string(container->pid),
+                                        container->config.cgroups_path)};
                         cgroup_manager->set_freeze("0");
                         container->status = "running";
                         container_db_manager.update_container(container->config.container_id, container.value());
@@ -1414,7 +1416,7 @@ auto CommandLineHandler::update(std::span<std::string> args) -> void {
         }
 
         auto cgroups_manager{CGroupsManagerCreator::create_cgourps_manager(
-                container->config.container_id, container->config.cgroups_path)};
+                std::to_string(container->pid), container->config.cgroups_path)};
 
         try {
                 if (update_cpu) {
