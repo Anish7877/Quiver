@@ -406,7 +406,7 @@ auto Backend::get_volumes() const -> std::vector<Volume> {
     if (!QFile::exists(cli_path)) return result;
 
     QProcess process;
-    process.start(cli_path, QStringList() << "volume" << "ls");
+    process.start(cli_path, QStringList() << "mount" << "ls");
     if (!process.waitForFinished(10000)) {
         process.kill();
         process.waitForFinished(500);
@@ -420,8 +420,8 @@ auto Backend::get_volumes() const -> std::vector<Volume> {
     for (int i = 1; i < lines.size(); ++i) {
         QString line = lines[i].trimmed();
         
-        // Truncate if we hit "Usage:" or "quiver volume:" error messages
-        if (line.startsWith("Usage:") || line.startsWith("quiver volume:")) {
+        // Truncate if we hit "Usage:" or "quiver mount:" error messages
+        if (line.startsWith("Usage:") || line.startsWith("quiver mount:")) {
             break; 
         }
         
@@ -444,7 +444,7 @@ auto Backend::add_volume(const QString& container_id, const QString& host_path, 
         QString mapping = host_path + ":" + container_path;
         if (!mode.isEmpty()) mapping += ":" + mode;
         QStringList args;
-        args << "volume" << "add" << container_id << mapping;
+        args << "mount" << "add" << container_id << mapping;
         qDebug() << "Executing Quiver CLI for add volume:" << cli_path << args;
         QProcess::startDetached(cli_path, args);
     }
@@ -456,7 +456,7 @@ auto Backend::delete_volumes(const QMap<QString, QStringList>& targets) -> void 
             QString container_id = it.key();
             QStringList paths = it.value();
             QStringList args;
-            args << "volume" << "rm" << container_id;
+            args << "mount" << "rm" << container_id;
             args.append(paths);
             qDebug() << "Executing Quiver CLI for rm volume:" << cli_path << args;
             QProcess::startDetached(cli_path, args);

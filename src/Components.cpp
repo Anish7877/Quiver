@@ -1220,7 +1220,7 @@ CreateDialog::CreateDialog(QWidget* parent)
     };
 
     create_list_box("DEVICES", pimpl_->device_list_, &CreateDialog::on_add_device);
-    create_list_box("VOLUMES", pimpl_->volume_list_, &CreateDialog::on_add_volume);
+    create_list_box("MOUNTS", pimpl_->volume_list_, &CreateDialog::on_add_volume);
     create_list_box("PORTS",   pimpl_->port_list_,   &CreateDialog::on_add_port);
     v_layout->addLayout(boxes);
 
@@ -1601,7 +1601,7 @@ auto CreateDialog::on_add_device() -> void {
 
 auto CreateDialog::on_add_volume() -> void {
     QString dir { QFileDialog::getExistingDirectory(
-        this, "Select Volume Directory", "",
+        this, "Select Mount Directory", "",
         QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks) };
     if (!dir.isEmpty() &&
         pimpl_->volume_list_->findItems(dir, Qt::MatchExactly).isEmpty())

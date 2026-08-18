@@ -252,7 +252,7 @@ DashboardPage::DashboardPage(QWidget* parent)
     pimpl_->total_containers_card_ = new StatCard("TOTAL CONTAINERS", "0", "orange");
     pimpl_->running_containers_card_ = new StatCard("RUNNING", "0", "green");
     pimpl_->failed_containers_card_ = new StatCard("FAILED / STOPPED", "0", "red");
-    pimpl_->active_volumes_card_ = new StatCard("ACTIVE VOLUMES", "0", "white");
+    pimpl_->active_volumes_card_ = new StatCard("ACTIVE MOUNTS", "0", "white");
     stats_row->addWidget(pimpl_->total_containers_card_);
     stats_row->addWidget(pimpl_->running_containers_card_);
     stats_row->addWidget(pimpl_->failed_containers_card_);

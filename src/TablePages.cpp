@@ -96,6 +96,11 @@ QIcon createActionIcon(const QString& type, const QColor& color) {
             p.setBrush(Qt::NoBrush);
             p.drawArc(3, 3, 10, 10, 45 * 16, 270 * 16);
             p.drawPolyline(QPolygonF() << QPointF(13, 7) << QPointF(13, 3) << QPointF(9, 3));
+        } else if (type == "power") {
+            p.setPen(QPen(drawColor, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(Qt::NoBrush);
+            p.drawArc(3, 3, 10, 10, 120 * 16, 300 * 16);
+            p.drawLine(8, 2, 8, 7);
         }
         return pixmap;
     };
@@ -720,7 +725,7 @@ auto ContainersPage::refresh() -> void {
 
         if (c.status == "running") {
             h->addWidget(create_btn("pause", "Pause", "#f97316", [](const QStringList& ids){ Backend::get_instance().pause_container(ids); }));
-            h->addWidget(create_btn("refresh", "Restart", "#58a6ff", [](const QStringList& ids){ Backend::get_instance().restart_container(ids.first()); }));
+            h->addWidget(create_btn("power", "Restart", "#2ea043", [](const QStringList& ids){ Backend::get_instance().restart_container(ids.first()); }));
             h->addWidget(create_btn("stop", "Stop", "#f85149", [](const QStringList& ids){ Backend::get_instance().stop_container(ids); }));
         } else if (c.status == "paused") {
             h->addWidget(create_btn("play", "Unpause", "#2ea043", [](const QStringList& ids){ Backend::get_instance().unpause_container(ids); }));
@@ -1089,7 +1094,7 @@ VolumesPage::VolumesPage(QWidget* parent)
     root->setSpacing(0);
 
     pimpl_->page_ = new TablePage(
-        "Volumes",
+        "Mounts",
         { "SELECT", "CONTAINER ID", "SOURCE", "DESTINATION", "TYPE" },
         this);
 
@@ -1111,7 +1116,7 @@ VolumesPage::VolumesPage(QWidget* parent)
         auto selected = pimpl_->get_selected_volumes();
         if (selected.isEmpty()) return;
         
-        CustomAlert alert(CustomAlert::Question, "Confirm Delete", "Are you sure you want to delete the selected volumes?", this);
+        CustomAlert alert(CustomAlert::Question, "Confirm Delete", "Are you sure you want to delete the selected mounts?", this);
         if (alert.exec() != QDialog::Accepted) {
             return;
         }
@@ -1139,7 +1144,7 @@ VolumesPage::VolumesPage(QWidget* parent)
         d.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
         auto* l { new QVBoxLayout(&d) };
         l->setContentsMargins(28, 28, 28, 28); l->setSpacing(14);
-        auto* title { new QLabel("Add Volume") }; title->setObjectName("PageTitle"); l->addWidget(title);
+        auto* title { new QLabel("Add Mount") }; title->setObjectName("PageTitle"); l->addWidget(title);
         
         auto* cid_in { new QLineEdit }; cid_in->setPlaceholderText("Container ID or Name"); cid_in->setFixedHeight(34); l->addWidget(cid_in);
         
@@ -1295,14 +1300,14 @@ auto VolumesPage::refresh() -> void {
         auto* del_btn = new HoverIconButton("", "delete", "#f85149");
         del_btn->setObjectName("RowActionBtn_delete");
         del_btn->setIconSize(QSize(14, 14));
-        del_btn->setToolTip("Delete Volume");
+        del_btn->setToolTip("Delete Mount");
         del_btn->setCursor(Qt::PointingHandCursor);
         del_btn->setFixedSize(30, 28);
         
         QString cid = v.container_id;
         QString dest = v.destination;
         connect(del_btn, &QPushButton::clicked, this, [this, cid, dest]() {
-            CustomAlert alert(CustomAlert::Question, "Confirm", "Are you sure you want to delete this volume mapping?", this);
+            CustomAlert alert(CustomAlert::Question, "Confirm", "Are you sure you want to delete this mount mapping?", this);
             if (alert.exec() != QDialog::Accepted) {
                 return;
             }

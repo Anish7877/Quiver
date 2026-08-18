@@ -66,7 +66,7 @@ TopNavBar::TopNavBar(QWidget* parent)
 
     pimpl_->search_bar_ = new QLineEdit;
     pimpl_->search_bar_->setObjectName("SearchBar");
-    pimpl_->search_bar_->setPlaceholderText("Search containers, images, volumes...");
+    pimpl_->search_bar_->setPlaceholderText("Search containers, images, mounts...");
     pimpl_->search_bar_->setClearButtonEnabled(true);
     connect(pimpl_->search_bar_, &QLineEdit::textChanged,
             this, &TopNavBar::search_changed);

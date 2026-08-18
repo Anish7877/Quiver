@@ -246,7 +246,7 @@ auto MainWindow::setup_sidebar() -> void {
     add_nav(":/assets/icons/home.svg",       "Home",       0, false);
     add_nav(":/assets/icons/containers.svg", "Containers", 1, true );
     add_nav(":/assets/icons/images.svg",     "Images",     2, false);
-    add_nav(":/assets/icons/volumes.svg",    "Volumes",    3, false);
+    add_nav(":/assets/icons/volumes.svg",    "Mounts",    3, false);
     add_nav(":/assets/icons/ports.svg",      "Ports",      4, false);
     add_nav(":/assets/icons/devices.svg",    "Devices",    5, false);
 
@@ -416,7 +416,7 @@ auto MainWindow::setup_content() -> void {
     top_layout->addStretch(); 
 
     auto* search_input { new QLineEdit };
-    search_input->setPlaceholderText("Search containers, images, volumes...");
+    search_input->setPlaceholderText("Search containers, images, mounts...");
     search_input->setFixedWidth(350);
     search_input->setFixedHeight(36);
     search_input->setObjectName("SearchBox");
