@@ -902,6 +902,11 @@ auto CommandLineHandler::stop(std::span<std::string> args) -> void {
                                         std::cerr << std::format("WARN: Container '{}' timed out. Sending SIGKILL...\n", arg);
                                         ::kill(container->config.pid, SIGKILL);
                                 }
+                                for (size_t i{0}; i<50; ++i) {
+                                        auto check_container{container_db_manager.get_container(arg)};
+                                        if (check_container && check_container->status == "exited") break;
+                                        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                                }
                                 container->status = "stopped";
                                 container_db_manager.update_container(arg, container.value());
                                 std::cout << std::format("Container '{}' stopped successfully.\n", arg);
@@ -2045,7 +2050,7 @@ auto CommandLineHandler::restart(std::span<std::string> args) -> void {
                                 ::kill(container->config.pid, SIGKILL);
                         }
                         for (int i{0}; i < 50; ++i) {
-                                auto check_container = container_db_manager.get_container(args[0]);
+                                auto check_container{container_db_manager.get_container(args[0])};
                                 if (check_container && check_container->status == "exited") {
                                         break;
                                 }
