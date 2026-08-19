@@ -1,7 +1,15 @@
 /build/**
 /bin/**
-/gen_schemas/**
+/test_out/*
+/gen_schemas/*
+/third_party/*
 *.txt
+*.sh
+Quiverfile
+!conanfile.txt
+!setup.sh
+!third_party/CLI11.hpp
+Dockerfile
 
 .vscode/**
 *.code-workspace

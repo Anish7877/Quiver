@@ -1,0 +1,41 @@
+#pragma once
+#include "oci_runtime.hpp"
+
+struct ContainerConfig {
+        std::string container_id{};
+        std::string hostname{};
+        std::string domain_name{};
+        std::string pty_slave_name{};
+        std::string final_filesystem{};
+        int pty_slave_fd{};
+        int control_sock{};
+        pid_t pid{};
+        pid_t net_pid{};
+        bool vfs{};
+        bool rm{false};
+        OCIRuntime::Root rootfs{};
+        OCIRuntime::Terminal terminal{};
+        OCIRuntime::Detach detach{};
+        OCIRuntime::ConsoleSize console_size{};
+        OCIRuntime::User user{};
+        OCIRuntime::UidMapping uid_mapping{};
+        OCIRuntime::GidMapping gid_mapping{};
+        OCIRuntime::Env env{};
+        OCIRuntime::Cwd cwd{};
+        OCIRuntime::Args args{};
+        OCIRuntime::OomScoreAdj oom_score{};
+        OCIRuntime::SchedularOpts schedular_opts{};
+        OCIRuntime::NoNewPrivileges no_new_privileges{};
+        OCIRuntime::Capabilities capabilities{};
+        std::vector<OCIRuntime::RLimit> rlimits{};
+        OCIRuntime::RootfsPropagation rootfs_propagation{};
+        OCIRuntime::Seccomp seccomp{};
+        fs::path cgroups_path{};
+        std::vector<OCIRuntime::Device> devices{};
+        OCIRuntime::Network networks{};
+        std::vector<OCIRuntime::TimeOffset> timeoffsets{};
+        std::vector<OCIRuntime::Namespace> namespaces{};
+        std::vector<OCIRuntime::Mount> mounts{};
+        OCIRuntime::MaskedPaths masked_paths{};
+        OCIRuntime::ReadOnlyPaths read_only_paths{};
+};

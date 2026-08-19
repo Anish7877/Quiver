@@ -1,93 +1,89 @@
-#include "../include/image_manager.hpp"
-#include "../include/database_manager.hpp"
-#include "../include/container_management.hpp"
-#include "../include/utils.hpp"
-#include "../include/command_line_handler.hpp"
-#include <cstdlib>
-#include <functional>
-#include <string>
+#include <ios>
 #include <iostream>
-#include <map>
 #include <vector>
+#include <string>
+#include <span>
+#include <exception>
 
-using CommandHandler = std::function<void(DatabaseManager&, ImageManager&, const std::vector<std::string>&)>;
+#include "command_line_handler.hpp"
+#include "utils.hpp"
 
 int main(int argc, char* argv[]) {
-    try {
-        std::string base_dir{ Utils::get_base_dir() };
-        Utils::ensure_dirs(base_dir);
-
-        std::string db_path{ base_dir + "/quiver.db" };
-        DatabaseManager db{ db_path };
-        if (!db.init_db()) [[unlikely]] {
-            std::cerr << "Failed to initialize the database. Exiting." << '\n';
-            return EXIT_FAILURE;
-        }
-
-        ImageManager img_manager(db);
-        ContainerManager containerManager(db);
-
+        std::ios::sync_with_stdio(false);
+        std::cin.tie(NULL);
         if (argc < 2) {
-            Utils::print_usage();
-            return EXIT_FAILURE;
+                return 1;
         }
+        std::string command = argv[1];
+        std::vector<std::string> args;
 
-        std::map<std::string, CommandHandler> commands{};
-        commands["run"]    = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::run(db, args); };
-        commands["attach"] = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::attach(db, args); };
-        commands["ps"]     = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::ps(db, args); };
-        commands["rm"]     = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::rm(db, args); };
-        commands["start"]  = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::start(db, args); };
-        commands["stop"]   = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::stop(db, args); };
-        commands["image"]  = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::image(db, img, args); };
-        commands["volume"] = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::volume(db, args); };
-        commands["network"] = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::network(db, args); };
-        commands["create"] = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::create(db, args); };
-        commands["pull"]   = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::pull(db, args); };
-        commands["vfs"]   = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ CommandLineHandler::vfs(db, args); };
-        commands["help"]   = [](DatabaseManager& db[[maybe_unused]],
-                                ImageManager& img[[maybe_unused]],
-                                const std::vector<std::string>& args[[maybe_unused]]){ Utils::print_usage(); };
-
-        std::vector<std::string> cmds;
         for (int i = 2; i < argc; ++i) {
-            cmds.emplace_back(argv[i]);
+                args.push_back(argv[i]);
         }
 
-        auto it{commands.find(argv[1])};
-        if (it == commands.end()) {
-            Utils::print_usage();
-            return EXIT_FAILURE;
-        } else {
-            it->second(db, img_manager, cmds);
+        try {
+                pid_t consumer_pid{Utils::spawn_new_consumer()};
+                if (command == "run") {
+                        CommandLineHandler::run(args);
+                } else if (command == "ps") {
+                        CommandLineHandler::ps(args);
+                } else if (command == "rm") {
+                        CommandLineHandler::remove(args);
+                } else if (command == "inspect") {
+                        CommandLineHandler::inspect(args);
+                } else if (command == "pause") {
+                        CommandLineHandler::pause(args);
+                } else if (command == "unpause") {
+                        CommandLineHandler::unpause(args);
+                } else if (command == "attach") {
+                        CommandLineHandler::attach(args);
+                } else if (command == "ports") {
+                        CommandLineHandler::ports(args);
+                } else if (command == "start") {
+                        CommandLineHandler::start(args);
+                } else if (command == "stop") {
+                        CommandLineHandler::stop(args);
+                } else if (command == "prune") {
+                        CommandLineHandler::prune(args);
+                } else if (command == "cp") {
+                        CommandLineHandler::cp(args);
+                } else if (command == "stats") {
+                        CommandLineHandler::stats(args);
+                } else if (command == "generate-systemd") {
+                        CommandLineHandler::generate_systemd(args);
+                } else if (command == "top") {
+                        CommandLineHandler::top(args);
+                } else if (command == "update") {
+                        CommandLineHandler::update(args);
+                } else if (command == "build") {
+                        CommandLineHandler::build(args);
+                } else if (command == "create") {
+                        CommandLineHandler::create(args);
+                } else if (command == "image") {
+                        CommandLineHandler::image(args);
+                } else if (command == "restart") {
+                        CommandLineHandler::restart(args);
+                } else if (command == "mount") {
+                        CommandLineHandler::mount(args);
+                } else if (command == "exec") {
+                        CommandLineHandler::exec(args);
+                } else if (command == "wait") {
+                        CommandLineHandler::wait(args);
+                } else if (command == "kill") {
+                        CommandLineHandler::kill(args);
+                } else if (command == "help") {
+                        Utils::print_usage();
+                } else {
+                        std::cerr << "quiver: '" << command << "' is not a quiver command.\n"
+                                << "See 'quiver help'.\n";
+                        return 1;
+                }
+        } catch (const std::exception& e) {
+                std::cerr << "Error: " << e.what() << "\n";
+                return 1;
+        } catch (...) {
+                std::cerr << "An unknown fatal error occurred.\n";
+                return 1;
         }
-        return EXIT_SUCCESS;
-    } catch (const std::runtime_error& e) {
-        std::cerr << "Database Error: " << e.what() << '\n';
-        return EXIT_FAILURE;
-    }
+        return 0;
 }

@@ -1,28 +1,30 @@
 #pragma once
-#include <vector>
+#include <span>
 #include <string>
 
-extern std::vector<VolumeObject> volumes;
-extern std::vector<std::string> commands;
-extern std::string image_name;
-extern std::string container_id;
-extern std::string container_name;
-extern pid_t container_pid;
-extern bool vfs;
-extern bool no_remove;
-
-class CommandLineHandler {
-public:
-    static void run(DatabaseManager& db, const std::vector<std::string>& cmds);
-    static void attach(DatabaseManager& db, const std::vector<std::string>& cmds);
-    static void ps(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
-    static void rm(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
-    static void image(DatabaseManager& db_manager, ImageManager& img_manager, const std::vector<std::string>& cmds);
-    static void volume(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
-    static void network(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
-    static void create(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
-    static void pull(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
-    static void start(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
-    static void stop(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
-    static void vfs(DatabaseManager& db_manager, const std::vector<std::string>& cmds);
-};
+namespace CommandLineHandler {
+        auto run(std::span<std::string>) -> void;
+        auto ps(std::span<std::string>) -> void;
+        auto remove(std::span<std::string>) -> void;
+        auto inspect(std::span<std::string>) -> void;
+        auto pause(std::span<std::string>) -> void;
+        auto unpause(std::span<std::string>) -> void;
+        auto attach(std::span<std::string>) -> void;
+        auto ports(std::span<std::string>) -> void;
+        auto start(std::span<std::string>) -> void;
+        auto stop(std::span<std::string>) -> void;
+        auto prune(std::span<std::string>) -> void;
+        auto cp(std::span<std::string>) -> void;
+        auto stats(std::span<std::string>) -> void;
+        auto generate_systemd(std::span<std::string>) -> void;
+        auto top(std::span<std::string>) -> void;
+        auto update(std::span<std::string>) -> void;
+        auto build(std::span<std::string>) -> void;
+        auto create(std::span<std::string>) -> void;
+        auto image(std::span<std::string>) -> void;
+        auto restart(std::span<std::string>) -> void;
+        auto mount(std::span<std::string>) -> void;
+        auto exec(std::span<std::string>) -> void;
+        auto wait(std::span<std::string>) -> void;
+        auto kill(std::span<std::string>) -> void;
+}

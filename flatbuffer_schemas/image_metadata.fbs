@@ -1,0 +1,11 @@
+namespace FB;
+
+table ImageMetadata {
+        id           : string;
+        name         : string;
+        tag          : string;
+        size_bytes   : uint64;
+        source       : string;
+}
+
+root_type ImageMetadata;
