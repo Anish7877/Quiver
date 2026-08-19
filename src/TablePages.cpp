@@ -829,7 +829,9 @@ auto ContainersPage::refresh() -> void {
         });
         h->addWidget(copy_btn);
         
-        h->addWidget(create_btn("delete", "Delete", "#f85149", [](const QStringList& ids){ Backend::get_instance().delete_container(ids); }, "Are you sure you want to delete this container?"));
+        if (c.status != "running") {
+            h->addWidget(create_btn("delete", "Delete", "#f85149", [](const QStringList& ids){ Backend::get_instance().delete_container(ids); }, "Are you sure you want to delete this container?"));
+        }
 
         auto* update_btn = new HoverIconButton("", "refresh", "#58a6ff");
         update_btn->setObjectName("RowActionBtn_update");
@@ -855,35 +857,37 @@ auto ContainersPage::refresh() -> void {
         });
         h->addWidget(update_btn);
 
-        auto* attach_btn = new HoverIconButton("", "attach", "#58a6ff");
-        attach_btn->setObjectName("RowActionBtn_attach");
-        attach_btn->setIconSize(QSize(14, 14));
-        attach_btn->setToolTip("Attach to Terminal");
-        attach_btn->setCursor(Qt::PointingHandCursor);
-        attach_btn->setFixedSize(30, 28);
-        connect(attach_btn, &QPushButton::clicked, this, [c]() {
-            QString binPath = Backend::get_instance().get_cli_path();
-            QString workDir = QFileInfo(binPath).absolutePath();
-            QString cmd = QString("alacritty -e sh -c 'cd %1 && ./quiver attach %2; echo \"\n[Process Exited]\"; read -p \"Press Enter to close...\"'")
-                            .arg(workDir, c.id);
-            QProcess::startDetached("sh", QStringList() << "-c" << cmd);
-        });
-        h->addWidget(attach_btn);
+        if (c.status == "running") {
+            auto* attach_btn = new HoverIconButton("", "attach", "#58a6ff");
+            attach_btn->setObjectName("RowActionBtn_attach");
+            attach_btn->setIconSize(QSize(14, 14));
+            attach_btn->setToolTip("Attach to Terminal");
+            attach_btn->setCursor(Qt::PointingHandCursor);
+            attach_btn->setFixedSize(30, 28);
+            connect(attach_btn, &QPushButton::clicked, this, [c]() {
+                QString binPath = Backend::get_instance().get_cli_path();
+                QString workDir = QFileInfo(binPath).absolutePath();
+                QString cmd = QString("alacritty -e sh -c 'cd %1 && ./quiver attach %2; echo \"\n[Process Exited]\"; read -p \"Press Enter to close...\"'")
+                                .arg(workDir, c.id);
+                QProcess::startDetached("sh", QStringList() << "-c" << cmd);
+            });
+            h->addWidget(attach_btn);
 
-        auto* wait_btn = new HoverIconButton("", "wait", "#d2a8ff");
-        wait_btn->setObjectName("RowActionBtn_wait");
-        wait_btn->setIconSize(QSize(14, 14));
-        wait_btn->setToolTip("Wait for Container");
-        wait_btn->setCursor(Qt::PointingHandCursor);
-        wait_btn->setFixedSize(30, 28);
-        connect(wait_btn, &QPushButton::clicked, this, [c]() {
-            QString binPath = Backend::get_instance().get_cli_path();
-            QString workDir = QFileInfo(binPath).absolutePath();
-            QString cmd = QString("alacritty -e sh -c 'cd %1 && ./quiver wait %2; echo \"\n[Wait Completed]\"; read -p \"Press Enter to close...\"'")
-                            .arg(workDir, c.id);
-            QProcess::startDetached("sh", QStringList() << "-c" << cmd);
-        });
-        h->addWidget(wait_btn);
+            auto* wait_btn = new HoverIconButton("", "wait", "#d2a8ff");
+            wait_btn->setObjectName("RowActionBtn_wait");
+            wait_btn->setIconSize(QSize(14, 14));
+            wait_btn->setToolTip("Wait for Container");
+            wait_btn->setCursor(Qt::PointingHandCursor);
+            wait_btn->setFixedSize(30, 28);
+            connect(wait_btn, &QPushButton::clicked, this, [c]() {
+                QString binPath = Backend::get_instance().get_cli_path();
+                QString workDir = QFileInfo(binPath).absolutePath();
+                QString cmd = QString("alacritty -e sh -c 'cd %1 && ./quiver wait %2; echo \"\n[Wait Completed]\"; read -p \"Press Enter to close...\"'")
+                                .arg(workDir, c.id);
+                QProcess::startDetached("sh", QStringList() << "-c" << cmd);
+            });
+            h->addWidget(wait_btn);
+        }
 
         auto* info_btn = new HoverIconButton("", "info", "#a1a1aa");
         info_btn->setObjectName("RowActionBtn_info");

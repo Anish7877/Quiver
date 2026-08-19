@@ -666,14 +666,14 @@ QPushButton#BulkActionBtn_stop:hover, QPushButton#BulkActionBtn_delete:hover, QP
 QPushButton#BulkActionBtn_pause { border: 1px solid #f97316; }
 QPushButton#BulkActionBtn_pause:hover { background: #f97316; color: white; }
 
-QPushButton#RowActionBtn_play, QPushButton#RowActionBtn_stop, QPushButton#RowActionBtn_pause, QPushButton#RowActionBtn_delete, QPushButton#RowActionBtn_attach, QPushButton#RowActionBtn_copy, QPushButton#RowActionBtn_info, QPushButton#RowActionBtn_update, QPushButton#RowActionBtn_power {
+QPushButton#RowActionBtn_play, QPushButton#RowActionBtn_stop, QPushButton#RowActionBtn_pause, QPushButton#RowActionBtn_delete, QPushButton#RowActionBtn_attach, QPushButton#RowActionBtn_copy, QPushButton#RowActionBtn_info, QPushButton#RowActionBtn_update, QPushButton#RowActionBtn_power, QPushButton#RowActionBtn_wait {
     border-radius: 4px;
     background: transparent;
 }
 QPushButton#RowActionBtn_play { border: 1px solid #2ea043; }
 QPushButton#RowActionBtn_play:hover { background: #2ea043; }
 
-QPushButton#RowActionBtn_power { border: 1px solid #2ea043; }
+QPushButton#RowActionBtn_power, QPushButton#RowActionBtn_wait { border: 1px solid #2ea043; }
 QPushButton#RowActionBtn_power:hover { background: #2ea043; }
 
 QPushButton#RowActionBtn_update { border: 1px solid #58a6ff; }
@@ -690,6 +690,9 @@ QPushButton#RowActionBtn_attach:hover { background: #58a6ff; }
 
 QPushButton#RowActionBtn_copy, QPushButton#RowActionBtn_info { border: 1px solid #a1a1aa; }
 QPushButton#RowActionBtn_copy:hover, QPushButton#RowActionBtn_info:hover { background: #a1a1aa; }
+
+QPushButton#RowActionBtn_wait { border: 1px solid #d2a8ff; }
+QPushButton#RowActionBtn_wait:hover { background: #d2a8ff; }
 
 /* =======================================================
    SCROLLBAR (SLEEK DARK MODE)

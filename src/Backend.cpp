@@ -27,6 +27,38 @@ static QString resolve_cli_path() {
     return QDir::cleanPath(dir.absoluteFilePath("Quiver/Quiver/build/release/quiver"));
 }
 
+static void execute_async_action(Backend* backend, const QString& action_name, const QString& cli_path, const QStringList& args) {
+    if (!QFile::exists(cli_path)) {
+        emit backend->cli_error_occurred("CLI not found: " + cli_path);
+        return;
+    }
+    
+    QProcess* process = new QProcess();
+    QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                     backend, [backend, process, action_name](int exitCode, QProcess::ExitStatus exitStatus) {
+        QString output = process->readAllStandardOutput();
+        QString err = process->readAllStandardError();
+        
+        bool has_error = (exitStatus == QProcess::CrashExit) || (exitCode != 0) ||
+                         output.contains("Error:", Qt::CaseInsensitive) || 
+                         output.contains("DbError", Qt::CaseInsensitive) ||
+                         err.contains("Error:", Qt::CaseInsensitive) || 
+                         err.contains("DbError", Qt::CaseInsensitive);
+                         
+        if (has_error) {
+            QString final_err = !err.isEmpty() ? err : output;
+            if (final_err.isEmpty()) final_err = "Action failed.";
+            emit backend->cli_error_occurred(action_name + " failed: " + final_err);
+        } else {
+            emit backend->cli_action_success(action_name + " succeeded.");
+        }
+        process->deleteLater();
+    });
+    
+    qDebug() << "Executing async action:" << action_name << cli_path << args;
+    process->start(cli_path, args);
+}
+
 struct Backend::BackendImpl {
     QNetworkAccessManager network_; 
     std::vector<Container> containers_ {};
@@ -46,7 +78,7 @@ struct Backend::BackendImpl {
     QString last_error_ {};
 };
 
-Backend::Backend() : pimpl_{std::make_unique<BackendImpl>()} {}
+Backend::Backend() : QObject(nullptr), pimpl_{std::make_unique<BackendImpl>()} {}
 Backend::~Backend() = default;
 
 auto Backend::get_instance() -> Backend& {
@@ -86,8 +118,10 @@ auto Backend::get_containers() const -> std::vector<Container> {
     QString err = process.readAllStandardError();
     log_debug("Process finished. Stdout length: " + QString::number(output.length()) + ", Stderr: " + err);
     
-    if (process.exitCode() != 0 || output.contains("Error:", Qt::CaseInsensitive) || output.contains("DbError", Qt::CaseInsensitive)) {
+    if (process.exitCode() != 0 || output.contains("Error:", Qt::CaseInsensitive) || output.contains("DbError", Qt::CaseInsensitive) ||
+        err.contains("Error:", Qt::CaseInsensitive) || err.contains("DbError", Qt::CaseInsensitive)) {
         pimpl_->last_error_ = !err.isEmpty() ? err : output;
+        emit const_cast<Backend*>(this)->cli_error_occurred(pimpl_->last_error_);
         return result;
     }
 
@@ -213,55 +247,22 @@ auto Backend::add_container(const Container& container) -> QProcess* {
 }
 auto Backend::delete_container(const QStringList& container_ids) -> void {
     if (container_ids.isEmpty()) return;
-    QString cli_path = resolve_cli_path();
-    if (QFile::exists(cli_path)) {
-        QProcess* process = new QProcess();
-        QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-                         process, &QObject::deleteLater);
-        QObject::connect(process, &QProcess::readyReadStandardError, [process]() {
-            qDebug() << "quiver rm stderr:" << process->readAllStandardError();
-        });
-        QObject::connect(process, &QProcess::readyReadStandardOutput, [process]() {
-            qDebug() << "quiver rm stdout:" << process->readAllStandardOutput();
-        });
-        qDebug() << "Executing Quiver CLI for delete:" << cli_path << "rm" << container_ids;
-        process->start(cli_path, QStringList() << "rm" << container_ids);
-    } else {
-        qDebug() << "CLI not found at" << cli_path;
-    }
+    execute_async_action(this, "Delete container", resolve_cli_path(), QStringList() << "rm" << container_ids);
 }
 
 auto Backend::pause_container(const QStringList& container_ids) -> void {
     if (container_ids.isEmpty()) return;
-    QString cli_path = resolve_cli_path();
-    if (QFile::exists(cli_path)) {
-        qDebug() << "Executing Quiver CLI for pause:" << cli_path << "pause" << container_ids;
-        QProcess::startDetached(cli_path, QStringList() << "pause" << container_ids);
-    } else {
-        qDebug() << "CLI not found at" << cli_path;
-    }
+    execute_async_action(this, "Pause container", resolve_cli_path(), QStringList() << "pause" << container_ids);
 }
 
 auto Backend::unpause_container(const QStringList& container_ids) -> void {
     if (container_ids.isEmpty()) return;
-    QString cli_path = resolve_cli_path();
-    if (QFile::exists(cli_path)) {
-        qDebug() << "Executing Quiver CLI for unpause:" << cli_path << "unpause" << container_ids;
-        QProcess::startDetached(cli_path, QStringList() << "unpause" << container_ids);
-    } else {
-        qDebug() << "CLI not found at" << cli_path;
-    }
+    execute_async_action(this, "Unpause container", resolve_cli_path(), QStringList() << "unpause" << container_ids);
 }
 
 auto Backend::start_container(const QStringList& container_ids) -> void {
     if (container_ids.isEmpty()) return;
-    QString cli_path = resolve_cli_path();
-    if (QFile::exists(cli_path)) {
-        qDebug() << "Executing Quiver CLI for start:" << cli_path << "start" << container_ids;
-        QProcess::startDetached(cli_path, QStringList() << "start" << container_ids);
-    } else {
-        qDebug() << "CLI not found at" << cli_path;
-    }
+    execute_async_action(this, "Start container", resolve_cli_path(), QStringList() << "start" << container_ids);
 }
 
 auto Backend::update_container(const Container& container) -> void {
@@ -280,43 +281,22 @@ auto Backend::update_container(const Container& container) -> void {
         if (!container.io_weight.isEmpty()) args << "--set-io-weight" << container.io_weight;
         if (!container.io_max.isEmpty()) args << "--set-io-max" << container.io_max;
 
-        qDebug() << "Executing Quiver CLI for update:" << cli_path << args;
-        QProcess::startDetached(cli_path, args);
-    } else {
-        qDebug() << "CLI not found at" << cli_path;
+        execute_async_action(this, "Update container", cli_path, args);
     }
 }
 
 auto Backend::stop_container(const QStringList& container_ids) -> void {
     if (container_ids.isEmpty()) return;
-    QString cli_path = resolve_cli_path();
-    if (QFile::exists(cli_path)) {
-        qDebug() << "Executing Quiver CLI for stop:" << cli_path << "stop" << container_ids;
-        QProcess::startDetached(cli_path, QStringList() << "stop" << container_ids);
-    } else {
-        qDebug() << "CLI not found at" << cli_path;
-    }
+    execute_async_action(this, "Stop container", resolve_cli_path(), QStringList() << "stop" << container_ids);
 }
 
 auto Backend::restart_container(const QString& id) -> void {
-    QString cli_path = resolve_cli_path();
-    if (QFile::exists(cli_path)) {
-        QStringList args;
-        args << "restart" << id;
-        qDebug() << "Executing Quiver CLI for restart:" << cli_path << args;
-        QProcess::startDetached(cli_path, args);
-    }
+    execute_async_action(this, "Restart container", resolve_cli_path(), QStringList() << "restart" << id);
 }
 
 
 auto Backend::prune_containers() -> void {
-    QString cli_path = resolve_cli_path();
-    if (QFile::exists(cli_path)) {
-        qDebug() << "Executing Quiver CLI for prune:" << cli_path << "prune";
-        QProcess::startDetached(cli_path, QStringList() << "prune");
-    } else {
-        qDebug() << "CLI not found at" << cli_path;
-    }
+    execute_async_action(this, "Prune containers", resolve_cli_path(), QStringList() << "prune");
 }
 
 auto Backend::get_images() const -> std::vector<Image> {
@@ -333,6 +313,15 @@ auto Backend::get_images() const -> std::vector<Image> {
     }
 
     QString output = process.readAllStandardOutput();
+    QString err = process.readAllStandardError();
+    
+    if (process.exitCode() != 0 || output.contains("Error:", Qt::CaseInsensitive) || output.contains("DbError", Qt::CaseInsensitive) ||
+        err.contains("Error:", Qt::CaseInsensitive) || err.contains("DbError", Qt::CaseInsensitive)) {
+        pimpl_->last_error_ = !err.isEmpty() ? err : output;
+        emit const_cast<Backend*>(this)->cli_error_occurred(pimpl_->last_error_);
+        return result;
+    }
+
     QStringList lines = output.split('\n', Qt::SkipEmptyParts);
     
     // Skip header line
@@ -365,41 +354,23 @@ auto Backend::get_images() const -> std::vector<Image> {
 auto Backend::add_image(const Image& img) -> void { pimpl_->images_.push_back(img); }
 auto Backend::delete_images(const QStringList& targets) -> void {
     if (targets.isEmpty()) return;
-    QString cli_path = resolve_cli_path();
-    if (QFile::exists(cli_path)) {
-        QStringList args;
-        args << "image" << "rm" << targets;
-        qDebug() << "Executing Quiver CLI for delete images:" << cli_path << args;
-        QProcess::startDetached(cli_path, args);
-    }
+    execute_async_action(this, "Delete images", resolve_cli_path(), QStringList() << "image" << "rm" << targets);
 }
 
 auto Backend::pull_image(const QString& name, const QString& tag) -> void {
-    QString cli_path = resolve_cli_path();
-    if (QFile::exists(cli_path)) {
-        QString target = name;
-        if (!tag.isEmpty()) {
-            target += ":" + tag;
-        }
-        QStringList args;
-        args << "image" << "pull" << target;
-        qDebug() << "Executing Quiver CLI for pull image:" << cli_path << args;
-        QProcess::startDetached(cli_path, args);
+    QString target = name;
+    if (!tag.isEmpty()) {
+        target += ":" + tag;
     }
+    execute_async_action(this, "Pull image", resolve_cli_path(), QStringList() << "image" << "pull" << target);
 }
 
 auto Backend::load_image(const QString& name, const QString& tag, const QString& tar_path) -> void {
-    QString cli_path = resolve_cli_path();
-    if (QFile::exists(cli_path)) {
-        QString target = name;
-        if (!tag.isEmpty()) {
-            target += ":" + tag;
-        }
-        QStringList args;
-        args << "image" << "load" << target << tar_path;
-        qDebug() << "Executing Quiver CLI for load image:" << cli_path << args;
-        QProcess::startDetached(cli_path, args);
+    QString target = name;
+    if (!tag.isEmpty()) {
+        target += ":" + tag;
     }
+    execute_async_action(this, "Load image", resolve_cli_path(), QStringList() << "image" << "load" << target << tar_path);
 }
 
 auto Backend::get_volumes() const -> std::vector<Volume> {
@@ -416,6 +387,15 @@ auto Backend::get_volumes() const -> std::vector<Volume> {
     }
 
     QString output = process.readAllStandardOutput();
+    QString err = process.readAllStandardError();
+    
+    if (process.exitCode() != 0 || output.contains("Error:", Qt::CaseInsensitive) || output.contains("DbError", Qt::CaseInsensitive) ||
+        err.contains("Error:", Qt::CaseInsensitive) || err.contains("DbError", Qt::CaseInsensitive)) {
+        pimpl_->last_error_ = !err.isEmpty() ? err : output;
+        emit const_cast<Backend*>(this)->cli_error_occurred(pimpl_->last_error_);
+        return result;
+    }
+
     QStringList lines = output.split('\n', Qt::SkipEmptyParts);
     
     // Skip header line
@@ -441,28 +421,18 @@ auto Backend::get_volumes() const -> std::vector<Volume> {
     return result;
 }
 auto Backend::add_volume(const QString& container_id, const QString& host_path, const QString& container_path, const QString& mode) -> void {
-    QString cli_path = resolve_cli_path();
-    if (QFile::exists(cli_path)) {
-        QString mapping = host_path + ":" + container_path;
-        if (!mode.isEmpty()) mapping += ":" + mode;
-        QStringList args;
-        args << "mount" << "add" << container_id << mapping;
-        qDebug() << "Executing Quiver CLI for add volume:" << cli_path << args;
-        QProcess::startDetached(cli_path, args);
-    }
+    QString mapping = host_path + ":" + container_path;
+    if (!mode.isEmpty()) mapping += ":" + mode;
+    execute_async_action(this, "Add volume", resolve_cli_path(), QStringList() << "mount" << "add" << container_id << mapping);
 }
 auto Backend::delete_volumes(const QMap<QString, QStringList>& targets) -> void {
-    QString cli_path = resolve_cli_path();
-    if (QFile::exists(cli_path)) {
-        for (auto it = targets.constBegin(); it != targets.constEnd(); ++it) {
-            QString container_id = it.key();
-            QStringList paths = it.value();
-            QStringList args;
-            args << "mount" << "rm" << container_id;
-            args.append(paths);
-            qDebug() << "Executing Quiver CLI for rm volume:" << cli_path << args;
-            QProcess::startDetached(cli_path, args);
-        }
+    for (auto it = targets.constBegin(); it != targets.constEnd(); ++it) {
+        QString container_id = it.key();
+        QStringList paths = it.value();
+        QStringList args;
+        args << "mount" << "rm" << container_id;
+        args.append(paths);
+        execute_async_action(this, "Delete volumes", resolve_cli_path(), args);
     }
 }
 
@@ -489,6 +459,13 @@ auto Backend::get_ports() const -> std::vector<PortMapping> {
     QString err = process.readAllStandardError();
     log_debug("Ports process finished. Stdout length: " + QString::number(output.length()) + ", Stderr: " + err);
     
+    if (process.exitCode() != 0 || output.contains("Error:", Qt::CaseInsensitive) || output.contains("DbError", Qt::CaseInsensitive) ||
+        err.contains("Error:", Qt::CaseInsensitive) || err.contains("DbError", Qt::CaseInsensitive)) {
+        pimpl_->last_error_ = !err.isEmpty() ? err : output;
+        emit const_cast<Backend*>(this)->cli_error_occurred(pimpl_->last_error_);
+        return result;
+    }
+
     QStringList lines = output.split('\n', Qt::SkipEmptyParts);
     log_debug("Ports lines count: " + QString::number(lines.size()));
     

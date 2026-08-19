@@ -7,6 +7,8 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 
+#include <QObject>
+
 namespace Quiver {
 
 struct Container {
@@ -62,7 +64,8 @@ struct Device {
     QString status {};
 };
 
-class Backend {
+class Backend : public QObject {
+    Q_OBJECT
 public:
     Backend();
     ~Backend();
@@ -110,6 +113,10 @@ public:
 private:
     struct BackendImpl;
     std::unique_ptr<BackendImpl> pimpl_ {};
+
+signals:
+    void cli_error_occurred(const QString& error_msg);
+    void cli_action_success(const QString& success_msg);
 };
 
 }
