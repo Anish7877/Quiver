@@ -6,6 +6,7 @@
 #include <QString>
 #include <QStringList>
 #include <QHBoxLayout>
+#include <QJsonObject>
 
 namespace Quiver {
 
@@ -56,7 +57,7 @@ public:
     ~ContainersPage() override;
     
     auto refresh() -> void;
-    auto open_create_dialog() -> void;
+    auto open_create_dialog(const QJsonObject& config = QJsonObject()) -> void;
 
 signals:
     void container_info_requested(const QString& container_id);

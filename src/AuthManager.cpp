@@ -14,6 +14,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QDesktopServices>
+#include <QRandomGenerator>
 #include <QUrl>
 #include <QRegularExpression>
 namespace Quiver {
@@ -35,6 +36,11 @@ auto AuthManager::get_instance() -> AuthManager& {
 bool AuthManager::is_logged_in() const {
     QSettings settings("QuiverApp", "Quiver");
     return !settings.value("jwt_token").toString().isEmpty();
+}
+
+bool AuthManager::is_guest() const {
+    QSettings settings("QuiverApp", "Quiver");
+    return settings.value("jwt_token").toString() == "guest_mode";
 }
 
 QString AuthManager::get_username() const {
@@ -113,6 +119,22 @@ void AuthManager::logout() {
     emit logged_out();
 }
 
+void AuthManager::guest_login() {
+    QSettings settings("QuiverApp", "Quiver");
+    settings.setValue("jwt_token", "guest_mode");
+    
+    // Clear any previous guest's offline configs
+    settings.remove("offline_configs");
+    
+    QString chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    QString randomString;
+    for(int i=0; i<6; ++i) {
+        randomString.append(chars.at(QRandomGenerator::global()->bounded(chars.length())));
+    }
+    settings.setValue("username", "@Guest_" + randomString);
+    settings.setValue("full_name", "Guest User");
+    emit login_success();
+}
 
 void AuthManager::login(const QString& identity, const QString& password) {
     QNetworkRequest request(QUrl(pimpl_->api_base_url_ + "/auth/signin"));
@@ -295,6 +317,23 @@ void AuthManager::upload_avatar(const QString& file_path) {
         return;
     }
 
+    if (is_guest()) {
+        QString cache_dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+        QDir().mkpath(cache_dir);
+        QString cache_path = cache_dir + "/quiver_avatar_guest.jpg";
+        
+        QFile f(cache_path);
+        if (f.open(QIODevice::WriteOnly)) {
+            f.write(compressed_data);
+            f.close();
+        }
+        
+        settings.setValue("avatar_cache_path", cache_path);
+        settings.setValue("avatar_hash", new_hash);
+        emit profile_updated();
+        return;
+    }
+
 
     QNetworkRequest request(QUrl(pimpl_->api_base_url_ + "/profile/avatar"));
     request.setRawHeader("Authorization", ("Bearer " + get_token()).toUtf8());
@@ -379,4 +418,65 @@ void AuthManager::download_and_cache_avatar() {
         emit profile_updated(); 
     });
 }
+
+void AuthManager::save_config(const QJsonObject& config) {
+    if (is_guest()) return; // Guests don't save configs to cloud/locally
+
+    QNetworkRequest request = make_auth_request("/configs");
+    QNetworkReply* reply = pimpl_->network_.post(request, QJsonDocument(config).toJson());
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, config]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            qDebug() << "Failed to save config to cloud, caching locally:" << reply->errorString();
+            QSettings settings("QuiverApp", "Quiver");
+            QString cached = settings.value("offline_configs", "[]").toString();
+            QJsonArray arr = QJsonDocument::fromJson(cached.toUtf8()).array();
+            arr.append(config);
+            settings.setValue("offline_configs", QJsonDocument(arr).toJson(QJsonDocument::Compact));
+        } else {
+            qDebug() << "Config saved to cloud successfully.";
+        }
+    });
+}
+
+void AuthManager::get_configs() {
+    if (is_guest()) {
+        emit configs_loaded(QJsonArray());
+        return;
+    }
+
+    QNetworkRequest request = make_auth_request("/configs");
+    QNetworkReply* reply = pimpl_->network_.get(request);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            qDebug() << "Failed to fetch configs from cloud, returning local cache:" << reply->errorString();
+            QSettings settings("QuiverApp", "Quiver");
+            QString cached = settings.value("offline_configs", "[]").toString();
+            QJsonArray arr = QJsonDocument::fromJson(cached.toUtf8()).array();
+            emit configs_loaded(arr);
+            return;
+        }
+
+        QByteArray raw = reply->readAll();
+        QJsonObject json = QJsonDocument::fromJson(raw).object();
+        QJsonArray configs = json["configs"].toArray();
+        
+        // Push any offline cached configs that haven't been synced yet
+        QSettings settings("QuiverApp", "Quiver");
+        QString cached = settings.value("offline_configs", "[]").toString();
+        QJsonArray offline_arr = QJsonDocument::fromJson(cached.toUtf8()).array();
+        if (!offline_arr.isEmpty()) {
+            for (const auto& val : offline_arr) {
+                save_config(val.toObject()); // Attempt to sync them now
+            }
+            settings.setValue("offline_configs", "[]"); // Clear cache after attempting sync
+        }
+
+        emit configs_loaded(configs);
+    });
+}
+
 } 

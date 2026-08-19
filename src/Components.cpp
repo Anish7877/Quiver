@@ -35,6 +35,11 @@
 #include <QClipboard>
 #include <QPointer>
 #include <QTimer>
+#include <QMenu>
+#include <QJsonObject>
+#include <QJsonArray>
+#include "include/Backend.h"
+#include "include/AuthManager.h"
 
 namespace Quiver {
 
@@ -643,6 +648,7 @@ PullImageDialog::PullImageDialog(QWidget* parent)
             
             QTimer::singleShot(50, this, [this, name, tag]() {
                 Backend::get_instance().pull_image(name, tag);
+
                 QTimer::singleShot(2500, this, [this]() {
                     pimpl_->overlay_->hide();
                     accept();
@@ -2083,4 +2089,40 @@ auto UpdateDialog::get_io_max() const -> QString {
     if (val > 0) return QString::number(val * 1048576ULL);
     return "";
 }
+
+void CreateDialog::set_config(const QJsonObject& config) {
+    if (config.contains("image")) {
+        QString full_image = config["image"].toString();
+        int colon_idx = full_image.indexOf(':');
+        if (colon_idx != -1) {
+            pimpl_->image_input_->setText(full_image.left(colon_idx));
+            pimpl_->tag_input_->setText(full_image.mid(colon_idx + 1));
+        } else {
+            pimpl_->image_input_->setText(full_image);
+            pimpl_->tag_input_->setText("latest");
+        }
+    }
+    if (config.contains("cpu_quota")) {
+        pimpl_->cpu_quota_input_->setText(config["cpu_quota"].toString());
+        pimpl_->cpu_quota_slider_->setValue(config["cpu_quota"].toString().toInt());
+    }
+    if (config.contains("memory_limit")) {
+        // Assume bytes in config, convert back to MB for slider/input
+        quint64 val = config["memory_limit"].toString().toULongLong();
+        if (val > 0) {
+            quint64 mb = val / 1048576ULL;
+            pimpl_->memory_max_input_->setText(QString::number(mb));
+            pimpl_->memory_max_slider_->setValue(mb);
+        }
+    }
+    if (config.contains("ports")) {
+        QJsonArray ports = config["ports"].toArray();
+        for (int i = 0; i < ports.size(); ++i) {
+            auto* item = new QListWidgetItem(ports[i].toString());
+            item->setFlags(item->flags() | Qt::ItemIsEditable);
+            pimpl_->port_list_->addItem(item);
+        }
+    }
+}
+
 } // namespace Quiver

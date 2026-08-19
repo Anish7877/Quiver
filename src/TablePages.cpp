@@ -36,6 +36,8 @@
 #include<QSettings>
 #include <QApplication>
 #include <QClipboard>
+#include <QJsonObject>
+#include <QJsonArray>
 
 namespace Quiver {
 namespace {
@@ -104,6 +106,14 @@ QIcon createActionIcon(const QString& type, const QColor& color) {
             p.setBrush(Qt::NoBrush);
             p.drawArc(3, 3, 10, 10, 120 * 16, 300 * 16);
             p.drawLine(8, 2, 8, 7);
+        } else if (type == "wait") {
+            p.setPen(QPen(drawColor, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(Qt::NoBrush);
+            p.drawLine(4, 2, 12, 2);
+            p.drawLine(4, 14, 12, 14);
+            p.drawPolyline(QPolygonF() << QPointF(5, 2) << QPointF(8, 8) << QPointF(5, 14));
+            p.drawPolyline(QPolygonF() << QPointF(11, 2) << QPointF(8, 8) << QPointF(11, 14));
+            p.drawLine(6, 12, 10, 12);
         }
         return pixmap;
     };
@@ -425,6 +435,7 @@ ContainersPage::ContainersPage(QWidget* parent)
     // Set SELECT column to be very narrow
     pimpl_->page_->table()->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
     pimpl_->page_->table()->setColumnWidth(0, 60);
+    pimpl_->page_->set_action_column_width(330);
 
 
     pimpl_->bulk_widget_ = new QWidget;
@@ -588,8 +599,11 @@ ContainersPage::ContainersPage(QWidget* parent)
     QTimer::singleShot(100, this, &ContainersPage::refresh);
 }
 
-auto ContainersPage::open_create_dialog() -> void {
+auto ContainersPage::open_create_dialog(const QJsonObject& config) -> void {
     CreateDialog d(this);
+    if (!config.isEmpty()) {
+        d.set_config(config);
+    }
     if (d.exec() == QDialog::Accepted) {
         QString name { d.get_container_name() };
         QString img  { d.get_container_image() };
@@ -638,7 +652,23 @@ auto ContainersPage::open_create_dialog() -> void {
         connect(process, &QProcess::readyReadStandardError, this, [process, read_output]() { read_output(process); });
         connect(process, &QProcess::readyReadStandardOutput, this, [process, read_output]() { read_output(process); });
         
-        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this]() {
+        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this, process, c]() {
+            if (process->exitCode() == 0) {
+                QJsonObject config;
+                config["type"] = "container";
+                config["image"] = c.image;
+                if (c.cpu_quota > 0) config["cpu_quota"] = QString::number(c.cpu_quota);
+                if (!c.memory_max.isEmpty()) config["memory_limit"] = c.memory_max;
+                
+                QJsonArray portsArr;
+                for (const auto& p : c.ports) {
+                    portsArr.append(p);
+                }
+                if (!portsArr.isEmpty()) config["ports"] = portsArr;
+
+                AuthManager::get_instance().save_config(config);
+            }
+
             pimpl_->progress_bar_->hide();
             pimpl_->progress_bar_->setRange(0, 100);
             pimpl_->loading_text_->setText("Processing...");
@@ -839,6 +869,21 @@ auto ContainersPage::refresh() -> void {
             QProcess::startDetached("sh", QStringList() << "-c" << cmd);
         });
         h->addWidget(attach_btn);
+
+        auto* wait_btn = new HoverIconButton("", "wait", "#d2a8ff");
+        wait_btn->setObjectName("RowActionBtn_wait");
+        wait_btn->setIconSize(QSize(14, 14));
+        wait_btn->setToolTip("Wait for Container");
+        wait_btn->setCursor(Qt::PointingHandCursor);
+        wait_btn->setFixedSize(30, 28);
+        connect(wait_btn, &QPushButton::clicked, this, [c]() {
+            QString binPath = Backend::get_instance().get_cli_path();
+            QString workDir = QFileInfo(binPath).absolutePath();
+            QString cmd = QString("alacritty -e sh -c 'cd %1 && ./quiver wait %2; echo \"\n[Wait Completed]\"; read -p \"Press Enter to close...\"'")
+                            .arg(workDir, c.id);
+            QProcess::startDetached("sh", QStringList() << "-c" << cmd);
+        });
+        h->addWidget(wait_btn);
 
         auto* info_btn = new HoverIconButton("", "info", "#a1a1aa");
         info_btn->setObjectName("RowActionBtn_info");

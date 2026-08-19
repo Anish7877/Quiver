@@ -473,10 +473,19 @@ auto* logo_lbl = new QLabel;
     connect(btn_browser_login, &QPushButton::clicked, this, []() {
         AuthManager::get_instance().start_browser_login();
     });
+
+    auto* btn_guest = new QPushButton("Continue as Guest");
+    btn_guest->setStyleSheet("color: #71717A; background: transparent; border: 1px solid #3F3F46; border-radius: 4px;");
+    btn_guest->setFixedSize(250, 45);
+    btn_guest->setCursor(Qt::PointingHandCursor);
+    connect(btn_guest, &QPushButton::clicked, this, []() {
+        AuthManager::get_instance().guest_login();
+    });
     
     auth_layout->addWidget(auth_title, 0, Qt::AlignCenter);
     auth_layout->addWidget(auth_subtitle, 0, Qt::AlignCenter);
     auth_layout->addWidget(btn_browser_login, 0, Qt::AlignCenter);
+    auth_layout->addWidget(btn_guest, 0, Qt::AlignCenter);
     
    
     
@@ -505,6 +514,17 @@ auto* logo_lbl = new QLabel;
         if (pimpl_->settings_btn_) pimpl_->settings_btn_->setChecked(false);
         switch_tab(1);
         pimpl_->containers_page_->open_create_dialog();
+    });
+
+    connect(pimpl_->dashboard_page_, &DashboardPage::open_create_container_with_config, this, [this](const QJsonObject& config) {
+        if (pimpl_->nav_group_) {
+            if (auto* btn = pimpl_->nav_group_->button(1)) {
+                btn->setChecked(true);
+            }
+        }
+        if (pimpl_->settings_btn_) pimpl_->settings_btn_->setChecked(false);
+        switch_tab(1);
+        pimpl_->containers_page_->open_create_dialog(config);
     });
     
     pimpl_->images_page_ = new ImagesPage;

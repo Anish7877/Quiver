@@ -30,6 +30,7 @@
 #include <QRegularExpression>
 #include <QFileSystemWatcher>
 #include "include/Backend.h"
+#include "include/AuthManager.h"
 
 namespace Quiver {
 
@@ -54,6 +55,8 @@ struct DashboardPage::Impl {
     StatCard* active_volumes_card_{};
     QWidget* graphs_pane_{};
     QWidget* no_data_widget_{};
+    QWidget* quick_launch_pane_{};
+    QHBoxLayout* quick_launch_layout_{};
 };
 static auto create_cpu_cores_panel(const QString& title) -> QFrame* {
     auto* panel = new QFrame;
@@ -259,6 +262,24 @@ DashboardPage::DashboardPage(QWidget* parent)
     stats_row->addWidget(pimpl_->active_volumes_card_);
     scroll_layout->addLayout(stats_row);
     
+    // Quick Launch Section
+    pimpl_->quick_launch_pane_ = new QWidget;
+    auto* ql_vbox = new QVBoxLayout(pimpl_->quick_launch_pane_);
+    ql_vbox->setContentsMargins(0, 10, 0, 10);
+    ql_vbox->setSpacing(10);
+    auto* ql_title = new QLabel("Quick Launch Templates");
+    ql_title->setObjectName("DashPanelTitle");
+    ql_title->setStyleSheet("color: #A1A1AA; font-size: 14px; font-weight: bold;");
+    ql_vbox->addWidget(ql_title);
+    
+    pimpl_->quick_launch_layout_ = new QHBoxLayout;
+    pimpl_->quick_launch_layout_->setSpacing(15);
+    pimpl_->quick_launch_layout_->setAlignment(Qt::AlignLeft);
+    ql_vbox->addLayout(pimpl_->quick_launch_layout_);
+    
+    scroll_layout->addWidget(pimpl_->quick_launch_pane_);
+    pimpl_->quick_launch_pane_->hide();
+
     auto* split_layout = new QHBoxLayout;
     split_layout->setSpacing(24);
 
@@ -581,6 +602,73 @@ DashboardPage::DashboardPage(QWidget* parent)
         }));
     });
     pimpl_->stats_timer_->start(2000);
+
+    connect(&AuthManager::get_instance(), &AuthManager::configs_loaded, this, &DashboardPage::on_configs_loaded);
+    connect(&AuthManager::get_instance(), &AuthManager::login_success, this, []() {
+        AuthManager::get_instance().get_configs();
+    });
+    AuthManager::get_instance().get_configs();
+}
+
+void DashboardPage::on_configs_loaded(const QJsonArray& configs) {
+    if (AuthManager::get_instance().is_guest()) {
+        pimpl_->quick_launch_pane_->hide();
+        return;
+    }
+    
+    // Clear old templates
+    QLayoutItem* item;
+    while ((item = pimpl_->quick_launch_layout_->takeAt(0)) != nullptr) {
+        if (item->widget()) item->widget()->deleteLater();
+        delete item;
+    }
+    
+    if (configs.isEmpty()) {
+        pimpl_->quick_launch_pane_->hide();
+        return;
+    }
+    
+    pimpl_->quick_launch_pane_->show();
+    
+    for (int i = 0; i < configs.size(); ++i) {
+        QJsonObject config = configs[i].toObject();
+        QString type = config["type"].toString();
+        
+        if (type == "image") continue;
+        
+        QString image = config["image"].toString();
+        
+        auto* btn = new QPushButton;
+        btn->setFixedSize(220, 90);
+        btn->setCursor(Qt::PointingHandCursor);
+        btn->setStyleSheet(
+            "QPushButton { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #18181B, stop:1 #27272A); "
+            "border: 1px solid #3F3F46; border-radius: 12px; text-align: left; }"
+            "QPushButton:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #27272A, stop:1 #3F3F46); border-color: #F97316; }"
+        );
+        
+        auto* layout = new QVBoxLayout(btn);
+        layout->setContentsMargins(15, 15, 15, 15);
+        layout->setSpacing(6);
+        
+        auto* lbl_type = new QLabel("CONTAINER");
+        lbl_type->setStyleSheet("color: #F97316; font-size: 11px; font-weight: 800; letter-spacing: 1px;");
+        lbl_type->setAttribute(Qt::WA_TransparentForMouseEvents);
+        
+        auto* lbl_img = new QLabel(image);
+        lbl_img->setStyleSheet("color: #FAFAFA; font-size: 14px; font-weight: bold;");
+        lbl_img->setAttribute(Qt::WA_TransparentForMouseEvents);
+        
+        layout->addWidget(lbl_type);
+        layout->addWidget(lbl_img);
+        layout->addStretch();
+        
+        connect(btn, &QPushButton::clicked, this, [this, config]() {
+            emit open_create_container_with_config(config);
+        });
+        
+        pimpl_->quick_launch_layout_->addWidget(btn);
+    }
 }
 
 DashboardPage::~DashboardPage() = default;

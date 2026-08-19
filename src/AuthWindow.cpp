@@ -103,6 +103,13 @@ AuthWindow::AuthWindow(QWidget* parent)
     si_layout->addWidget(btn_login);
     si_layout->addLayout(box_no_acc);
     
+    auto* btn_guest = new QPushButton("Continue as Guest");
+    btn_guest->setStyleSheet("color: #71717A; background: transparent; border: 1px solid #3F3F46; border-radius: 4px;");
+    btn_guest->setFixedHeight(36);
+    btn_guest->setCursor(Qt::PointingHandCursor);
+    connect(btn_guest, &QPushButton::clicked, this, []() { AuthManager::get_instance().guest_login(); });
+    si_layout->addWidget(btn_guest);
+    
     pimpl_->stack_->addWidget(page_signin);
 
  

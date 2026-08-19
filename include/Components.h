@@ -7,6 +7,7 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QDialog>
+#include <QJsonObject>
 #include <QLineEdit>
 #include <QSlider>
 #include <QComboBox>
@@ -117,6 +118,8 @@ class CreateDialog : public QDialog {
 public:
     explicit CreateDialog(QWidget* parent = nullptr);
     ~CreateDialog() override;
+
+    void set_config(const QJsonObject& config);
 
     auto get_container_name() const -> QString;
     auto get_container_image() const -> QString;
