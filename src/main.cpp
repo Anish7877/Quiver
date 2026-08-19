@@ -71,9 +71,11 @@ int main(int argc, char* argv[]) {
                         CommandLineHandler::wait(args);
                 } else if (command == "kill") {
                         CommandLineHandler::kill(args);
+                } else if (command == "help") {
+                        Utils::print_usage();
                 } else {
                         std::cerr << "quiver: '" << command << "' is not a quiver command.\n"
-                                << "See 'quiver --help'.\n";
+                                << "See 'quiver help'.\n";
                         return 1;
                 }
         } catch (const std::exception& e) {
