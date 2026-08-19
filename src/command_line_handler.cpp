@@ -1184,6 +1184,13 @@ auto CommandLineHandler::generate_systemd(std::span<std::string> args) -> void {
                 quiver_bin = (count != -1) ? std::string(exe_path, count) : "/usr/local/bin/quiver";
         }
 
+
+        uid_t uid{getuid()};
+        struct passwd* pw{getpwuid(uid)};
+        std::string username{pw ? pw->pw_name : "root"};
+        std::string homedir{pw ? pw->pw_dir : "/root"};
+        std::string uid_str{std::to_string(uid)};
+
         std::string unit_file = std::format(
                         R"([Unit]
 Description=Quiver Container: {0}
@@ -1192,23 +1199,30 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
+# Dynamically injected User Context and Environment Variables
+User={3}
+Group={3}
+Environment="HOME={4}"
+Environment="XDG_RUNTIME_DIR=/run/user/{5}"
+Environment="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{5}/bus"
+
 Type=forking
 Restart=always
 RestartSec=2
 
-# Container Lifecycle Commands
-ExecStart={1} start {2}
-ExecStop={1} stop {2}
-
-# Optional Host-level Sandboxing for the Quiver CLI invocation
-NoNewPrivileges=yes
+# Container Lifecycle Commands (Quotes added to handle paths with spaces safely)
+ExecStart="{1}" start {2}
+ExecStop="{1}" stop {2}
 
 [Install]
 WantedBy=multi-user.target
 )",
                 container->name,
                 quiver_bin,
-                container->config.container_id
+                container->config.container_id,
+                username,
+                homedir,
+                uid_str
                         );
 
         std::cout << unit_file;
@@ -1235,7 +1249,7 @@ auto CommandLineHandler::top(std::span<std::string> args) -> void {
         };
         auto target_id{args[0]};
         auto container{container_db_manager.get_container(target_id)};
-        if (!container || container->status != "running" || container->status != "paused") {
+        if (!container || (container->status != "running" && container->status == "paused")) {
                 std::cerr << std::format("Error: Container '{}' not found or is not running or paused.\n", target_id);
                 return;
         }
