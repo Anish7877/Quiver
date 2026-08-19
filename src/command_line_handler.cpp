@@ -824,7 +824,11 @@ auto CommandLineHandler::start(std::span<std::string> args) -> void {
         }
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(arg)};
-                if (container && container->status != "running") {
+                if (container && container->status != "running" && container->status != "paused") {
+                        if (!fs::exists(Utils::get_image_path(container->image) / "config.json")) [[unlikely]] {
+                                std::cerr << std::format("Image '{}' doesn't exist please pull image first.\n", container->image);
+                                continue;
+                        }
                         ContainerMonitor::Limits limits{};
                         limits.cpu_quota = container->cpu_quota;
                         limits.cpu_period = container->cpu_period;
@@ -840,7 +844,7 @@ auto CommandLineHandler::start(std::span<std::string> args) -> void {
                         container_monitor.invoke_container();
                 }
                 else {
-                        std::cerr << std::format("Error: Container '{}' not found or Container already running\n", arg);
+                        std::cerr << std::format("Error: Container '{}' not found or Container already running or paused\n", arg);
                 }
         }
 }
@@ -877,7 +881,7 @@ auto CommandLineHandler::stop(std::span<std::string> args) -> void {
 
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(arg)};
-                if (container && container->status == "running") {
+                if (container && (container->status == "running" || container->status == "paused")) {
                         auto cgroup_base_opt{get_cgroup_path(container->pid)};
                         if (cgroup_base_opt) {
                                 fs::path cg_kill_path{cgroup_base_opt.value() / "cgroup.kill"};
@@ -915,7 +919,7 @@ auto CommandLineHandler::stop(std::span<std::string> args) -> void {
                         }
                 }
                 else {
-                        std::cerr << std::format("Error: Container '{}' not found or Container is not running\n", arg);
+                        std::cerr << std::format("Error: Container '{}' not found or Container is not running or paused\n", arg);
                 }
         }
 }
@@ -930,7 +934,7 @@ auto CommandLineHandler::prune(std::span<std::string> args) -> void {
         }
         auto containers{container_db_manager.get_all_container()};
         for (const auto& container : containers) {
-                if (container.status != "running") {
+                if (container.status != "running" && container.status != "paused") {
                         container_db_manager.remove_container(container.config.container_id);
                         try {
                                 Utils::remove_directory(std::format("{}/filesystems/quiver_{}", Utils::get_base_dir().string(),
@@ -1231,8 +1235,8 @@ auto CommandLineHandler::top(std::span<std::string> args) -> void {
         };
         auto target_id{args[0]};
         auto container{container_db_manager.get_container(target_id)};
-        if (!container || container->status != "running") {
-                std::cerr << std::format("Error: Container '{}' not found or is not running.\n", target_id);
+        if (!container || container->status != "running" || container->status != "paused") {
+                std::cerr << std::format("Error: Container '{}' not found or is not running or paused.\n", target_id);
                 return;
         }
         auto get_cgroup_path{[](pid_t pid) -> std::optional<std::string> {
@@ -1410,7 +1414,7 @@ auto CommandLineHandler::update(std::span<std::string> args) -> void {
                 return;
         }
 
-        if (container->status != "running") {
+        if (container->status != "running" || container->status != "paused") {
                 std::cerr << std::format("Error: Cannot update limits. Container '{}' is not running.\n", target_id);
                 return;
         }
@@ -1835,6 +1839,28 @@ auto CommandLineHandler::image(std::span<std::string> args) -> void {
                         auto image{image_db_manager.get_image(target)};
 
                         if (image) {
+                                auto& container_db_manager{ContainerDbManager::get_instance()};
+                                container_db_manager.init();
+                                auto containers{container_db_manager.get_all_container()};
+                                bool image_in_use{false};
+                                std::string image_full_name{std::format("{}:{}", image->name, image->tag)};
+                                for (const auto& container : containers) {
+                                        if (container.status == "running" || container.status == "paused") {
+                                                if (container.image == image_full_name ||
+                                                    container.image == image->name ||
+                                                    container.image == image->id ||
+                                                    container.image == target) {
+                                                        image_in_use = true;
+                                                        break;
+                                                }
+                                        }
+                                }
+
+                                if (image_in_use) {
+                                        std::cerr << std::format("Error: Image '{}' is in use by a running or paused container and cannot be deleted.\n", target);
+                                        continue;
+                                }
+
                                 fs::path dir{Utils::get_image_path(std::format("{}_{}", image->name, image->tag))};
                                 try {
                                         if (fs::exists(dir)) {
@@ -2136,8 +2162,8 @@ auto CommandLineHandler::mount(std::span<std::string> args) -> void {
                         return;
                 }
 
-                if (container->status == "running") {
-                        std::cerr << std::format("Warning: Container '{}' is running. Volume changes will take effect on next restart.\n", target_id);
+                if (container->status == "running" || container->status == "paused") {
+                        std::cerr << std::format("Warning: Container '{}' is running or paused. Volume changes will take effect on next restart.\n", target_id);
                 }
 
                 for (size_t i{2}; i < args.size(); ++i) {
@@ -2185,8 +2211,8 @@ auto CommandLineHandler::mount(std::span<std::string> args) -> void {
                         std::cerr << std::format("Error: Container '{}' not found.\n", target_id);
                         return;
                 }
-                if (container->status == "running") {
-                        std::cerr << std::format("Warning: Container '{}' is running. Volume changes will take effect on next restart.\n", target_id);
+                if (container->status == "running" || container->status == "paused") {
+                        std::cerr << std::format("Warning: Container '{}' is running or paused. Volume changes will take effect on next restart.\n", target_id);
                 }
                 bool modified{false};
 

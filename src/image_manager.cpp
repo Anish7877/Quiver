@@ -27,10 +27,10 @@ static constexpr std::size_t  MAX_TOKEN_RESPONSE_SIZE {   64 * 1024};
 static constexpr std::size_t  MAX_MANIFEST_SIZE       {    1 * 1024 * 1024};
 static constexpr std::size_t  MAX_CONFIG_SIZE         {    1 * 1024 * 1024};
 
-static constexpr std::int32_t TIMEOUT_AUTH_MS         {    5'000};
-static constexpr std::int32_t TIMEOUT_MANIFEST_MS     {    5'000};
-static constexpr std::int32_t TIMEOUT_CONFIG_MS       {   10'000};
-static constexpr std::int32_t TIMEOUT_LAYER_MS        {  300'000};
+static constexpr std::int32_t TIMEOUT_AUTH_MS         {   30'000};
+static constexpr std::int32_t TIMEOUT_MANIFEST_MS     {   30'000};
+static constexpr std::int32_t TIMEOUT_CONFIG_MS       {   30'000};
+static constexpr std::int32_t TIMEOUT_LAYER_MS        {  600'000};
 [[nodiscard]] static auto blake3_hex(std::string_view data) -> std::string {
         blake3_hasher hasher{};
         blake3_hasher_init(&hasher);
