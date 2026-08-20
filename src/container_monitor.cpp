@@ -338,9 +338,19 @@ auto ContainerMonitor::run_container_child() -> void {
                 _exit(EXIT_FAILURE);
         }
 
+        bool joined_user_ns{false};
+        for (const auto& [path, namespace_str] : m_container_config.namespaces) {
+                if (namespace_str == "user" && !path.empty()) joined_user_ns = true;
+        }
+
         int flags{resolve_namespaces()};
-        if (unshare(CLONE_NEWUSER | flags) == -1) [[unlikely]] {
-                log_event(std::format("[{}] [{}] Container Runtime Error: unshare(CLONE_NEWUSER) failed.\n",
+        int unshare_flags = flags;
+        if (!joined_user_ns) {
+                unshare_flags |= CLONE_NEWUSER;
+        }
+
+        if (unshare(unshare_flags) == -1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: unshare failed.\n",
                                         chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
                 _exit(EXIT_FAILURE);
         }
@@ -390,12 +400,19 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                 close(m_container_to_monitor_fd[0]);
                 _exit(EXIT_FAILURE);
         }
-        try {
-                setup_usernamespace();
+        bool joined_user_ns{false};
+        for (const auto& [path, namespace_str] : m_container_config.namespaces) {
+                if (namespace_str == "user" && !path.empty()) joined_user_ns = true;
         }
-        catch (const std::exception& e) {
-                std::cerr << "\n[Monitor Error] User Namespace mapping failed: " << e.what() << "\n";
-                _exit(EXIT_FAILURE);
+
+        if (!joined_user_ns) {
+                try {
+                        setup_usernamespace();
+                }
+                catch (const std::exception& e) {
+                        std::cerr << "\n[Monitor Error] User Namespace mapping failed: " << e.what() << "\n";
+                        _exit(EXIT_FAILURE);
+                }
         }
         try {
                 m_cgroups_manager = CGroupsManagerCreator::create_cgourps_manager(std::to_string(m_container_pid),

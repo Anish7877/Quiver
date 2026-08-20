@@ -29,6 +29,7 @@ class ImageManager : public Singleton<ImageManager> {
         // Interface
         auto init()  -> void;
         auto pull(const std::string& image_name, std::string& out_path, std::string& error) -> json;
+        auto push(const std::string& image_name, std::string& error) -> bool;
         auto remove(const std::string& image_name, std::string& error) -> bool;
 
         // --- Commented out: DatabaseManager base and job queue dispatch ---
@@ -42,7 +43,7 @@ class ImageManager : public Singleton<ImageManager> {
         // auto process_delete_job(const DatabaseJobData& job_data, Status& stat)                        -> void;
 
         // Registry & Layer Management
-        auto get_auth_token  (const std::string& repo, std::string& out_token, std::string& error) -> bool;
+        auto get_auth_token  (const std::string& repo, const std::string& scope, std::string& out_token, std::string& error) -> bool;
 
         // Updated signature: returns media_type to handle multi-arch lists
         auto fetch_manifest  (const std::string& repo, const std::string& tag,
@@ -56,6 +57,14 @@ class ImageManager : public Singleton<ImageManager> {
         auto download_layer(const std::string& repo, const std::string& digest,
                         const std::string& token, const fs::path& dest,
                         std::size_t expected_size) -> std::string;
+
+        auto upload_blob(const std::string& repo, const std::string& digest,
+                        const std::string& token, const fs::path& filepath,
+                        std::string& error) -> bool;
+
+        auto upload_manifest(const std::string& repo, const std::string& tag,
+                        const std::string& token, const std::string& manifest_json,
+                        const std::string& media_type, std::string& error) -> bool;
 
         auto extract_layer(const fs::path& tarball_path, const fs::path& destination,
                         std::string& error) -> bool;

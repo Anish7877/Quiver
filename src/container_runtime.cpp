@@ -201,8 +201,8 @@ auto ContainerRuntime::execute_container_init() -> void {
                 _exit(EXIT_FAILURE);
         }
 
-        if (setuid(m_container_config.user.uid) == -1) [[unlikely]] {
-                log_event(std::format("[{}] [{}] Container Runtime Error: final setuid failed before exec.\n",
+        if (setgroups(m_container_config.user.additional_gids.size(), m_container_config.user.additional_gids.data()) == -1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: final setgroups failed before exec.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
@@ -211,8 +211,8 @@ auto ContainerRuntime::execute_container_init() -> void {
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
-        if (setgroups(m_container_config.user.additional_gids.size(), m_container_config.user.additional_gids.data()) == -1) [[unlikely]] {
-                log_event(std::format("[{}] [{}] Container Runtime Error: final setgroups failed before exec.\n",
+        if (setuid(m_container_config.user.uid) == -1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: final setuid failed before exec.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }

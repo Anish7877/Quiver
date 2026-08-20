@@ -230,6 +230,15 @@ static auto render_progress(const std::vector<std::string>& order, std::size_t p
 auto ImageManager::init() -> void {
         m_images_root = Utils::get_base_dir();
         Utils::ensure_dir(m_images_root);
+        const char* home_dir{std::getenv("HOME")};
+        if (home_dir == nullptr) {
+                struct passwd* pw = getpwuid(getuid());
+                if (pw) home_dir = pw->pw_dir;
+        }
+        if (home_dir) {
+                fs::path raw_images = fs::path(home_dir) / ".quiver" / "raw_images";
+                Utils::ensure_dir(raw_images);
+        }
 }
 
 auto ImageManager::pull(const std::string& image_name, std::string& out_path, std::string& error) -> json {
@@ -242,7 +251,7 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
         }
 
         std::string token{};
-        if (!get_auth_token(repo, token, error)) [[unlikely]] return {};
+        if (!get_auth_token(repo, "pull", token, error)) [[unlikely]] return {};
 
         json manifest{};
         std::string media_type{};
@@ -291,19 +300,24 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
                 return {};
         }
 
-        fs::path temp_layout_dir{std::format("/tmp/quiver_pull_{}", getpid())};
+        const char* home_dir{std::getenv("HOME")};
+        if (home_dir == nullptr) {
+                struct passwd* pw = getpwuid(getuid());
+                if (pw) home_dir = pw->pw_dir;
+        }
+        std::string safe_repo = repo;
+        std::replace(safe_repo.begin(), safe_repo.end(), '/', '_');
+        std::string safe_tag = tag;
+        std::replace(safe_tag.begin(), safe_tag.end(), ':', '_');
+        fs::path temp_layout_dir = fs::path(home_dir) / ".quiver" / "raw_images" / std::format("{}_{}", safe_repo, safe_tag);
+
         std::error_code ec{};
         fs::create_directories(temp_layout_dir / "blobs" / "sha256", ec);
         if (ec) {
-                error = std::format("Failed to create temp layout dir: {}", ec.message());
+                error = std::format("Failed to create layout dir: {}", ec.message());
                 secure_zero(token);
                 return {};
         }
-
-        struct TempCleanup {
-                fs::path path;
-                ~TempCleanup() { std::error_code e{}; fs::remove_all(path, e); }
-        } layout_cleanup{temp_layout_dir};
 
         fs::path blobs_root{temp_layout_dir / "blobs"};
 
@@ -371,7 +385,13 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
                 return {};
         }
         {
-                std::ofstream cfg_out(blobs_root / "sha256" / config_hash, std::ios::binary);
+                auto config_path = blobs_root / "sha256" / config_hash;
+                if (fs::exists(config_path)) {
+                        std::error_code ec;
+                        fs::permissions(config_path, fs::perms::owner_write, fs::perm_options::add, ec);
+                        fs::remove(config_path, ec);
+                }
+                std::ofstream cfg_out(config_path, std::ios::binary);
                 if (!cfg_out.is_open()) {
                         error = "Failed to write config blob to temp layout";
                         return {};
@@ -380,6 +400,15 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
         }
         manifest["config"]["digest"] = "sha256:" + config_hash;
         manifest["config"]["size"]   = config_bytes.size();
+        manifest["mediaType"] = "application/vnd.oci.image.manifest.v1+json";
+        manifest["config"]["mediaType"] = "application/vnd.oci.image.config.v1+json";
+        if (manifest.contains("layers") && manifest["layers"].is_array()) {
+                for (auto& l : manifest["layers"]) {
+                        if (l.value("mediaType", "") == "application/vnd.docker.image.rootfs.diff.tar.gzip") {
+                                l["mediaType"] = "application/vnd.oci.image.layer.v1.tar+gzip";
+                        }
+                }
+        }
 
         const std::string manifest_bytes{manifest.dump(4)};
         const std::string manifest_hash{Utils::sha256(manifest_bytes)};
@@ -388,7 +417,13 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
                 return {};
         }
         {
-                std::ofstream man_out(blobs_root / "sha256" / manifest_hash, std::ios::binary);
+                auto man_path = blobs_root / "sha256" / manifest_hash;
+                if (fs::exists(man_path)) {
+                        std::error_code ec;
+                        fs::permissions(man_path, fs::perms::owner_write, fs::perm_options::add, ec);
+                        fs::remove(man_path, ec);
+                }
+                std::ofstream man_out(man_path, std::ios::binary);
                 if (!man_out.is_open()) {
                         error = "Failed to write manifest blob to temp layout";
                         return {};
@@ -452,10 +487,20 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
         return manifest;
 }
 
-auto ImageManager::get_auth_token(const std::string& repo, std::string& out_token, std::string& error) -> bool {
-        auto url{std::format("https://auth.docker.io/token?service=registry.docker.io&scope=repository:{}:pull", repo)};
+auto ImageManager::get_auth_token(const std::string& repo, const std::string& scope, std::string& out_token, std::string& error) -> bool {
+        auto url{std::format("https://auth.docker.io/token?service=registry.docker.io&scope=repository:{}:{}", repo, scope)};
 
-        cpr::Response r{cpr::Get(cpr::Url{url}, cpr::Timeout{TIMEOUT_AUTH_MS})};
+        cpr::Session session;
+        session.SetUrl(cpr::Url{url});
+        session.SetTimeout(cpr::Timeout{TIMEOUT_AUTH_MS});
+
+        const char* q_user = std::getenv("QUIVER_USERNAME");
+        const char* q_pass = std::getenv("QUIVER_PASSWORD");
+        if (q_user != nullptr && q_pass != nullptr) {
+                session.SetAuth(cpr::Authentication{q_user, q_pass, cpr::AuthMode::BASIC});
+        }
+
+        cpr::Response r = session.Get();
 
         if (r.status_code != 200) [[unlikely]] {
                 error = std::format("Auth Error: HTTP {} - {} - Registry responded: {}", r.status_code, r.error.message, r.text);
@@ -555,7 +600,7 @@ auto ImageManager::download_layer(const std::string& repo, const std::string& di
                 ~ProgressFinisher() { if (p) { p->failed.store(!*ok); p->done.store(true); } }
         } finisher{progress, &succeeded};
 
-        if (!is_valid_digest(digest)) [[unlikely]] return "";
+        if (!is_valid_digest(digest)) [[unlikely]] { std::cerr << "Invalid digest: " << digest << "\n"; return ""; }
 
         const auto colon{digest.find(':')};
         const std::string algo{digest.substr(0, colon)};
@@ -571,10 +616,24 @@ auto ImageManager::download_layer(const std::string& repo, const std::string& di
 
         const fs::path canonical_dest{fs::weakly_canonical(dest)};
         const fs::path canonical_file{fs::weakly_canonical(file_path)};
-        if (!canonical_file.string().starts_with(canonical_dest.string())) [[unlikely]] return "";
+        if (!canonical_file.string().starts_with(canonical_dest.string())) [[unlikely]] { std::cerr << "Path traversal blocked\n"; return ""; }
+
+        if (fs::exists(file_path)) {
+                std::error_code ec;
+                if (fs::file_size(file_path, ec) == expected_size) {
+                        if (Utils::sha256_file(file_path) == digest) {
+                                succeeded = true;
+                                if (progress) progress->downloaded.store(expected_size);
+                                return digest;
+                        }
+                }
+                // Invalid or partial file, make writable and remove it
+                fs::permissions(file_path, fs::perms::owner_write, fs::perm_options::add, ec);
+                fs::remove(file_path, ec);
+        }
 
         std::ofstream ofs(file_path, std::ios::binary);
-        if (!ofs.is_open()) [[unlikely]] return "";
+        if (!ofs.is_open()) [[unlikely]] { std::cerr << "Cannot open " << file_path << "\n"; return ""; }
 
         cpr::Response r{cpr::Get(
                         cpr::Url{url},
@@ -648,6 +707,195 @@ auto ImageManager::extract_image_meta(const std::string& image_name, std::string
         repo = (pos != std::string::npos) ? image_name.substr(0, pos) : image_name;
         tag  = (pos != std::string::npos) ? image_name.substr(pos + 1) : "latest";
         if (repo.find('/') == std::string::npos) repo = "library/" + repo;
+}
+
+auto ImageManager::upload_blob(const std::string& repo, const std::string& digest,
+                const std::string& token, const fs::path& filepath,
+                std::string& error) -> bool {
+        
+        auto init_url{std::format("https://registry-1.docker.io/v2/{}/blobs/uploads/", repo)};
+        cpr::Response r_init{cpr::Post(
+                cpr::Url{init_url},
+                cpr::Header{{"Authorization", "Bearer " + token}},
+                cpr::Timeout{TIMEOUT_CONFIG_MS}
+        )};
+        
+        if (r_init.status_code != 202) {
+                error = std::format("Upload Error: Failed to initiate blob upload. HTTP {} - {}", r_init.status_code, r_init.text);
+                return false;
+        }
+        
+        std::string location = r_init.header["Location"];
+        if (location.empty()) {
+                error = "Upload Error: Registry did not return a Location header";
+                return false;
+        }
+        
+        if (location.starts_with("/")) {
+                location = "https://registry-1.docker.io" + location;
+        }
+        
+        auto upload_url = std::format("{}&digest={}", location, digest);
+        if (location.find('?') == std::string::npos) {
+                upload_url = std::format("{}?digest={}", location, digest);
+        }
+        
+        std::ifstream ifs(filepath, std::ios::binary | std::ios::ate);
+        if (!ifs.is_open()) {
+                error = "Upload Error: Cannot open blob file " + filepath.string();
+                return false;
+        }
+        std::streamsize size = ifs.tellg();
+        ifs.seekg(0, std::ios::beg);
+        
+        std::string buffer(size, 0);
+        if (!ifs.read(buffer.data(), size)) {
+                error = "Upload Error: Failed to read blob file " + filepath.string();
+                return false;
+        }
+        
+        cpr::Response r_upload{cpr::Put(
+                cpr::Url{upload_url},
+                cpr::Header{
+                        {"Authorization", "Bearer " + token},
+                        {"Content-Type", "application/octet-stream"}
+                },
+                cpr::Body{buffer},
+                cpr::Timeout{TIMEOUT_LAYER_MS}
+        )};
+        
+        if (r_upload.status_code != 201) {
+                error = std::format("Upload Error: Failed to upload blob. HTTP {} - {}", r_upload.status_code, r_upload.text);
+                return false;
+        }
+        
+        return true;
+}
+
+auto ImageManager::upload_manifest(const std::string& repo, const std::string& tag,
+                const std::string& token, const std::string& manifest_json,
+                const std::string& media_type, std::string& error) -> bool {
+        
+        auto url{std::format("https://registry-1.docker.io/v2/{}/manifests/{}", repo, tag)};
+        cpr::Response r{cpr::Put(
+                cpr::Url{url},
+                cpr::Header{
+                        {"Authorization", "Bearer " + token},
+                        {"Content-Type", media_type}
+                },
+                cpr::Body{manifest_json},
+                cpr::Timeout{TIMEOUT_MANIFEST_MS}
+        )};
+        
+        if (r.status_code != 201 && r.status_code != 200) {
+                error = std::format("Upload Error: Failed to push manifest. HTTP {} - {}", r.status_code, r.text);
+                return false;
+        }
+        
+        return true;
+}
+
+auto ImageManager::push(const std::string& image_name, std::string& error) -> bool {
+        std::string repo, tag;
+        extract_image_meta(image_name, repo, tag);
+
+        if (!is_valid_repo(repo) || !is_valid_tag(tag)) [[unlikely]] {
+                error = "Invalid repository or tag name";
+                return false;
+        }
+
+        const char* home_dir{std::getenv("HOME")};
+        if (home_dir == nullptr) {
+                struct passwd* pw = getpwuid(getuid());
+                if (pw) home_dir = pw->pw_dir;
+        }
+        std::string safe_repo = repo;
+        std::replace(safe_repo.begin(), safe_repo.end(), '/', '_');
+        std::string safe_tag = tag;
+        std::replace(safe_tag.begin(), safe_tag.end(), ':', '_');
+        fs::path layout_dir = fs::path(home_dir) / ".quiver" / "raw_images" / std::format("{}_{}", safe_repo, safe_tag);
+
+        if (!fs::exists(layout_dir / "index.json")) {
+                error = std::format("Push Error: OCI layout for {} does not exist. Did you pull or build it first?", image_name);
+                return false;
+        }
+
+        std::string token{};
+        if (!get_auth_token(repo, "pull,push", token, error)) [[unlikely]] return false;
+
+        std::ifstream index_fs(layout_dir / "index.json");
+        json index_json;
+        try {
+                index_json = json::parse(index_fs);
+        } catch (const std::exception& e) {
+                error = "Push Error: Failed to parse index.json";
+                secure_zero(token);
+                return false;
+        }
+
+        std::string manifest_digest;
+        std::string manifest_media_type;
+        for (const auto& m : index_json["manifests"]) {
+                manifest_digest = m["digest"];
+                manifest_media_type = m["mediaType"];
+                break;
+        }
+
+        if (manifest_digest.empty()) {
+                error = "Push Error: No manifest found in index.json";
+                secure_zero(token);
+                return false;
+        }
+
+        const auto colon = manifest_digest.find(':');
+        const std::string m_algo = manifest_digest.substr(0, colon);
+        const std::string m_hash = manifest_digest.substr(colon + 1);
+        fs::path manifest_path = layout_dir / "blobs" / m_algo / m_hash;
+
+        std::ifstream manifest_fs(manifest_path);
+        json manifest_json;
+        try {
+                manifest_json = json::parse(manifest_fs);
+        } catch (const std::exception& e) {
+                error = "Push Error: Failed to parse manifest blob";
+                secure_zero(token);
+                return false;
+        }
+
+        std::string config_digest = manifest_json["config"]["digest"];
+        const auto c_colon = config_digest.find(':');
+        fs::path config_path = layout_dir / "blobs" / config_digest.substr(0, c_colon) / config_digest.substr(c_colon + 1);
+        
+        std::cout << "Pushing config blob " << config_digest << "\n";
+        if (!upload_blob(repo, config_digest, token, config_path, error)) {
+                secure_zero(token);
+                return false;
+        }
+
+        for (const auto& layer : manifest_json["layers"]) {
+                std::string l_digest = layer["digest"];
+                const auto l_colon = l_digest.find(':');
+                fs::path l_path = layout_dir / "blobs" / l_digest.substr(0, l_colon) / l_digest.substr(l_colon + 1);
+                
+                std::cout << "Pushing layer blob " << l_digest << "\n";
+                if (!upload_blob(repo, l_digest, token, l_path, error)) {
+                        secure_zero(token);
+                        return false;
+                }
+        }
+
+        std::cout << "Pushing manifest " << tag << "\n";
+        std::ifstream manifest_fs_raw(manifest_path);
+        std::stringstream buffer;
+        buffer << manifest_fs_raw.rdbuf();
+        
+        if (!upload_manifest(repo, tag, token, buffer.str(), manifest_media_type, error)) {
+                secure_zero(token);
+                return false;
+        }
+
+        secure_zero(token);
+        return true;
 }
 
 ImageManager::~ImageManager() {}

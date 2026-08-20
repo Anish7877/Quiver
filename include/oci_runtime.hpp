@@ -95,7 +95,8 @@ namespace OCIRuntime {
                 {"uts", CLONE_NEWUTS},
                 {"mount", CLONE_NEWNS},
                 {"cgroup", CLONE_NEWCGROUP},
-                {"time", CLONE_NEWTIME}
+                {"time", CLONE_NEWTIME},
+                {"user", CLONE_NEWUSER}
         };
 
         const std::unordered_map<std::string, unsigned long> MOUNT_FLAGS_STR_MAP {

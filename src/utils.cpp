@@ -1335,7 +1335,7 @@ auto Utils::load_oci_tar(const fs::path& tar_path, const fs::path& dest_dir) -> 
         }
 
         std::error_code ec{};
-        fs::path temp_layout_dir{std::format("/tmp/quiver_layout_{}", getpid())};
+        fs::path temp_layout_dir = dest_dir.parent_path().parent_path() / "raw_images" / dest_dir.filename();
         fs::create_directories(temp_layout_dir, ec);
 
         std::cout << "Extracting raw OCI layout\n";
@@ -1451,7 +1451,7 @@ auto Utils::load_oci_tar(const fs::path& tar_path, const fs::path& dest_dir) -> 
                 } else if (WIFSIGNALED(status)) {
                         std::cerr << "Error: process killed by signal " << WTERMSIG(status) << "\n";
                 }
-                fs::remove_all(temp_layout_dir);
+                // fs::remove_all(temp_layout_dir); // Kept for pushing
 
                 return success;
         }
