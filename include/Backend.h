@@ -115,6 +115,8 @@ private:
     std::unique_ptr<BackendImpl> pimpl_ {};
 
 signals:
+    void pull_output_received(const QString& msg);
+    void pull_finished(bool success);
     void cli_error_occurred(const QString& error_msg);
     void cli_action_success(const QString& success_msg);
 };

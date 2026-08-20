@@ -1,3 +1,4 @@
+#include "include/Backend.h"
 #include "include/MainWindow.h"
 #include "include/Components.h"
 #include "include/TablePages.h"
@@ -137,6 +138,13 @@ MainWindow::MainWindow(QWidget* parent)
         pimpl_->main_stack_->setCurrentWidget(pimpl_->auth_page_);
     });
     
+    connect(&Backend::get_instance(), &Backend::cli_error_occurred, this, [this](const QString& err_msg) {
+        // Suppress polling errors (like connection refused during health checks or continuous fetch loops)
+        if (err_msg.contains("Connection refused") || err_msg.contains("timeout", Qt::CaseInsensitive)) return;
+        CustomAlert alert(CustomAlert::Warning, "Action Failed", err_msg, this);
+        alert.exec();
+    });
+
     auto* refresh_timer = new QTimer(this);
     connect(refresh_timer, &QTimer::timeout, this, [this]() {
         if (pimpl_->main_stack_ && pimpl_->containers_page_ && 

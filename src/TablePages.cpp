@@ -1786,6 +1786,65 @@ SettingsPage::SettingsPage(QWidget* parent)
     acc_fl->addLayout(profile_row);
     layout->addWidget(acc_frame);
 
+    // Hub Credentials Section (Only for authenticated users)
+    if (!AuthManager::get_instance().is_guest()) {
+        auto* hub_frame = new QFrame;
+        hub_frame->setObjectName("SettingsGroup");
+        auto* hub_fl = new QVBoxLayout(hub_frame);
+        hub_fl->setContentsMargins(24, 20, 24, 20);
+        hub_fl->setSpacing(16);
+        
+        auto* hub_gt = new QLabel("HUB CREDENTIALS"); 
+        hub_gt->setObjectName("SettingsGroupTitle"); 
+        hub_fl->addWidget(hub_gt);
+        
+        auto* hub_div = new QFrame; 
+        hub_div->setObjectName("Divider"); 
+        hub_div->setFixedHeight(1); 
+        hub_fl->addWidget(hub_div);
+        
+        auto* hub_form_box = new QVBoxLayout;
+        hub_form_box->setSpacing(10);
+        
+        auto* hub_user_lbl = new QLabel("Hub Username"); 
+        hub_user_lbl->setObjectName("SettingsLabel");
+        auto* hub_user_input = new QLineEdit;
+        hub_user_input->setText(AuthManager::get_instance().get_hub_username());
+        hub_user_input->setFixedHeight(36);
+        
+        auto* hub_token_lbl = new QLabel("Hub Token / Password"); 
+        hub_token_lbl->setObjectName("SettingsLabel");
+        auto* hub_token_input = new QLineEdit;
+        hub_token_input->setText(AuthManager::get_instance().get_hub_token());
+        hub_token_input->setEchoMode(QLineEdit::Password);
+        hub_token_input->setFixedHeight(36);
+        
+        auto* hub_save_btn = new QPushButton("Save Credentials");
+        hub_save_btn->setObjectName("PrimaryButton");
+        hub_save_btn->setCursor(Qt::PointingHandCursor);
+        hub_save_btn->setFixedWidth(160);
+        
+        connect(hub_save_btn, &QPushButton::clicked, this, [this, hub_user_input, hub_token_input]() {
+            AuthManager::get_instance().update_hub_credentials(hub_user_input->text(), hub_token_input->text());
+            CustomAlert alert(CustomAlert::Warning, "Success", "Hub credentials saved.", this);
+            alert.exec();
+        });
+        
+        connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this, [hub_user_input, hub_token_input]() {
+            hub_user_input->setText(AuthManager::get_instance().get_hub_username());
+            hub_token_input->setText(AuthManager::get_instance().get_hub_token());
+        });
+        
+        hub_form_box->addWidget(hub_user_lbl);
+        hub_form_box->addWidget(hub_user_input);
+        hub_form_box->addWidget(hub_token_lbl);
+        hub_form_box->addWidget(hub_token_input);
+        hub_form_box->addWidget(hub_save_btn, 0, Qt::AlignRight);
+        
+        hub_fl->addLayout(hub_form_box);
+        layout->addWidget(hub_frame);
+    }
+
 
 
     layout->addStretch(); 

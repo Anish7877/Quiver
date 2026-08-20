@@ -362,7 +362,45 @@ auto Backend::pull_image(const QString& name, const QString& tag) -> void {
     if (!tag.isEmpty()) {
         target += ":" + tag;
     }
-    execute_async_action(this, "Pull image", resolve_cli_path(), QStringList() << "image" << "pull" << target);
+    
+    QString cli_path = resolve_cli_path();
+    if (!QFile::exists(cli_path)) {
+        emit cli_error_occurred("CLI not found: " + cli_path);
+        emit pull_finished(false);
+        return;
+    }
+    
+    QProcess* process = new QProcess();
+    
+    QObject::connect(process, &QProcess::readyReadStandardOutput, this, [this, process]() {
+        QString output = process->readAllStandardOutput();
+        emit pull_output_received(output);
+    });
+    
+    QObject::connect(process, &QProcess::readyReadStandardError, this, [this, process]() {
+        QString err = process->readAllStandardError();
+        emit pull_output_received(err); // stream error as well
+    });
+    
+    QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                     this, [this, process](int exitCode, QProcess::ExitStatus exitStatus) {
+        
+        bool has_error = (exitStatus == QProcess::CrashExit) || (exitCode != 0);
+        
+        if (has_error) {
+            emit pull_output_received("\n\n[Error] Pull operation failed.");
+            emit pull_finished(false);
+            emit cli_error_occurred("Pull image failed.");
+        } else {
+            emit pull_output_received("\n\n[Success] Image pulled successfully.");
+            emit pull_finished(true);
+            emit cli_action_success("Pull image succeeded.");
+        }
+        process->deleteLater();
+    });
+    
+    qDebug() << "Executing stream action: Pull image" << cli_path << target;
+    process->start(cli_path, QStringList() << "image" << "pull" << target);
 }
 
 auto Backend::load_image(const QString& name, const QString& tag, const QString& tar_path) -> void {

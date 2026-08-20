@@ -22,6 +22,9 @@ public:
 QString get_avatar_path() const;
     void set_avatar_path(const QString& path);
     void update_profile(const QString& full_name, const QString& username);
+    void update_hub_credentials(const QString& hub_username, const QString& hub_token);
+    QString get_hub_username() const;
+    QString get_hub_token() const;
 
     void start_browser_login();
     

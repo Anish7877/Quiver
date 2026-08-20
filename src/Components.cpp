@@ -1,3 +1,4 @@
+#include <QTextEdit>
 #include "include/Components.h"
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
@@ -42,6 +43,31 @@
 #include "include/AuthManager.h"
 
 namespace Quiver {
+
+static void add_item_with_delete_btn(QListWidget* list, const QString& text) {
+    if (!list->findItems(text, Qt::MatchExactly).isEmpty()) return;
+    auto* item = new QListWidgetItem(text, list);
+    item->setSizeHint(QSize(0, 32));
+    item->setForeground(QBrush(Qt::transparent));
+    
+    auto* w = new QWidget;
+    auto* l = new QHBoxLayout(w);
+    l->setContentsMargins(5, 0, 5, 0);
+    auto* lbl = new QLabel(text);
+    lbl->setStyleSheet("color: #fafafa; font-size: 13px;");
+    auto* btn = new QPushButton("×");
+    btn->setFixedSize(24, 24);
+    btn->setCursor(Qt::PointingHandCursor);
+    btn->setStyleSheet("QPushButton { color: #f87171; background: transparent; border: none; font-weight: bold; font-size: 18px; } QPushButton:hover { color: #ef4444; }");
+    QObject::connect(btn, &QPushButton::clicked, [list, item]() {
+        delete list->takeItem(list->row(item));
+    });
+    l->addWidget(lbl);
+    l->addStretch();
+    l->addWidget(btn);
+    list->setItemWidget(item, w);
+}
+
 
 struct ToggleSwitch::Impl {};
 ToggleSwitch::ToggleSwitch(QWidget* parent)
@@ -641,18 +667,66 @@ PullImageDialog::PullImageDialog(QWidget* parent)
             if (name.isEmpty()) return;
             QString tag = pimpl_->pull_tag_->text().trimmed();
             
-            pimpl_->loading_text_->setText("Pulling Image...");
-            pimpl_->overlay_->show();
-            pimpl_->overlay_->move((width() - pimpl_->overlay_->width()) / 2, height() - pimpl_->overlay_->height() - 40);
-            pimpl_->overlay_->raise();
+            // Show terminal instead of spinner overlay
+            pimpl_->stack_->hide();
             
-            QTimer::singleShot(50, this, [this, name, tag]() {
-                Backend::get_instance().pull_image(name, tag);
-
-                QTimer::singleShot(2500, this, [this]() {
-                    pimpl_->overlay_->hide();
-                    accept();
-                });
+            auto* terminal = new QTextEdit(this);
+            terminal->setReadOnly(true);
+            terminal->setStyleSheet("QTextEdit { background: #09090b; color: #a1a1aa; border: 1px solid #3f3f46; border-radius: 6px; font-family: monospace; font-size: 11px; padding: 10px; }");
+            
+            auto* main_layout = static_cast<QVBoxLayout*>(layout());
+            main_layout->insertWidget(2, terminal, 1);
+            
+            pimpl_->confirm_btn_->hide();
+            
+            for (auto* b : findChildren<QPushButton*>()) {
+                if (b->text() == "Cancel") {
+                    b->setText("Close");
+                    break;
+                }
+            }
+            
+            Backend::get_instance().pull_image(name, tag);
+            
+            auto* conn_out = new QMetaObject::Connection();
+            auto* conn_fin = new QMetaObject::Connection();
+            
+            *conn_out = connect(&Backend::get_instance(), &Backend::pull_output_received, this, [terminal](const QString& msg) {
+                QScrollBar* vBar = terminal->verticalScrollBar();
+                bool atBottom = (vBar->value() == vBar->maximum());
+                
+                QTextCursor cursor = terminal->textCursor();
+                cursor.movePosition(QTextCursor::End);
+                cursor.insertText(msg);
+                
+                if (atBottom) {
+                    vBar->setValue(vBar->maximum());
+                }
+            });
+            
+            *conn_fin = connect(&Backend::get_instance(), &Backend::pull_finished, this, [this, terminal, conn_out, conn_fin](bool success) {
+                QObject::disconnect(*conn_out);
+                QObject::disconnect(*conn_fin);
+                delete conn_out;
+                delete conn_fin;
+                
+                QScrollBar* vBar = terminal->verticalScrollBar();
+                bool atBottom = (vBar->value() == vBar->maximum());
+                
+                QTextCursor cursor = terminal->textCursor();
+                cursor.movePosition(QTextCursor::End);
+                
+                if (success) {
+                    cursor.insertText("\n--- Pull Successful ---");
+                    terminal->setStyleSheet("QTextEdit { background: #09090b; color: #4ade80; border: 1px solid #3f3f46; border-radius: 6px; font-family: monospace; font-size: 11px; padding: 10px; }");
+                } else {
+                    cursor.insertText("\n--- Pull Failed ---");
+                    terminal->setStyleSheet("QTextEdit { background: #09090b; color: #f87171; border: 1px solid #3f3f46; border-radius: 6px; font-family: monospace; font-size: 11px; padding: 10px; }");
+                }
+                
+                if (atBottom) {
+                    vBar->setValue(vBar->maximum());
+                }
             });
         } else {
             QString name = pimpl_->load_name_->text().trimmed();
@@ -1599,19 +1673,94 @@ auto CreateDialog::on_add_device() -> void {
 
     if (d.exec() == QDialog::Accepted) {
         for (QListWidgetItem* item : list->selectedItems()) {
-            if (pimpl_->device_list_->findItems(item->text(), Qt::MatchExactly).isEmpty())
-                pimpl_->device_list_->addItem(item->text());
+            add_item_with_delete_btn(pimpl_->device_list_, item->text());
         }
     }
 }
 
 auto CreateDialog::on_add_volume() -> void {
-    QString dir { QFileDialog::getExistingDirectory(
-        this, "Select Mount Directory", "",
-        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks) };
-    if (!dir.isEmpty() &&
-        pimpl_->volume_list_->findItems(dir, Qt::MatchExactly).isEmpty())
-        pimpl_->volume_list_->addItem(dir);
+    QDialog d(this);
+    d.setWindowTitle("Add Volume Mapping");
+    d.setFixedSize(400, 300);
+    d.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+
+    d.setStyleSheet(
+        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
+        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
+        "QLineEdit:focus { border: 1px solid #f97316; }"
+        "QPushButton#SecondaryBtn { background: transparent; color: #fafafa; border: 1px solid #3f3f46; border-radius: 6px; font-weight: bold; }"
+        "QPushButton#SecondaryBtn:hover { background: #27272a; }"
+        "QPushButton#PrimaryButton { background: #ea580c; color: #fafafa; border: none; border-radius: 6px; font-weight: bold; }"
+        "QPushButton#PrimaryButton:hover { background: #f97316; }"
+    );
+    d.setAttribute(Qt::WA_TranslucentBackground);
+    
+    auto* base_l { new QVBoxLayout(&d) };
+    base_l->setContentsMargins(10, 10, 10, 10);
+    auto* bg_frame { new QFrame(&d) };
+    bg_frame->setObjectName("PopupFrame");
+    base_l->addWidget(bg_frame);
+    auto* l { new QVBoxLayout(bg_frame) };
+    l->setContentsMargins(20, 20, 20, 20);
+    l->setSpacing(15);
+    
+    auto* title_lbl { new QLabel("Add Volume") };
+    title_lbl->setStyleSheet("color: #fafafa; font-size: 16px; font-weight: bold;");
+    l->addWidget(title_lbl);
+    
+    auto* host_lbl { new QLabel("Host Path:") };
+    host_lbl->setStyleSheet("color: #a1a1aa; font-size: 13px;");
+    l->addWidget(host_lbl);
+    
+    auto* host_row { new QHBoxLayout };
+    auto* host_input { new QLineEdit };
+    host_input->setPlaceholderText("e.g. /home/user/data");
+    host_input->setFixedHeight(36);
+    auto* browse_btn { new QPushButton("...") };
+    browse_btn->setFixedSize(36, 36);
+    browse_btn->setObjectName("SecondaryBtn");
+    browse_btn->setCursor(Qt::PointingHandCursor);
+    QObject::connect(browse_btn, &QPushButton::clicked, [&]() {
+        QString dir = QFileDialog::getExistingDirectory(&d, "Select Host Mount Directory", "", QFileDialog::ShowDirsOnly);
+        if (!dir.isEmpty()) host_input->setText(dir);
+    });
+    host_row->addWidget(host_input);
+    host_row->addWidget(browse_btn);
+    l->addLayout(host_row);
+    
+    auto* cont_lbl { new QLabel("Container Path:") };
+    cont_lbl->setStyleSheet("color: #a1a1aa; font-size: 13px;");
+    l->addWidget(cont_lbl);
+    
+    auto* cont_input { new QLineEdit };
+    cont_input->setPlaceholderText("e.g. /app/data");
+    cont_input->setFixedHeight(36);
+    l->addWidget(cont_input);
+    
+    l->addStretch();
+    auto* btns { new QHBoxLayout };
+    auto* cancel_btn { new QPushButton("Cancel") };
+    cancel_btn->setObjectName("SecondaryBtn");
+    cancel_btn->setCursor(Qt::PointingHandCursor);
+    cancel_btn->setFixedSize(85, 34);
+    QObject::connect(cancel_btn, &QPushButton::clicked, &d, &QDialog::reject);
+    auto* add_btn { new QPushButton("Add") };
+    add_btn->setObjectName("PrimaryButton");
+    add_btn->setCursor(Qt::PointingHandCursor);
+    add_btn->setFixedSize(85, 34);
+    QObject::connect(add_btn, &QPushButton::clicked, &d, &QDialog::accept);
+    btns->addStretch();
+    btns->addWidget(cancel_btn);
+    btns->addWidget(add_btn);
+    l->addLayout(btns);
+    
+    if (d.exec() == QDialog::Accepted) {
+        QString host = host_input->text().trimmed();
+        QString cont = cont_input->text().trimmed();
+        if (!host.isEmpty() && !cont.isEmpty()) {
+            add_item_with_delete_btn(pimpl_->volume_list_, host + ":" + cont);
+        }
+    }
 }
 
 auto CreateDialog::on_add_port() -> void {
@@ -1620,7 +1769,7 @@ auto CreateDialog::on_add_port() -> void {
     d.setFixedSize(360, 240);
     d.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
 
-    setStyleSheet(
+    d.setStyleSheet(
         "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
         "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
         "QLineEdit:focus { border: 1px solid #f97316; }"
@@ -1665,9 +1814,9 @@ auto CreateDialog::on_add_port() -> void {
     l->addLayout(btns);
     if (d.exec() == QDialog::Accepted) {
         QString txt { port_input->text().trimmed() };
-        if (!txt.isEmpty() &&
-            pimpl_->port_list_->findItems(txt, Qt::MatchExactly).isEmpty())
-            pimpl_->port_list_->addItem(txt);
+        if (!txt.isEmpty()) {
+            add_item_with_delete_btn(pimpl_->port_list_, txt);
+        }
     }
 }
 
@@ -2118,9 +2267,7 @@ void CreateDialog::set_config(const QJsonObject& config) {
     if (config.contains("ports")) {
         QJsonArray ports = config["ports"].toArray();
         for (int i = 0; i < ports.size(); ++i) {
-            auto* item = new QListWidgetItem(ports[i].toString());
-            item->setFlags(item->flags() | Qt::ItemIsEditable);
-            pimpl_->port_list_->addItem(item);
+            add_item_with_delete_btn(pimpl_->port_list_, ports[i].toString());
         }
     }
 }

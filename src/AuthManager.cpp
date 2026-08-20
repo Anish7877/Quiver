@@ -53,6 +53,16 @@ QString AuthManager::get_full_name() const {
     return settings.value("full_name", "Local User").toString();
 }
 
+QString AuthManager::get_hub_username() const {
+    QSettings settings("QuiverApp", "Quiver");
+    return settings.value("hub_username").toString();
+}
+
+QString AuthManager::get_hub_token() const {
+    QSettings settings("QuiverApp", "Quiver");
+    return settings.value("hub_token").toString();
+}
+
 QString AuthManager::get_token() const {
     QSettings settings("QuiverApp", "Quiver");
     return settings.value("jwt_token").toString();
@@ -236,247 +246,151 @@ QNetworkRequest AuthManager::make_auth_request(const QString& endpoint) const {
     return request;
 }
 
-void AuthManager::update_profile(const QString& full_name, const QString& username) {
-    QNetworkRequest request = make_auth_request("/profile/update");
+void AuthManager::update_hub_credentials(const QString& hub_username, const QString& hub_token) {
+    if (is_guest()) return;
 
-    
-    QStringList parts = full_name.split(' ');
-    QJsonObject body;
-    body["first_name"] = parts.value(0);
-    body["last_name"]  = parts.mid(1).join(' ');
-    body["username"]   = username.startsWith('@') ? username.mid(1) : username;
+    QJsonObject json;
+    json["hub_username"] = hub_username;
+    json["hub_token"] = hub_token;
 
-    QNetworkReply* reply = pimpl_->network_.sendCustomRequest(request, "PATCH",
-                               QJsonDocument(body).toJson());
+    QNetworkRequest request(QUrl(pimpl_->api_base_url_ + "/profile/hub-credentials"));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setRawHeader("Authorization", ("Bearer " + get_token()).toUtf8());
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, full_name, username]() {
+    QNetworkReply* reply = pimpl_->network_.post(request, QJsonDocument(json).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, hub_username, hub_token]() {
+        if (reply->error() == QNetworkReply::NoError) {
+            QSettings settings("Quiver", "App");
+            settings.setValue("hub_username", hub_username);
+            settings.setValue("hub_token", hub_token); // Cache locally for CLI use
+            emit profile_updated();
+        } else {
+            emit login_failed("Failed to update Hub Credentials: " + reply->errorString());
+        }
         reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) return; 
-        QSettings settings("QuiverApp", "Quiver");
-        settings.setValue("full_name", full_name);
-        QString formatted = username.startsWith('@') ? username : "@" + username;
-        settings.setValue("username", formatted);
-        emit profile_updated();
     });
 }
 
 
+void AuthManager::update_profile(const QString& full_name, const QString& username) {
+    if (is_guest()) return;
+    QJsonObject json;
+    
+    // basic split for full name
+    QStringList parts = full_name.split(" ");
+    json["first_name"] = parts.isEmpty() ? "" : parts[0];
+    json["last_name"] = parts.size() > 1 ? parts.mid(1).join(" ") : "";
+    json["username"] = username;
+
+    QNetworkRequest request = make_auth_request("/profile/update");
+    QNetworkReply* reply = pimpl_->network_.sendCustomRequest(request, "PATCH", QJsonDocument(json).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, full_name, username]() {
+        if (reply->error() == QNetworkReply::NoError) {
+            QSettings settings("QuiverApp", "Quiver");
+            settings.setValue("full_name", full_name);
+            settings.setValue("username", username);
+            emit profile_updated();
+        }
+        reply->deleteLater();
+    });
+}
+
+void AuthManager::upload_avatar(const QString& file_path) {
+    if (is_guest()) return;
+    QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+
+    QHttpPart imagePart;
+    imagePart.setHeader(QNetworkRequest::ContentTypeHeader, QVariant("image/jpeg"));
+    imagePart.setHeader(QNetworkRequest::ContentDispositionHeader, QVariant("form-data; name=\"avatar\"; filename=\"avatar.jpg\""));
+
+    QFile *file = new QFile(file_path);
+    file->open(QIODevice::ReadOnly);
+    imagePart.setBodyDevice(file);
+    file->setParent(multiPart);
+    multiPart->append(imagePart);
+
+    QNetworkRequest request = make_auth_request("/profile/avatar");
+    QNetworkReply* reply = pimpl_->network_.post(request, multiPart);
+    multiPart->setParent(reply);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() == QNetworkReply::NoError) {
+            fetch_profile();
+        }
+        reply->deleteLater();
+    });
+}
+
 void AuthManager::fetch_profile() {
+    if (is_guest()) return;
     QNetworkRequest request = make_auth_request("/profile/me");
     QNetworkReply* reply = pimpl_->network_.get(request);
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() == QNetworkReply::NoError) {
+            QJsonObject json = QJsonDocument::fromJson(reply->readAll()).object();
+            QJsonObject user = json["user"].toObject();
+            QSettings settings("QuiverApp", "Quiver");
+            settings.setValue("full_name", user["first_name"].toString() + " " + user["last_name"].toString());
+            settings.setValue("username", "@" + user["username"].toString());
+            settings.setValue("email", user["email"].toString());
+            settings.setValue("avatar_url", user["avatar_url"].toString());
+            settings.setValue("hub_username", user["hub_username"].toString());
+            if (user.contains("hub_token") && !user["hub_token"].toString().isEmpty()) {
+                settings.setValue("hub_token", user["hub_token"].toString());
+            }
+            emit profile_updated();
+            download_and_cache_avatar();
+        }
         reply->deleteLater();
-        QByteArray raw = reply->readAll();
-        
-      
-        qDebug() << "Profile fetch:" << raw; 
-
-        if (reply->error() != QNetworkReply::NoError) return;
-
-        QJsonObject user = QJsonDocument::fromJson(raw).object()["user"].toObject();
-
-        QSettings settings("QuiverApp", "Quiver");
-        settings.setValue("full_name",   user["first_name"].toString() + " " + user["last_name"].toString());
-        settings.setValue("username",    "@" + user["username"].toString());
-        settings.setValue("avatar_url",  user["avatar_url"].toString());
-
-        emit profile_updated();
-        download_and_cache_avatar();
     });
 }
 
+void AuthManager::download_and_cache_avatar() {
+    QString url = get_avatar_path();
+    if (url.startsWith(":/") || url.isEmpty()) return;
 
-
-void AuthManager::upload_avatar(const QString& file_path) {
-
-    QImage img(file_path);
-    if (img.isNull()) {
-        qDebug() << "upload_avatar: failed to load image from" << file_path;
-        return;
-    }
-
-  
-    if (img.width() > 512 || img.height() > 512)
-        img = img.scaled(512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-
-  
-    QByteArray compressed_data;
-    QBuffer buffer(&compressed_data);
-    buffer.open(QIODevice::WriteOnly);
-    img.save(&buffer, "JPEG", 75);
-    buffer.close();
-
-
-    QString new_hash = QString(QCryptographicHash::hash(compressed_data, QCryptographicHash::Md5).toHex());
-    QSettings settings("QuiverApp", "Quiver");
-    QString old_hash = settings.value("avatar_hash").toString();
-
-    if (new_hash == old_hash) {
-        qDebug() << "upload_avatar: image unchanged, skipping upload";
-        return;
-    }
-
-    if (is_guest()) {
-        QString cache_dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
-        QDir().mkpath(cache_dir);
-        QString cache_path = cache_dir + "/quiver_avatar_guest.jpg";
-        
-        QFile f(cache_path);
-        if (f.open(QIODevice::WriteOnly)) {
-            f.write(compressed_data);
-            f.close();
+    QNetworkRequest request((QUrl(url)));
+    QNetworkReply* reply = pimpl_->network_.get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, url]() {
+        if (reply->error() == QNetworkReply::NoError) {
+            QByteArray data = reply->readAll();
+            QString cache_path = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/avatar.jpg";
+            QDir().mkpath(QStandardPaths::writableLocation(QStandardPaths::CacheLocation));
+            QFile file(cache_path);
+            if (file.open(QIODevice::WriteOnly)) {
+                file.write(data);
+                file.close();
+                QSettings settings("QuiverApp", "Quiver");
+                settings.setValue("avatar_cache_path", cache_path);
+                emit profile_updated();
+            }
         }
-        
-        settings.setValue("avatar_cache_path", cache_path);
-        settings.setValue("avatar_hash", new_hash);
-        emit profile_updated();
-        return;
-    }
-
-
-    QNetworkRequest request(QUrl(pimpl_->api_base_url_ + "/profile/avatar"));
-    request.setRawHeader("Authorization", ("Bearer " + get_token()).toUtf8());
-
-    QHttpMultiPart* multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
-    QHttpPart filePart;
-    filePart.setHeader(QNetworkRequest::ContentDispositionHeader,
-                       QVariant("form-data; name=\"avatar\"; filename=\"avatar.jpg\""));
-    filePart.setHeader(QNetworkRequest::ContentTypeHeader, QVariant("image/jpeg"));
-    filePart.setBody(compressed_data); 
-    multiPart->append(filePart);
-
-    QNetworkReply* reply = pimpl_->network_.post(request, multiPart);
-    multiPart->setParent(reply);
-
-   connect(reply, &QNetworkReply::finished, this, [this, reply, new_hash]() {
-        
         reply->deleteLater();
-
-        QByteArray raw = reply->readAll();
-        qDebug() << "Avatar upload response:" << raw;
-
-        if (reply->error() != QNetworkReply::NoError) {
-            qDebug() << "Avatar upload failed:" << reply->errorString();
-            return;
-        }
-
-        QJsonObject json = QJsonDocument::fromJson(raw).object();
-        QString url = json["avatar_url"].toString();
-
-        QSettings settings("QuiverApp", "Quiver");
-        settings.setValue("avatar_url", url);
-        settings.setValue("avatar_hash", new_hash);  
-        download_and_cache_avatar(); 
-        emit profile_updated();
     });
 }
 
 QString AuthManager::get_cached_avatar_path() const {
     QSettings settings("QuiverApp", "Quiver");
-  
-    QString cached = settings.value("avatar_cache_path").toString();
-    if (!cached.isEmpty() && QFile::exists(cached)) return cached;
-    return ":/assets/icons/profile.svg"; 
-}
-
-
-void AuthManager::download_and_cache_avatar() {
-    QSettings settings("QuiverApp", "Quiver");
-    QString url = settings.value("avatar_url").toString();
-    QString username = settings.value("username").toString().remove("@"); 
-
-    if (url.isEmpty() || url.startsWith(":/")) return;
-
-    QNetworkRequest request{QUrl(url)};
-    QNetworkReply* reply = pimpl_->network_.get(request);
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply, username]() {
-        reply->deleteLater();
-       
-        if (reply->error() != QNetworkReply::NoError) {
-            qDebug() << "Avatar download failed:" << reply->errorString();
-            return;
-        }
-
-        QByteArray data = reply->readAll();
-
-        
-        QString cache_dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
-        QDir().mkpath(cache_dir);
-        QString cache_path = cache_dir + "/quiver_avatar_" + username + ".jpg";
-
-        QFile f(cache_path);
-        if (f.open(QIODevice::WriteOnly)) {
-            f.write(data);
-            f.close();
-        }
-
-        QSettings settings("QuiverApp", "Quiver");
-        settings.setValue("avatar_cache_path", cache_path);
-
-        emit profile_updated(); 
-    });
+    return settings.value("avatar_cache_path", get_avatar_path()).toString();
 }
 
 void AuthManager::save_config(const QJsonObject& config) {
-    if (is_guest()) return; // Guests don't save configs to cloud/locally
-
+    if (is_guest()) return;
     QNetworkRequest request = make_auth_request("/configs");
     QNetworkReply* reply = pimpl_->network_.post(request, QJsonDocument(config).toJson());
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply, config]() {
+    connect(reply, &QNetworkReply::finished, this, [reply]() {
         reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            qDebug() << "Failed to save config to cloud, caching locally:" << reply->errorString();
-            QSettings settings("QuiverApp", "Quiver");
-            QString cached = settings.value("offline_configs", "[]").toString();
-            QJsonArray arr = QJsonDocument::fromJson(cached.toUtf8()).array();
-            arr.append(config);
-            settings.setValue("offline_configs", QJsonDocument(arr).toJson(QJsonDocument::Compact));
-        } else {
-            qDebug() << "Config saved to cloud successfully.";
-        }
     });
 }
 
 void AuthManager::get_configs() {
-    if (is_guest()) {
-        emit configs_loaded(QJsonArray());
-        return;
-    }
-
+    if (is_guest()) return;
     QNetworkRequest request = make_auth_request("/configs");
     QNetworkReply* reply = pimpl_->network_.get(request);
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [reply]() {
         reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            qDebug() << "Failed to fetch configs from cloud, returning local cache:" << reply->errorString();
-            QSettings settings("QuiverApp", "Quiver");
-            QString cached = settings.value("offline_configs", "[]").toString();
-            QJsonArray arr = QJsonDocument::fromJson(cached.toUtf8()).array();
-            emit configs_loaded(arr);
-            return;
-        }
-
-        QByteArray raw = reply->readAll();
-        QJsonObject json = QJsonDocument::fromJson(raw).object();
-        QJsonArray configs = json["configs"].toArray();
-        
-        // Push any offline cached configs that haven't been synced yet
-        QSettings settings("QuiverApp", "Quiver");
-        QString cached = settings.value("offline_configs", "[]").toString();
-        QJsonArray offline_arr = QJsonDocument::fromJson(cached.toUtf8()).array();
-        if (!offline_arr.isEmpty()) {
-            for (const auto& val : offline_arr) {
-                save_config(val.toObject()); // Attempt to sync them now
-            }
-            settings.setValue("offline_configs", "[]"); // Clear cache after attempting sync
-        }
-
-        emit configs_loaded(configs);
     });
 }
 
-} 
+} // namespace Quiver
