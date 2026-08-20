@@ -232,8 +232,8 @@ auto ContainerRuntime::execute_container_init() -> void {
                 _exit(EXIT_FAILURE);
         }
         exec_commands();
-        log_event(std::format("[{}] [{}] Container Runtime Error: exec failed.\n",
-                                chrono::system_clock::now(), m_container_config.container_id));
+        log_event(std::format("[{}] [{}] Container Runtime Error: exec failed. Reason: {}\n",
+                                chrono::system_clock::now(), m_container_config.container_id, strerror(errno)));
         _exit(EXIT_FAILURE);
 }
 

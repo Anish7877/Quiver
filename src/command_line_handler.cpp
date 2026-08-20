@@ -880,6 +880,10 @@ auto CommandLineHandler::start(std::span<std::string> args) -> void {
                         limits.io_weight_updates = container->io_weight_updates;
                         container_monitor.init(container->config, container->image, container->name, limits, false);
                         container_monitor.invoke_container();
+                        if (container->config.terminal.value && !container->config.detach.value) {
+                                container_monitor.attach_to_container(container->config.container_id);
+                        }
+
                 }
                 else {
                         std::cerr << std::format("Error: Container '{}' not found or Container already running or paused\n", arg);
@@ -1816,12 +1820,140 @@ auto CommandLineHandler::create(std::span<std::string> args) -> void {
                 }
         }
 
-        std::string container_id = std::format("qvr-{:x}", std::time(nullptr));
+        std::string container_id = Utils::generate_id();
+
+        std::string target_rootfs{};
+        if (!image_name.empty()) {
+                target_rootfs = Utils::get_image_path(image_name);
+        } else if (!json_path.empty()) {
+                try {
+                        std::ifstream file(fs::absolute(json_path));
+                        nlohmann::json j;
+                        file >> j;
+                        if (j.contains("rootfs") && j["rootfs"].contains("path")) {
+                                target_rootfs = j["rootfs"]["path"].get<std::string>();
+                        }
+                } catch (...) {}
+        }
+
+        if (target_rootfs.empty() || !fs::exists(target_rootfs) || !fs::is_directory(target_rootfs)) {
+                std::cerr << "Error: A valid rootfs path must be provided either via IMAGE:TAG or inside the JSON configuration.\n";
+                return;
+        }
 
         ContainerConfig config{};
+        try {
+                config = SpecGenerator::generate_default_rootless_spec(container_id, target_rootfs);
+        } catch (const std::exception& e) {
+                std::cerr << "Error generating default spec: " << e.what() << "\n";
+                return;
+        }
+
+        fs::path config_path{fs::path(target_rootfs) / "config.json"};
+        if (!Utils::file_exists(config_path)) {
+                config_path = fs::path(target_rootfs) / "image_config.json";
+        }
+
+        if (Utils::file_exists(config_path)) {
+                try {
+                        std::ifstream config_file(config_path);
+                        nlohmann::json img_config;
+                        config_file >> img_config;
+
+                        if (img_config.contains("process")) {
+                                auto& process_cfg = img_config["process"];
+
+                                if (process_cfg.contains("terminal") && process_cfg["terminal"].is_boolean()) {
+                                        if (!config.terminal.value && !config.detach.value) {
+                                                config.terminal.value = process_cfg["terminal"].get<bool>();
+                                        }
+                                }
+
+                                if (process_cfg.contains("user")) {
+                                        auto& user_cfg = process_cfg["user"];
+                                        if (user_cfg.contains("uid") && user_cfg["uid"].is_number()) {
+                                                config.user.uid = user_cfg["uid"].get<uid_t>();
+                                        }
+                                        if (user_cfg.contains("gid") && user_cfg["gid"].is_number()) {
+                                                config.user.gid = user_cfg["gid"].get<gid_t>();
+                                        }
+                                        if (user_cfg.contains("additionalGids") && user_cfg["additionalGids"].is_array()) {
+                                                for (const auto& gid : user_cfg["additionalGids"]) {
+                                                        config.user.additional_gids.push_back(gid.get<gid_t>());
+                                                }
+                                        }
+                                }
+
+                                if (custom_cmds.empty() && process_cfg.contains("args") && process_cfg["args"].is_array()) {
+                                        for (const auto& item : process_cfg["args"]) {
+                                                custom_cmds.push_back(item.get<std::string>());
+                                        }
+                                }
+
+                                if (process_cfg.contains("env") && process_cfg["env"].is_array()) {
+                                        for (const auto& item : process_cfg["env"]) {
+                                                config.env.value.push_back(item.get<std::string>());
+                                        }
+                                }
+
+                                if (process_cfg.contains("cwd") && process_cfg["cwd"].is_string()) {
+                                        if (config.cwd.value == "/") {
+                                                config.cwd.value = process_cfg["cwd"].get<std::string>();
+                                        }
+                                }
+
+                                if (process_cfg.contains("capabilities")) {
+                                        auto& caps = process_cfg["capabilities"];
+                                        auto append_caps = [](const nlohmann::json& j, const std::string& key, std::vector<std::string>& out) {
+                                                if (j.contains(key) && j[key].is_array()) {
+                                                        for (const auto& item : j[key]) {
+                                                                std::string cap = item.get<std::string>();
+                                                                if (std::find(out.begin(), out.end(), cap) == out.end()) {
+                                                                        out.push_back(cap);
+                                                                }
+                                                        }
+                                                }
+                                        };
+                                        append_caps(caps, "bounding", config.capabilities.bounding);
+                                        append_caps(caps, "effective", config.capabilities.effective);
+                                        append_caps(caps, "inheritable", config.capabilities.inheritable);
+                                        append_caps(caps, "permitted", config.capabilities.permitted);
+                                        append_caps(caps, "ambient", config.capabilities.ambient);
+                                }
+
+                                if (process_cfg.contains("rlimits") && process_cfg["rlimits"].is_array()) {
+                                        for (const auto& rl : process_cfg["rlimits"]) {
+                                                OCIRuntime::RLimit rlimit{};
+                                                if (rl.contains("type") && rl["type"].is_string()) {
+                                                        std::string r_type = rl["type"].get<std::string>();
+                                                        if (r_type.starts_with("RLIMIT_")) r_type = r_type.substr(7);
+                                                        rlimit.name = r_type;
+                                                }
+                                                if (rl.contains("hard") && rl["hard"].is_number()) rlimit.hard_limit = rl["hard"].get<uint64_t>();
+                                                if (rl.contains("soft") && rl["soft"].is_number()) rlimit.soft_limit = rl["soft"].get<uint64_t>();
+                                                config.rlimits.push_back(rlimit);
+                                        }
+                                }
+
+                                if (process_cfg.contains("noNewPrivileges") && process_cfg["noNewPrivileges"].is_boolean()) {
+                                        config.no_new_privileges.value = process_cfg["noNewPrivileges"].get<bool>();
+                                }
+                                if (process_cfg.contains("oomScoreAdj") && process_cfg["oomScoreAdj"].is_number()) {
+                                        config.oom_score.value = process_cfg["oomScoreAdj"].get<int>();
+                                }
+                        }
+                } catch (const std::exception& e) {
+                        std::cerr << "Warning: Failed to parse image config.json: " << e.what() << "\n";
+                }
+        }
+
         if (!json_path.empty()) {
                 try {
-                        config = ConfigParser::parse_file(fs::absolute(json_path));
+                        std::ifstream file(fs::absolute(json_path));
+                        nlohmann::json j;
+                        file >> j;
+                        j.get_to(config);
+
                         if (config.container_id.empty()) {
                                 config.container_id = container_id;
                         } else {
@@ -1829,7 +1961,7 @@ auto CommandLineHandler::create(std::span<std::string> args) -> void {
                         }
 
                         if (!image_name.empty()) {
-                                config.rootfs.path = Utils::get_image_path(image_name);
+                                config.rootfs.path = Utils::get_image_path(image_name).string() + "/rootfs/";
                                 config.rootfs.read_only = false;
                         }
                 } catch (const std::exception& e) {
@@ -1842,13 +1974,15 @@ auto CommandLineHandler::create(std::span<std::string> args) -> void {
                         std::cerr << "Usage: quiver create [OPTIONS] IMAGE:TAG [COMMANDS...]\n";
                         return;
                 }
-                config = SpecGenerator::generate_default_rootless_spec(container_id, Utils::get_image_path(image_name));
+                config.rootfs.path = Utils::get_image_path(image_name).string() + "/rootfs/";
+                config.rootfs.read_only = false;
         }
 
         if (!custom_cmds.empty()) {
                 config.args.value = custom_cmds;
         }
         auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
         ContainerDbObject db_object{};
         db_object.config = config;
         db_object.image = image_name;
