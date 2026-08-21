@@ -1653,7 +1653,7 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                         primary_tag += "latest";
                         tags[0] += "latest";
                 }
-                else {
+                else if (!tags[0].find(':')) {
                         primary_tag += "_latest";
                         tags[0] += ":latest";
                 }
