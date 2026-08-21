@@ -260,7 +260,7 @@ void AuthManager::update_hub_credentials(const QString& hub_username, const QStr
     QNetworkReply* reply = pimpl_->network_.post(request, QJsonDocument(json).toJson());
     connect(reply, &QNetworkReply::finished, this, [this, reply, hub_username, hub_token]() {
         if (reply->error() == QNetworkReply::NoError) {
-            QSettings settings("Quiver", "App");
+            QSettings settings("QuiverApp", "Quiver");
             settings.setValue("hub_username", hub_username);
             settings.setValue("hub_token", hub_token); // Cache locally for CLI use
             emit profile_updated();

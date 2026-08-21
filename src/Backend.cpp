@@ -1,4 +1,5 @@
 #include "include/Backend.h"
+#include "include/AuthManager.h"
 #include <QProcess>
 #include <QDir>
 #include <QCoreApplication>
@@ -401,6 +402,52 @@ auto Backend::pull_image(const QString& name, const QString& tag) -> void {
     
     qDebug() << "Executing stream action: Pull image" << cli_path << target;
     process->start(cli_path, QStringList() << "image" << "pull" << target);
+}
+
+auto Backend::push_image(const QString& target_image) -> void {
+    auto* process = new QProcess(this);
+    
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    QString hub_user = AuthManager::get_instance().get_hub_username();
+    QString hub_token = AuthManager::get_instance().get_hub_token();
+    
+    if (hub_user.isEmpty() || hub_token.isEmpty()) {
+        emit push_finished(false);
+        emit cli_error_occurred("Hub credentials are missing. Please configure them in Settings.");
+        process->deleteLater();
+        return;
+    }
+    
+    env.insert("QUIVER_USERNAME", hub_user);
+    env.insert("QUIVER_PASSWORD", hub_token);
+    process->setProcessEnvironment(env);
+    
+    connect(process, &QProcess::readyReadStandardOutput, this, [this, process]() {
+        QByteArray data = process->readAllStandardOutput();
+        emit push_output_received(QString::fromUtf8(data));
+    });
+    connect(process, &QProcess::readyReadStandardError, this, [this, process]() {
+        QByteArray data = process->readAllStandardError();
+        emit push_output_received(QString::fromUtf8(data)); // Stream stderr to same terminal
+    });
+    
+    connect(process, &QProcess::finished, this, [this, process, target_image](int exitCode, QProcess::ExitStatus exitStatus) {
+        bool has_error = (exitStatus == QProcess::CrashExit) || (exitCode != 0);
+        if (!has_error) {
+            emit push_output_received("\n\n[Success] Image pushed successfully.");
+            emit push_finished(true);
+            emit cli_action_success(QString("Successfully pushed %1").arg(target_image));
+        } else {
+            emit push_output_received("\n\n[Error] Push operation failed.");
+            emit push_finished(false);
+            emit cli_error_occurred(QString("Failed to push %1").arg(target_image));
+        }
+        process->deleteLater();
+    });
+    
+    QString cli_path = resolve_cli_path();
+    qDebug() << "Executing stream action: Push image" << cli_path << target_image;
+    process->start(cli_path, QStringList() << "image" << "push" << target_image);
 }
 
 auto Backend::load_image(const QString& name, const QString& tag, const QString& tar_path) -> void {

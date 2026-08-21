@@ -997,6 +997,18 @@ ImagesPage::ImagesPage(QWidget* parent)
     bulk_row->addWidget(bulk_del_btn);
     pimpl_->bulk_widget_->hide(); // Hidden by default
     
+    auto* push_btn = new QPushButton("Push Image");
+    push_btn->setStyleSheet(
+        "QPushButton { background: transparent; color: #f97316; border: 1px solid #f97316; border-radius: 6px; font-weight: bold; font-size: 14px; }"
+        "QPushButton:hover { background: #f97316; color: #ffffff; }"
+    );
+    push_btn->setFixedSize(120, 36);
+    push_btn->setCursor(Qt::PointingHandCursor);
+    connect(push_btn, &QPushButton::clicked, this, [this]() {
+        PushImageDialog dialog(this);
+        dialog.exec();
+    });
+
     auto* build_btn = new QPushButton("Build Image");
     build_btn->setStyleSheet(
         "QPushButton { background: #f97316; color: #ffffff; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; }"
@@ -1011,6 +1023,8 @@ ImagesPage::ImagesPage(QWidget* parent)
     
     pimpl_->page_->header_layout()->addStretch();
     pimpl_->page_->header_layout()->addWidget(pimpl_->bulk_widget_);
+    pimpl_->page_->header_layout()->addWidget(push_btn);
+    pimpl_->page_->header_layout()->addSpacing(10);
     pimpl_->page_->header_layout()->addWidget(build_btn);
     
     connect(pimpl_->page_, &TablePage::add_clicked, this, [this]() {

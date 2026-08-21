@@ -200,7 +200,7 @@ QPushButton#SmallPlusBtn {
 }
 QPushButton#SmallPlusBtn:hover {
     background-color: rgba(249, 115, 22, 0.1);
-    color: #09090B;
+    color: #FFFFFF;
 }
 
 /* Form Typography & Editors */

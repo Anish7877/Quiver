@@ -256,7 +256,6 @@ auto MainWindow::setup_sidebar() -> void {
     add_nav(":/assets/icons/images.svg",     "Images",     2, false);
     add_nav(":/assets/icons/volumes.svg",    "Mounts",    3, false);
     add_nav(":/assets/icons/ports.svg",      "Ports",      4, false);
-    add_nav(":/assets/icons/devices.svg",    "Devices",    5, false);
 
     pimpl_->sidebar_layout_->addStretch(); 
 
@@ -543,9 +542,6 @@ auto* logo_lbl = new QLabel;
 
     pimpl_->ports_page_ = new PortsPage;
     pimpl_->main_stack_->addWidget(pimpl_->ports_page_);
-
-    pimpl_->devices_page_ = new DevicesPage;
-    pimpl_->main_stack_->addWidget(pimpl_->devices_page_);
 
     pimpl_->details_page_ = new ContainerDetailsPage;
     pimpl_->main_stack_->addWidget(pimpl_->details_page_);

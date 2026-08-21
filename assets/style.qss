@@ -506,7 +506,7 @@ QLabel#SliderVal { color: #FAFAFA; font-size: 13px; font-weight: bold; backgroun
 QFrame#InnerBox { background: #09090B; border: 1px solid #27272A; border-radius: 8px; }
 QLabel#BoxTitle { color: #A1A1AA; font-size: 11px; font-weight: 900; letter-spacing: 0.5px; }
 QPushButton#SmallPlusBtn { background: rgba(249, 115, 22, 0.15); color: #F97316; border: 1px solid transparent; border-radius: 4px; font-size: 16px; font-weight: bold; padding-bottom: 2px;}
-QPushButton#SmallPlusBtn:hover { background: #F97316; color: #09090B; }
+QPushButton#SmallPlusBtn:hover { background: #F97316; color: #FFFFFF; }
 
 QListWidget#CreateList { background: transparent; border: none; outline: none; }
 QListWidget#CreateList::item { font-family: monospace; font-size: 11px; color: #A1A1AA; padding: 4px 0; border-bottom: 1px solid #27272A; }

@@ -93,6 +93,7 @@ public:
     auto add_image(const Image& img) -> void;
     auto delete_images(const QStringList& targets) -> void;
     auto pull_image(const QString& name, const QString& tag) -> void;
+    auto push_image(const QString& target_image) -> void;
     auto load_image(const QString& name, const QString& tag, const QString& tar_path) -> void;
 
     auto get_volumes() const -> std::vector<Volume>;
@@ -117,6 +118,8 @@ private:
 signals:
     void pull_output_received(const QString& msg);
     void pull_finished(bool success);
+    void push_output_received(const QString& msg);
+    void push_finished(bool success);
     void cli_error_occurred(const QString& error_msg);
     void cli_action_success(const QString& success_msg);
 };

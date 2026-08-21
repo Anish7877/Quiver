@@ -1,3 +1,4 @@
+#include <QKeyEvent>
 #include <QTextEdit>
 #include "include/Components.h"
 #include <QGraphicsOpacityEffect>
@@ -45,10 +46,12 @@
 namespace Quiver {
 
 static void add_item_with_delete_btn(QListWidget* list, const QString& text) {
-    if (!list->findItems(text, Qt::MatchExactly).isEmpty()) return;
-    auto* item = new QListWidgetItem(text, list);
+    for (int i = 0; i < list->count(); ++i) {
+        if (list->item(i)->data(Qt::UserRole).toString() == text) return;
+    }
+    auto* item = new QListWidgetItem("", list);
+    item->setData(Qt::UserRole, text);
     item->setSizeHint(QSize(0, 32));
-    item->setForeground(QBrush(Qt::transparent));
     
     auto* w = new QWidget;
     auto* l = new QHBoxLayout(w);
@@ -1248,6 +1251,13 @@ CreateDialog::CreateDialog(QWidget* parent)
     pimpl_->fs_combo_ = new QComboBox;
     pimpl_->fs_combo_->addItems({"OverlayFS", "Btrfs", "VFS"});
     pimpl_->fs_combo_->setFixedHeight(36);
+    pimpl_->fs_combo_->setStyleSheet(
+        "QComboBox { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
+        "QComboBox:focus { border: 1px solid #f97316; }"
+        "QComboBox::drop-down { border: none; width: 30px; }"
+        "QComboBox::down-arrow { image: none; }"
+        "QComboBox QAbstractItemView { background: #18181b; border: 1px solid #27272a; color: #fafafa; selection-background-color: #f97316; selection-color: white; outline: none; }"
+    );
     v1->addWidget(pimpl_->fs_combo_);
     auto* v2 { new QVBoxLayout };
     auto* persist_lbl { new QLabel("Interactions") };
@@ -1561,6 +1571,14 @@ CreateDialog::CreateDialog(QWidget* parent)
 }
 CreateDialog::~CreateDialog() = default;
 
+void CreateDialog::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        event->ignore(); // Prevent Enter from closing the dialog
+        return;
+    }
+    QDialog::keyPressEvent(event);
+}
+
 auto CreateDialog::get_container_name()  const -> QString { return pimpl_->name_input_->text(); }
 auto CreateDialog::get_container_image() const -> QString { 
     QString img = pimpl_->image_input_->text().trimmed();
@@ -1573,7 +1591,7 @@ auto CreateDialog::get_container_image() const -> QString {
 auto CreateDialog::get_devices() const -> QStringList {
     QStringList list;
     for (int i = 0; i < pimpl_->device_list_->count(); ++i) {
-        list << pimpl_->device_list_->item(i)->text();
+        list << pimpl_->device_list_->item(i)->data(Qt::UserRole).toString();
     }
     return list;
 }
@@ -1581,7 +1599,7 @@ auto CreateDialog::get_devices() const -> QStringList {
 auto CreateDialog::get_volumes() const -> QStringList {
     QStringList list;
     for (int i = 0; i < pimpl_->volume_list_->count(); ++i) {
-        list << pimpl_->volume_list_->item(i)->text();
+        list << pimpl_->volume_list_->item(i)->data(Qt::UserRole).toString();
     }
     return list;
 }
@@ -1589,7 +1607,7 @@ auto CreateDialog::get_volumes() const -> QStringList {
 auto CreateDialog::get_ports() const -> QStringList {
     QStringList list;
     for (int i = 0; i < pimpl_->port_list_->count(); ++i) {
-        list << pimpl_->port_list_->item(i)->text();
+        list << pimpl_->port_list_->item(i)->data(Qt::UserRole).toString();
     }
     return list;
 }
@@ -1657,13 +1675,13 @@ auto CreateDialog::on_add_device() -> void {
     auto* cancel_btn { new QPushButton("Cancel") };
     cancel_btn->setObjectName("SecondaryBtn");
     cancel_btn->setCursor(Qt::PointingHandCursor);
-    cancel_btn->setFixedSize(85, 34); // Nice and wide!
+    cancel_btn->setFixedSize(110, 34); // Nice and wide!
     connect(cancel_btn, &QPushButton::clicked, &d, &QDialog::reject);
 
     auto* ok_btn { new QPushButton("OK") };
     ok_btn->setObjectName("PrimaryButton");
     ok_btn->setCursor(Qt::PointingHandCursor);
-    ok_btn->setFixedSize(85, 34); // Nice and wide!
+    ok_btn->setFixedSize(110, 34); // Nice and wide!
     connect(ok_btn, &QPushButton::clicked, &d, &QDialog::accept);
 
     btns->addStretch();
@@ -1742,12 +1760,12 @@ auto CreateDialog::on_add_volume() -> void {
     auto* cancel_btn { new QPushButton("Cancel") };
     cancel_btn->setObjectName("SecondaryBtn");
     cancel_btn->setCursor(Qt::PointingHandCursor);
-    cancel_btn->setFixedSize(85, 34);
+    cancel_btn->setFixedSize(110, 34);
     QObject::connect(cancel_btn, &QPushButton::clicked, &d, &QDialog::reject);
     auto* add_btn { new QPushButton("Add") };
     add_btn->setObjectName("PrimaryButton");
     add_btn->setCursor(Qt::PointingHandCursor);
-    add_btn->setFixedSize(85, 34);
+    add_btn->setFixedSize(110, 34);
     QObject::connect(add_btn, &QPushButton::clicked, &d, &QDialog::accept);
     btns->addStretch();
     btns->addWidget(cancel_btn);
@@ -1801,12 +1819,12 @@ auto CreateDialog::on_add_port() -> void {
     auto* cancel_btn { new QPushButton("Cancel") };
     cancel_btn->setObjectName("SecondaryBtn");
     cancel_btn->setCursor(Qt::PointingHandCursor);
-    cancel_btn->setFixedSize(85, 34);
+    cancel_btn->setFixedSize(110, 34);
     connect(cancel_btn, &QPushButton::clicked, &d, &QDialog::reject);
     auto* add_btn { new QPushButton("Add Port") };
     add_btn->setObjectName("PrimaryButton");
     add_btn->setCursor(Qt::PointingHandCursor);
-    add_btn->setFixedSize(85, 34);
+    add_btn->setFixedSize(110, 34);
     connect(add_btn, &QPushButton::clicked, &d, &QDialog::accept);
     btns->addStretch();
     btns->addWidget(cancel_btn);
@@ -1874,13 +1892,13 @@ CustomAlert::CustomAlert(Type type, const QString& title, const QString& message
         auto* cancel = new QPushButton("No");
         cancel->setObjectName("SecondaryBtn");
         cancel->setCursor(Qt::PointingHandCursor);
-        cancel->setFixedSize(85, 34);
+        cancel->setFixedSize(110, 34);
         connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
 
         auto* yes_btn = new QPushButton("Yes");
         yes_btn->setObjectName("PrimaryButton");
         yes_btn->setCursor(Qt::PointingHandCursor);
-        yes_btn->setFixedSize(85, 34);
+        yes_btn->setFixedSize(110, 34);
         connect(yes_btn, &QPushButton::clicked, this, &QDialog::accept);
 
         btns->addWidget(cancel);
@@ -1889,7 +1907,7 @@ CustomAlert::CustomAlert(Type type, const QString& title, const QString& message
         auto* ok_btn = new QPushButton("OK");
         ok_btn->setObjectName("PrimaryButton");
         ok_btn->setCursor(Qt::PointingHandCursor);
-        ok_btn->setFixedSize(85, 34);
+        ok_btn->setFixedSize(110, 34);
         connect(ok_btn, &QPushButton::clicked, this, &QDialog::accept);
 
         btns->addWidget(ok_btn);
@@ -2272,4 +2290,135 @@ void CreateDialog::set_config(const QJsonObject& config) {
     }
 }
 
+
+struct PushImageDialog::Impl {
+    QLineEdit* target_input_;
+    QPushButton* push_btn_;
+    QPushButton* cancel_btn_;
+};
+
+PushImageDialog::PushImageDialog(QWidget* parent)
+    : QDialog(parent), pimpl_{std::make_unique<Impl>()}
+{
+    setObjectName("CreateDialog");
+    setFixedSize(450, 220); 
+    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+
+    setStyleSheet(
+        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
+        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
+        "QLineEdit:focus { border: 1px solid #f97316; }"
+    );
+
+    auto* main_layout = new QVBoxLayout(this);
+    main_layout->setContentsMargins(28, 28, 28, 28);
+    main_layout->setSpacing(20);
+    
+    auto* header = new QHBoxLayout;
+    auto* title = new QLabel("Push Image");
+    title->setObjectName("PageTitle");
+    header->addWidget(title);
+    header->addStretch();
+    main_layout->addLayout(header);
+    
+    auto* form_layout = new QVBoxLayout;
+    form_layout->setSpacing(10);
+    
+    auto* target_lbl = new QLabel("Target Image (e.g. username/repo:tag)");
+    target_lbl->setStyleSheet("color: #a1a1aa; font-size: 13px;");
+    pimpl_->target_input_ = new QLineEdit;
+    pimpl_->target_input_->setFixedHeight(36);
+    
+    form_layout->addWidget(target_lbl);
+    form_layout->addWidget(pimpl_->target_input_);
+    main_layout->addLayout(form_layout);
+    
+    auto* btns = new QHBoxLayout;
+    btns->addStretch();
+    
+    pimpl_->cancel_btn_ = new QPushButton("Cancel");
+    pimpl_->cancel_btn_->setCursor(Qt::PointingHandCursor);
+    pimpl_->cancel_btn_->setObjectName("SecondaryBtn");
+    pimpl_->cancel_btn_->setFixedSize(90, 36);
+    connect(pimpl_->cancel_btn_, &QPushButton::clicked, this, &QDialog::reject);
+    
+    pimpl_->push_btn_ = new QPushButton("Push");
+    pimpl_->push_btn_->setCursor(Qt::PointingHandCursor);
+    pimpl_->push_btn_->setObjectName("PrimaryButton");
+    pimpl_->push_btn_->setFixedSize(90, 36);
+    
+    btns->addWidget(pimpl_->cancel_btn_);
+    btns->addWidget(pimpl_->push_btn_);
+    main_layout->addLayout(btns);
+    
+    connect(pimpl_->push_btn_, &QPushButton::clicked, this, [this]() {
+        QString target = pimpl_->target_input_->text().trimmed();
+        if (target.isEmpty()) return;
+        
+        // Hide inputs, show terminal view
+        pimpl_->target_input_->hide();
+        pimpl_->push_btn_->hide();
+        for (auto* b : findChildren<QPushButton*>()) {
+            if (b->text() == "Cancel") {
+                b->setText("Close");
+                break;
+            }
+        }
+        
+        auto* terminal = new QTextEdit(this);
+        terminal->setReadOnly(true);
+        terminal->setStyleSheet("QTextEdit { background: #09090b; color: #a1a1aa; border: 1px solid #3f3f46; border-radius: 6px; font-family: monospace; font-size: 11px; padding: 10px; }");
+        
+        auto* main_layout = static_cast<QVBoxLayout*>(layout());
+        main_layout->insertWidget(2, terminal, 1);
+        setFixedSize(450, 320); // Expand for terminal
+        
+        Backend::get_instance().push_image(target);
+        
+        auto* conn_out = new QMetaObject::Connection();
+        auto* conn_fin = new QMetaObject::Connection();
+        
+        *conn_out = connect(&Backend::get_instance(), &Backend::push_output_received, this, [terminal](const QString& msg) {
+            QScrollBar* vBar = terminal->verticalScrollBar();
+            bool atBottom = (vBar->value() == vBar->maximum());
+            
+            QTextCursor cursor = terminal->textCursor();
+            cursor.movePosition(QTextCursor::End);
+            cursor.insertText(msg);
+            
+            if (atBottom) {
+                vBar->setValue(vBar->maximum());
+            }
+        });
+        
+        *conn_fin = connect(&Backend::get_instance(), &Backend::push_finished, this, [this, terminal, conn_out, conn_fin](bool success) {
+            QObject::disconnect(*conn_out);
+            QObject::disconnect(*conn_fin);
+            delete conn_out;
+            delete conn_fin;
+            
+            QScrollBar* vBar = terminal->verticalScrollBar();
+            bool atBottom = (vBar->value() == vBar->maximum());
+            
+            QTextCursor cursor = terminal->textCursor();
+            cursor.movePosition(QTextCursor::End);
+            
+            if (success) {
+                cursor.insertText("\n--- Push Successful ---");
+                terminal->setStyleSheet("QTextEdit { background: #09090b; color: #4ade80; border: 1px solid #3f3f46; border-radius: 6px; font-family: monospace; font-size: 11px; padding: 10px; }");
+            } else {
+                cursor.insertText("\n--- Push Failed ---");
+                terminal->setStyleSheet("QTextEdit { background: #09090b; color: #f87171; border: 1px solid #3f3f46; border-radius: 6px; font-family: monospace; font-size: 11px; padding: 10px; }");
+            }
+            
+            if (atBottom) {
+                vBar->setValue(vBar->maximum());
+            }
+        });
+    });
+}
+
+PushImageDialog::~PushImageDialog() = default;
+
 } // namespace Quiver
+

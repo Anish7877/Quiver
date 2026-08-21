@@ -139,6 +139,8 @@ public:
     auto get_cpuset_mems() const -> QString;
     auto get_io_weight() const -> QString;
     auto get_io_max() const -> QString;
+protected:
+    void keyPressEvent(QKeyEvent* event) override;
 
 private slots:
     auto show_visual() -> void;
@@ -196,6 +198,16 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> pimpl_ {};
+};
+
+class PushImageDialog : public QDialog {
+    Q_OBJECT
+public:
+    explicit PushImageDialog(QWidget* parent = nullptr);
+    ~PushImageDialog() override;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pimpl_;
 };
 
 class CircularGauge : public QWidget {

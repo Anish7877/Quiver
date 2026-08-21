@@ -300,13 +300,13 @@ DashboardPage::DashboardPage(QWidget* parent)
     auto* create_btn = new QPushButton("Create Container");
     create_btn->setObjectName("PrimaryButton");
     create_btn->setCursor(Qt::PointingHandCursor);
-    create_btn->setFixedSize(140, 36);
+    create_btn->setFixedSize(160, 36);
     connect(create_btn, &QPushButton::clicked, this, &DashboardPage::open_create_container);
     
     auto* go_btn = new QPushButton("Go to Containers");
     go_btn->setObjectName("SecondaryBtn");
     go_btn->setCursor(Qt::PointingHandCursor);
-    go_btn->setFixedSize(140, 36);
+    go_btn->setFixedSize(160, 36);
     connect(go_btn, &QPushButton::clicked, this, &DashboardPage::navigate_to_containers);
     
     btn_layout->addWidget(create_btn);
