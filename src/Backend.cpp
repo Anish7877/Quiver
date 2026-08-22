@@ -404,6 +404,10 @@ auto Backend::pull_image(const QString& name, const QString& tag) -> void {
     process->start(cli_path, QStringList() << "image" << "pull" << target);
 }
 
+auto Backend::prune_images() -> void {
+    execute_async_action(this, "Prune images", resolve_cli_path(), QStringList() << "image" << "prune");
+}
+
 auto Backend::push_image(const QString& target_image) -> void {
     auto* process = new QProcess(this);
     

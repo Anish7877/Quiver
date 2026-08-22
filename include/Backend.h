@@ -94,6 +94,7 @@ public:
     auto delete_images(const QStringList& targets) -> void;
     auto pull_image(const QString& name, const QString& tag) -> void;
     auto push_image(const QString& target_image) -> void;
+    auto prune_images() -> void;
     auto load_image(const QString& name, const QString& tag, const QString& tar_path) -> void;
 
     auto get_volumes() const -> std::vector<Volume>;

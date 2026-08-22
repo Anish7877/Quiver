@@ -1026,6 +1026,32 @@ ImagesPage::ImagesPage(QWidget* parent)
     pimpl_->page_->header_layout()->addWidget(push_btn);
     pimpl_->page_->header_layout()->addSpacing(10);
     pimpl_->page_->header_layout()->addWidget(build_btn);
+
+    auto* prune_btn = new QPushButton("Prune Images");
+    prune_btn->setStyleSheet(
+        "QPushButton { background: transparent; color: #f85149; border: 1px solid #f85149; border-radius: 6px; font-weight: bold; font-size: 14px; }"
+        "QPushButton:hover { background: rgba(248, 81, 73, 0.1); }"
+    );
+    prune_btn->setFixedSize(120, 36);
+    prune_btn->setCursor(Qt::PointingHandCursor);
+    connect(prune_btn, &QPushButton::clicked, this, [this]() {
+        CustomAlert alert(CustomAlert::Question, "Confirm Prune", "Are you sure you want to prune all dangling images?", this);
+        if (alert.exec() != QDialog::Accepted) {
+            return;
+        }
+        pimpl_->overlay_->show();
+        pimpl_->overlay_->raise();
+        QTimer::singleShot(50, this, [this]() {
+            Backend::get_instance().prune_images();
+            QTimer::singleShot(500, this, [this]() {
+                refresh();
+                pimpl_->overlay_->hide();
+            });
+        });
+    });
+    
+    pimpl_->page_->header_layout()->addSpacing(10);
+    pimpl_->page_->header_layout()->addWidget(prune_btn);
     
     connect(pimpl_->page_, &TablePage::add_clicked, this, [this]() {
         PullImageDialog dialog(this);
