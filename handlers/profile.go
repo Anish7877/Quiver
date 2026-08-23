@@ -9,6 +9,7 @@ import (
 	"quiver-backend/config"
 	"quiver-backend/middleware"
 	"quiver-backend/models"
+	"quiver-backend/utils"
 
 	"github.com/cloudinary/cloudinary-go/v2/api/uploader"
 	"github.com/gin-gonic/gin"
@@ -40,8 +41,17 @@ func GetProfile(c *gin.Context) {
 		return
 	}
 
+	// Optionally decrypt token for the GUI to use
+	resp := user.ToResponse()
+	if user.HubToken != "" {
+		decrypted, err := utils.Decrypt(user.HubToken)
+		if err == nil {
+			resp.HubToken = decrypted
+		}
+	}
+	
 	c.JSON(http.StatusOK, gin.H{
-		"user": user.ToResponse(),
+		"user": resp,
 	})
 }
 
@@ -129,6 +139,55 @@ func UpdateProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Profile updated successfully",
 		"user":    updatedUser.ToResponse(),
+	})
+}
+
+// POST /api/profile/hub-credentials (protected)
+func UpdateHubCredentials(c *gin.Context) {
+	userID, exists := c.Get(middleware.UserIDKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	objID, err := primitive.ObjectIDFromHex(userID.(string))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID in token"})
+		return
+	}
+
+	var req models.HubCredentialsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": formatValidationError(err)})
+		return
+	}
+
+	encryptedToken, err := utils.Encrypt(req.HubToken)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encrypt token"})
+		return
+	}
+
+	collection := config.GetCollection("users")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err = collection.UpdateOne(
+		ctx,
+		bson.M{"_id": objID},
+		bson.M{"$set": bson.M{
+			"hub_username": req.HubUsername,
+			"hub_token":    encryptedToken,
+			"updated_at":   time.Now(),
+		}},
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save hub credentials"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Hub credentials saved securely",
 	})
 }
 

@@ -35,7 +35,13 @@ func SetupRoutes(router *gin.Engine) {
 
 		// Profile
 		protected.GET("/profile/me", handlers.GetProfile)
-		protected.PATCH("/profile/update", handlers.UpdateProfile)    
+		protected.PATCH("/profile/update", handlers.UpdateProfile)
+		protected.POST("/profile/hub-credentials", handlers.UpdateHubCredentials)    
 		protected.POST("/profile/avatar", handlers.UpdateAvatar)      
+
+		// Configs (Quick Launch)
+		protected.POST("/configs", handlers.SaveConfig)
+		protected.GET("/configs", handlers.GetConfigs)
+		protected.DELETE("/configs", handlers.DeleteAllConfigs)
 	}
 }

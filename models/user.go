@@ -14,6 +14,8 @@ type User struct {
 	Email     string             `bson:"email"           json:"email"         binding:"required,email"`
 	Password  string             `bson:"password"        json:"-"` // Never returned in JSON
 	AvatarURL string             `bson:"avatar_url"      json:"avatar_url"`
+	HubUsername string           `bson:"hub_username"    json:"hub_username"`
+	HubToken  string             `bson:"hub_token"       json:"-"`
 	CreatedAt time.Time          `bson:"created_at"      json:"created_at"`
 	UpdatedAt time.Time          `bson:"updated_at"      json:"updated_at"`
 }
@@ -40,6 +42,12 @@ type UpdateProfileRequest struct {
 	Username  string `json:"username"   binding:"omitempty,min=3,max=30,alphanum"`
 }
 
+// HubCredentialsRequest for POST /profile/hub-credentials
+type HubCredentialsRequest struct {
+	HubUsername string `json:"hub_username" binding:"required"`
+	HubToken    string `json:"hub_token"    binding:"required"`
+}
+
 // UserResponse is the safe public view of a user (no password)
 type UserResponse struct {
 	ID        primitive.ObjectID `json:"id"`
@@ -48,6 +56,8 @@ type UserResponse struct {
 	Username  string             `json:"username"`
 	Email     string             `json:"email"`
 	AvatarURL string             `json:"avatar_url"`
+	HubUsername string           `json:"hub_username"`
+	HubToken  string             `json:"hub_token,omitempty"` // populated on demand
 	CreatedAt time.Time          `json:"created_at"`
 	UpdatedAt time.Time          `json:"updated_at"`
 }
@@ -61,6 +71,7 @@ func (u *User) ToResponse() UserResponse {
 		Username:  u.Username,
 		Email:     u.Email,
 		AvatarURL: u.AvatarURL,
+		HubUsername: u.HubUsername,
 		CreatedAt: u.CreatedAt,
 		UpdatedAt: u.UpdatedAt,
 	}
