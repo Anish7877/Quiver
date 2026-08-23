@@ -1,3 +1,4 @@
+#include <QDateTime>
 #include "include/DashboardPage.h"
 #include "include/Components.h"
 #include <QtConcurrent>
@@ -658,9 +659,18 @@ void DashboardPage::on_configs_loaded(const QJsonArray& configs) {
         auto* lbl_img = new QLabel(image);
         lbl_img->setStyleSheet("color: #FAFAFA; font-size: 14px; font-weight: bold;");
         lbl_img->setAttribute(Qt::WA_TransparentForMouseEvents);
+
+        QString created_str = config["created_at"].toString();
+        QDateTime dt = QDateTime::fromString(created_str, Qt::ISODate);
+        QString formatted_date = dt.isValid() ? dt.toLocalTime().toString("MMM d, yyyy - h:mm AP") : "Unknown Date";
+        
+        auto* lbl_date = new QLabel(formatted_date);
+        lbl_date->setStyleSheet("color: #A1A1AA; font-size: 10px;");
+        lbl_date->setAttribute(Qt::WA_TransparentForMouseEvents);
         
         layout->addWidget(lbl_type);
         layout->addWidget(lbl_img);
+        layout->addWidget(lbl_date);
         layout->addStretch();
         
         connect(btn, &QPushButton::clicked, this, [this, config]() {

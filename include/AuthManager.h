@@ -39,7 +39,8 @@ QString get_avatar_path() const;
     QString get_cached_avatar_path() const;
 
     void save_config(const QJsonObject& config);
-    void get_configs();
+    void delete_all_configs();
+    void get_configs(int retries = 5);
 
 signals:
     void login_success();

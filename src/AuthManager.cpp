@@ -379,16 +379,44 @@ void AuthManager::save_config(const QJsonObject& config) {
     if (is_guest()) return;
     QNetworkRequest request = make_auth_request("/configs");
     QNetworkReply* reply = pimpl_->network_.post(request, QJsonDocument(config).toJson());
-    connect(reply, &QNetworkReply::finished, this, [reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() == QNetworkReply::NoError) {
+            get_configs();
+        }
         reply->deleteLater();
     });
 }
 
-void AuthManager::get_configs() {
+void AuthManager::get_configs(int retries) {
     if (is_guest()) return;
     QNetworkRequest request = make_auth_request("/configs");
     QNetworkReply* reply = pimpl_->network_.get(request);
-    connect(reply, &QNetworkReply::finished, this, [reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, retries]() {
+        if (reply->error() == QNetworkReply::NoError) {
+            QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+            if (doc.isObject()) {
+                QJsonObject obj = doc.object();
+                if (obj.contains("configs") && obj["configs"].isArray()) {
+                    emit configs_loaded(obj["configs"].toArray());
+                }
+            }
+        } else if (reply->error() == QNetworkReply::ConnectionRefusedError && retries > 0) {
+            QTimer::singleShot(1000, this, [this, retries]() {
+                get_configs(retries - 1);
+            });
+        }
+        reply->deleteLater();
+    });
+}
+
+void AuthManager::delete_all_configs() {
+    if (is_guest()) return;
+    QNetworkRequest request = make_auth_request("/configs");
+    QNetworkReply* reply = pimpl_->network_.deleteResource(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() == QNetworkReply::NoError) {
+            emit configs_loaded(QJsonArray()); // Instantly clear UI
+        }
         reply->deleteLater();
     });
 }

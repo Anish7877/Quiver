@@ -2021,6 +2021,47 @@ connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this, [save
                                { "Build",      "quiver-gui / C++" },
                                { "Qt version", "6.x"              },
                                });
+
+    auto* data_frame = new QFrame;
+    data_frame->setObjectName("SettingsGroup");
+    auto* data_fl = new QVBoxLayout(data_frame);
+    data_fl->setContentsMargins(24, 20, 24, 20);
+    data_fl->setSpacing(16);
+    
+    auto* data_gt = new QLabel("DATA & PRIVACY"); 
+    data_gt->setObjectName("SettingsGroupTitle"); 
+    data_fl->addWidget(data_gt);
+    
+    auto* data_div = new QFrame; 
+    data_div->setObjectName("Divider"); 
+    data_div->setFixedHeight(1); 
+    data_fl->addWidget(data_div);
+
+    auto* delete_history_btn = new QPushButton("Clear Quick Launch History");
+    delete_history_btn->setCursor(Qt::PointingHandCursor);
+    delete_history_btn->setFixedSize(220, 36);
+    delete_history_btn->setStyleSheet(
+        "QPushButton { background-color: #ef4444; color: white; border: none; border-radius: 6px; font-weight: bold; padding: 0 16px; }"
+        "QPushButton:hover { background-color: #dc2626; }"
+        "QPushButton:pressed { background-color: #b91c1c; }"
+    );
+    connect(delete_history_btn, &QPushButton::clicked, this, [this]() {
+        CustomAlert alert(CustomAlert::Question, "Confirm Clear", "Are you sure you want to delete all container history?", this);
+        if (alert.exec() == QDialog::Accepted) {
+            AuthManager::get_instance().delete_all_configs();
+        }
+    });
+
+    auto* data_row = new QHBoxLayout;
+    auto* data_lbl = new QLabel("Quick Launch History"); 
+    data_lbl->setObjectName("SettingsLabel");
+    data_row->addWidget(data_lbl); 
+    data_row->addStretch(); 
+    data_row->addWidget(delete_history_btn);
+    
+    data_fl->addLayout(data_row);
+    layout->addWidget(data_frame);
+
     layout->addStretch();
 }
 SettingsPage::~SettingsPage() = default;

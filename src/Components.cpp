@@ -2270,8 +2270,10 @@ void CreateDialog::set_config(const QJsonObject& config) {
         }
     }
     if (config.contains("cpu_quota")) {
-        pimpl_->cpu_quota_input_->setText(config["cpu_quota"].toString());
-        pimpl_->cpu_quota_slider_->setValue(config["cpu_quota"].toString().toInt());
+        int quota = config["cpu_quota"].toString().toInt();
+        if (quota > 1000) quota /= 1000;
+        pimpl_->cpu_quota_input_->setText(QString::number(quota));
+        pimpl_->cpu_quota_slider_->setValue(quota);
     }
     if (config.contains("memory_limit")) {
         // Assume bytes in config, convert back to MB for slider/input
