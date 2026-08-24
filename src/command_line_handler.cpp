@@ -206,9 +206,16 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
 
                 try {
                         auto dir_opts = fs::directory_options::skip_permission_denied;
+                        std::set<std::pair<dev_t, ino_t>> seen_inodes{};
+
                         for (const auto& entry : fs::recursive_directory_iterator(outpath, dir_opts)) {
                                 if (entry.is_regular_file() && !entry.is_symlink()) {
-                                        image_metadata.size_bytes += entry.file_size();
+                                        struct stat st{};
+                                        if (stat(entry.path().c_str(), &st) == 0) {
+                                                if (seen_inodes.insert({st.st_dev, st.st_ino}).second) {
+                                                        image_metadata.size_bytes += st.st_size;
+                                                }
+                                        }
                                 }
                         }
                 } catch (const std::exception& e) {
@@ -2180,7 +2187,7 @@ auto CommandLineHandler::image(std::span<std::string> args) -> void {
 
                 image_metadata.source = tar_path.filename().string();
                 image_db_manager.add_image(image_metadata);
-                double size_mb = static_cast<double>(image_metadata.size_bytes) / (1024.0 * 1024.0);
+                double size_mb{static_cast<double>(image_metadata.size_bytes) / (1024.0 * 1024.0)};
                 std::cout << std::format("Successfully loaded image {}:{} ({:.2f} MB)\n",
                                          image_metadata.name, image_metadata.tag, size_mb);
         }
