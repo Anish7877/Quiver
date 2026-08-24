@@ -11,11 +11,11 @@ import (
 	"quiver-backend/utils"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/crypto/bcrypt"
 )
-
 
 func SignUp(c *gin.Context) {
 	var req models.SignUpRequest
@@ -24,7 +24,6 @@ func SignUp(c *gin.Context) {
 		return
 	}
 
-	
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.Username = strings.ToLower(strings.TrimSpace(req.Username))
 
@@ -52,7 +51,6 @@ func SignUp(c *gin.Context) {
 		return
 	}
 
-	
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to secure password"})
@@ -78,20 +76,37 @@ func SignUp(c *gin.Context) {
 		return
 	}
 
-	
 	token, err := utils.GenerateToken(user.ID.Hex(), user.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Account created but failed to generate token"})
 		return
 	}
 
+	var machineUUID string
+	if req.IsGUI {
+		machineUUID = uuid.New().String()
+		if req.FriendlyName == "" {
+			req.FriendlyName = "Unknown Machine"
+		}
+		newMachine := models.Machine{
+			ID:           primitive.NewObjectID(),
+			UserID:       user.ID,
+			MachineUUID:  machineUUID,
+			FriendlyName: req.FriendlyName,
+			LastSeen:     time.Now(),
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+		config.GetCollection("machines").InsertOne(ctx, newMachine)
+	}
+
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "Account created successfully",
-		"token":   token,
-		"user":    user.ToResponse(),
+		"message":      "Account created successfully",
+		"token":        token,
+		"user":         user.ToResponse(),
+		"machine_uuid": machineUUID,
 	})
 }
-
 
 func SignIn(c *gin.Context) {
 	var req models.SignInRequest
@@ -116,12 +131,11 @@ func SignIn(c *gin.Context) {
 	var user models.User
 	err := collection.FindOne(ctx, filter).Decode(&user)
 	if err != nil {
-		
+
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
-	
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
@@ -133,20 +147,63 @@ func SignIn(c *gin.Context) {
 		return
 	}
 
+	machineUUIDStr := req.MachineUUID
+	var chosenUUID string
+
+	if req.IsGUI {
+		machinesCollection := config.GetCollection("machines")
+		
+		if machineUUIDStr != "" {
+			uuids := strings.Split(machineUUIDStr, ",")
+			for _, id := range uuids {
+				id = strings.TrimSpace(id)
+				if id == "" { continue }
+				
+				count, _ := machinesCollection.CountDocuments(ctx, bson.M{"machine_uuid": id, "user_id": user.ID})
+				if count > 0 {
+					chosenUUID = id
+					break
+				}
+			}
+		}
+
+		if chosenUUID == "" {
+			chosenUUID = uuid.New().String()
+			if req.FriendlyName == "" {
+				req.FriendlyName = "Unknown Machine"
+			}
+			newMachine := models.Machine{
+				ID:           primitive.NewObjectID(),
+				UserID:       user.ID,
+				MachineUUID:  chosenUUID,
+				FriendlyName: req.FriendlyName,
+				LastSeen:     time.Now(),
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
+			}
+			_, _ = machinesCollection.InsertOne(ctx, newMachine)
+		} else {
+			_, _ = machinesCollection.UpdateOne(ctx,
+				bson.M{"machine_uuid": chosenUUID, "user_id": user.ID},
+				bson.M{"$set": bson.M{"last_seen": time.Now(), "updated_at": time.Now()}},
+			)
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Signed in successfully",
-		"token":   token,
-		"user":    user.ToResponse(),
+		"message":      "Signed in successfully",
+		"token":        token,
+		"user":         user.ToResponse(),
+		"machine_uuid": chosenUUID,
 	})
 }
 
 func Logout(c *gin.Context) {
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Logged out successfully. Please discard your token.",
 	})
 }
-
 
 func formatValidationError(err error) string {
 	return err.Error()

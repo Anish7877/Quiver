@@ -182,7 +182,9 @@
 
 <script>
 
-const redirectPort = "{{ .redirectPort }}";
+const urlParams = new URLSearchParams(window.location.search);
+const redirectPort = urlParams.get('port') || "{{ .redirectPort }}";
+const existingUUID = urlParams.get('uuid') || "";
 
 let isLoginMode = true;
 
@@ -368,7 +370,9 @@ form.addEventListener("submit", async (e) => {
                 identity:
                     document.getElementById("identity").value.trim(),
                 password:
-                    passwordInput.value
+                    passwordInput.value,
+                is_gui: true,
+                machine_uuid: existingUUID
             };
 
             if(!payload.identity || !payload.password) {
@@ -391,7 +395,9 @@ form.addEventListener("submit", async (e) => {
                     document.getElementById("email").value.trim(),
 
                 password:
-                    passwordInput.value
+                    passwordInput.value,
+                is_gui: true,
+                machine_uuid: existingUUID
             };
 
             if(Object.values(payload).some(v => !v)) {
@@ -457,8 +463,7 @@ form.addEventListener("submit", async (e) => {
         `;
 
         setTimeout(() => {
-            
-            window.location.href = `http://localhost:${redirectPort}/callback?token=${data.token}`;
+            window.location.href = `http://localhost:${redirectPort}/callback?token=${data.token}&machine_uuid=${data.machine_uuid}`;
         }, 1000);
 
     } catch(err) {

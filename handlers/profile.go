@@ -49,7 +49,7 @@ func GetProfile(c *gin.Context) {
 			resp.HubToken = decrypted
 		}
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
 		"user": resp,
 	})
@@ -239,7 +239,7 @@ func UpdateAvatar(c *gin.Context) {
 
 	resp, uploadErr := config.Cloudinary.Upload.Upload(uploadCtx, file, uploader.UploadParams{
 		Folder:         "quiver_avatars",
-		PublicID:       "avatar_" + objID.Hex(), // deterministic ID — overwrites previous avatar
+		PublicID:       "avatar_" + objID.Hex(),            // deterministic ID — overwrites previous avatar
 		Transformation: "c_fill,w_200,h_200,q_auto,f_auto", // auto-resize to 200x200
 	})
 	if uploadErr != nil {

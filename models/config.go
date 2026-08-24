@@ -1,8 +1,8 @@
 package models
 
 import (
-	"time"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"time"
 )
 
 // ContainerConfig represents a saved container configuration for Quick Launch.
