@@ -28,6 +28,7 @@
 #include "include/DashboardPage.h"
 #include "include/ContainerDetailsPage.h"
 #include "include/AuthManager.h"
+#include "include/SyncManager.h"
 #include <QProcess> 
 #include <QtCharts/QChartView>
 #include <QtCharts/QChart>
@@ -122,6 +123,8 @@ MainWindow::MainWindow(QWidget* parent)
     } else {
         AuthManager::get_instance().fetch_profile();
         pimpl_->main_stack_->setCurrentIndex(1); 
+        Quiver::SyncManager::get_instance().start_database_watcher(QDir::homePath() + "/.quiver/db/container");
+        Quiver::SyncManager::get_instance().trigger_sync();
     }
 
    
@@ -129,6 +132,8 @@ MainWindow::MainWindow(QWidget* parent)
         pimpl_->sidebar_->show();
         pimpl_->top_bar_->show();
         pimpl_->main_stack_->setCurrentIndex(1); 
+        Quiver::SyncManager::get_instance().start_database_watcher(QDir::homePath() + "/.quiver/db/container");
+        Quiver::SyncManager::get_instance().trigger_sync();
     });
 
    

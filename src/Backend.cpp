@@ -1,5 +1,6 @@
 #include "include/Backend.h"
 #include "include/AuthManager.h"
+#include "include/SyncManager.h"
 #include <QProcess>
 #include <QDir>
 #include <QCoreApplication>
@@ -52,6 +53,7 @@ static void execute_async_action(Backend* backend, const QString& action_name, c
             emit backend->cli_error_occurred(action_name + " failed: " + final_err);
         } else {
             emit backend->cli_action_success(action_name + " succeeded.");
+            Quiver::SyncManager::get_instance().trigger_sync();
         }
         process->deleteLater();
     });
@@ -190,7 +192,12 @@ auto Backend::add_container(const Container& container) -> QProcess* {
     if (QFile::exists(cli_path)) {
         QProcess* process = new QProcess();
         QObject::connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), 
-                         process, &QObject::deleteLater);
+                         [process](int exitCode, QProcess::ExitStatus exitStatus) {
+            if (exitStatus == QProcess::NormalExit && exitCode == 0) {
+                Quiver::SyncManager::get_instance().trigger_sync();
+            }
+            process->deleteLater();
+        });
                          
         QStringList args;
         args << "run";

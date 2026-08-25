@@ -1,4 +1,5 @@
 #include "include/AuthManager.h"
+#include "include/SyncManager.h"
 #include <QSettings>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -78,11 +79,16 @@ void AuthManager::start_browser_login() {
                 QByteArray request = socket->readAll();
                 
                 
-                QRegularExpression rx("GET /callback\\?token=([^\\s]+)");
+                QRegularExpression rx("GET /callback\\?token=([^&\\s]+)(?:&machine_uuid=([^\\s&]+))?");
                 QRegularExpressionMatch match = rx.match(QString(request));
 
                 if (match.hasMatch()) {
                     QString token = match.captured(1);
+                    QString uuid = match.captured(2);
+                    
+                    if (!uuid.isEmpty()) {
+                        Quiver::SyncManager::get_instance().set_machine_uuid(uuid);
+                    }
                     
                     
                     QByteArray response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
@@ -111,7 +117,8 @@ void AuthManager::start_browser_login() {
     }
 
  
-    QDesktopServices::openUrl(QUrl("http://localhost:8080/web/auth?port=54321"));
+    QString existing_uuids = Quiver::SyncManager::get_instance().get_known_uuids();
+    QDesktopServices::openUrl(QUrl("http://localhost:8080/web/auth?port=54321&uuid=" + existing_uuids));
 }
 
 
@@ -125,6 +132,8 @@ void AuthManager::logout() {
     settings.remove("avatar_url");
     settings.remove("avatar_cache_path");
     settings.remove("avatar_hash");
+    settings.remove("hub_username");
+    settings.remove("hub_token");
     
     emit logged_out();
 }
@@ -153,6 +162,12 @@ void AuthManager::login(const QString& identity, const QString& password) {
     QJsonObject body;
     body["identity"] = identity;
     body["password"] = password;
+    body["is_gui"] = true; // Request a MachineUUID
+
+    QString existing_uuid = Quiver::SyncManager::get_instance().get_machine_uuid();
+    if (!existing_uuid.isEmpty()) {
+        body["machine_uuid"] = existing_uuid;
+    }
 
     QNetworkReply* reply = pimpl_->network_.post(request, QJsonDocument(body).toJson());
 
@@ -179,6 +194,10 @@ connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     settings.setValue("full_name", user["first_name"].toString() + " " + user["last_name"].toString());
     settings.setValue("avatar_url", user["avatar_url"].toString());
 
+    if (json.contains("machine_uuid")) {
+        Quiver::SyncManager::get_instance().set_machine_uuid(json["machine_uuid"].toString());
+    }
+
     emit signup_success();
 });
 }
@@ -193,6 +212,7 @@ void AuthManager::signUp(const QString& first_name, const QString& last_name,
     body["username"]   = username;
     body["email"]      = email;
     body["password"]   = password;
+    body["is_gui"]     = true; // Request a MachineUUID
 
     qDebug() << "Sending signup request to:" << pimpl_->api_base_url_ + "/auth/signup";
     qDebug() << "Body:" << QJsonDocument(body).toJson();
@@ -220,6 +240,10 @@ connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         settings.setValue("username", "@" + user["username"].toString());
         settings.setValue("full_name", user["first_name"].toString() + " " + user["last_name"].toString());
         settings.setValue("avatar_url", user["avatar_url"].toString());
+
+        if (json.contains("machine_uuid")) {
+            Quiver::SyncManager::get_instance().set_machine_uuid(json["machine_uuid"].toString());
+        }
 
         emit signup_success();
     });
@@ -280,7 +304,12 @@ void AuthManager::update_profile(const QString& full_name, const QString& userna
     QStringList parts = full_name.split(" ");
     json["first_name"] = parts.isEmpty() ? "" : parts[0];
     json["last_name"] = parts.size() > 1 ? parts.mid(1).join(" ") : "";
-    json["username"] = username;
+    
+    QString clean_username = username;
+    if (clean_username.startsWith("@")) {
+        clean_username = clean_username.mid(1);
+    }
+    json["username"] = clean_username;
 
     QNetworkRequest request = make_auth_request("/profile/update");
     QNetworkReply* reply = pimpl_->network_.sendCustomRequest(request, "PATCH", QJsonDocument(json).toJson());
@@ -309,7 +338,8 @@ void AuthManager::upload_avatar(const QString& file_path) {
     file->setParent(multiPart);
     multiPart->append(imagePart);
 
-    QNetworkRequest request = make_auth_request("/profile/avatar");
+    QNetworkRequest request(QUrl(pimpl_->api_base_url_ + "/profile/avatar"));
+    request.setRawHeader("Authorization", ("Bearer " + get_token()).toUtf8());
     QNetworkReply* reply = pimpl_->network_.post(request, multiPart);
     multiPart->setParent(reply);
 
@@ -421,4 +451,28 @@ void AuthManager::delete_all_configs() {
     });
 }
 
+void AuthManager::rename_machine(const QString& name) {
+    if (is_guest() || get_token().isEmpty()) return;
+    
+    QNetworkRequest request(QUrl(pimpl_->api_base_url_ + "/machine/rename"));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setRawHeader("Authorization", "Bearer " + get_token().toUtf8());
+    
+    QJsonObject payload;
+    payload["machine_uuid"] = Quiver::SyncManager::get_instance().get_machine_uuid();
+    payload["friendly_name"] = name;
+    
+    QNetworkReply* reply = pimpl_->network_.sendCustomRequest(request, "PATCH", QJsonDocument(payload).toJson());
+    
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() == QNetworkReply::NoError) {
+            emit machine_renamed();
+        } else {
+            qDebug() << "Machine rename failed:" << reply->errorString() << reply->readAll();
+        }
+    });
+}
+
 } // namespace Quiver
+

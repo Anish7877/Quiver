@@ -1,0 +1,22 @@
+--- main.cpp
++++ main.cpp
+@@ -5,9 +5,19 @@
+ #include <QApplication>
+ #include <QDialog>
++#include <QLocalSocket>
+ 
+ auto main(int argc, char *argv[]) -> int {
+     QApplication a(argc, argv);
+     QApplication::setQuitOnLastWindowClosed(false);
++
++    QLocalSocket socket;
++    socket.connectToServer("QuiverGUI_IPC");
++    if (socket.waitForConnected(500)) {
++        socket.write("SHOW");
++        socket.waitForBytesWritten(500);
++        return 0; 
++    }
++
+     Quiver::MainWindow w {};
+     w.show();
+ 

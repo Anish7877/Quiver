@@ -22,6 +22,7 @@ public:
 QString get_avatar_path() const;
     void set_avatar_path(const QString& path);
     void update_profile(const QString& full_name, const QString& username);
+    void rename_machine(const QString& name);
     void update_hub_credentials(const QString& hub_username, const QString& hub_token);
     QString get_hub_username() const;
     QString get_hub_token() const;
@@ -51,6 +52,7 @@ signals:
     void signup_failed(const QString& error_message);
     void profile_save_failed(const QString& error);
     void configs_loaded(const QJsonArray& configs);
+    void machine_renamed();
 
 private:
     AuthManager();

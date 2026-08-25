@@ -21,6 +21,7 @@ add_executable(QuiverCpp
     src/TablePages.cpp
     src/TopNavBar.cpp
     src/ContainerDetailsPage.cpp
+    src/SyncManager.cpp
     include/MainWindow.h
     include/DashboardPage.h
     include/AuthWindow.h
@@ -32,6 +33,7 @@ add_executable(QuiverCpp
     include/TablePages.h
     include/TopNavBar.h
     include/ContainerDetailsPage.h
+    include/SyncManager.h
     src/FlowLayout.cpp
     resources.qrc
     assets/style.qss

@@ -1884,7 +1884,58 @@ SettingsPage::SettingsPage(QWidget* parent)
         hub_fl->addLayout(hub_form_box);
         layout->addWidget(hub_frame);
     }
-
+    // Machine Details Section (Only for authenticated users)
+    if (!AuthManager::get_instance().is_guest()) {
+        auto* mach_frame = new QFrame;
+        mach_frame->setObjectName("SettingsGroup");
+        auto* mach_fl = new QVBoxLayout(mach_frame);
+        mach_fl->setContentsMargins(24, 20, 24, 20);
+        mach_fl->setSpacing(16);
+        
+        auto* mach_gt = new QLabel("MACHINE DETAILS"); 
+        mach_gt->setObjectName("SettingsGroupTitle"); 
+        mach_fl->addWidget(mach_gt);
+        
+        auto* mach_div = new QFrame; 
+        mach_div->setObjectName("Divider"); 
+        mach_div->setFixedHeight(1); 
+        mach_fl->addWidget(mach_div);
+        
+        auto* mach_form_box = new QVBoxLayout;
+        mach_form_box->setSpacing(10);
+        
+        auto* mach_name_lbl = new QLabel("Machine Name"); 
+        mach_name_lbl->setObjectName("SettingsLabel");
+        auto* mach_name_input = new QLineEdit;
+        mach_name_input->setPlaceholderText("Enter new machine name");
+        mach_name_input->setFixedHeight(36);
+        
+        auto* mach_save_btn = new QPushButton("Update Name");
+        mach_save_btn->setStyleSheet("QPushButton { background-color: #f97316; color: white; border: none; border-radius: 6px; padding: 0 24px; font-size: 13px; font-weight: 600; } QPushButton:hover { background-color: #ea580c; } QPushButton:disabled { background-color: #fdba74; }");
+        mach_save_btn->setCursor(Qt::PointingHandCursor);
+        mach_save_btn->setMinimumWidth(150);
+        mach_save_btn->setFixedHeight(36);
+        
+        connect(mach_save_btn, &QPushButton::clicked, this, [this, mach_name_input, mach_save_btn]() {
+            if (mach_name_input->text().trimmed().isEmpty()) return;
+            mach_save_btn->setText("Updating...");
+            mach_save_btn->setEnabled(false);
+            AuthManager::get_instance().rename_machine(mach_name_input->text().trimmed());
+        });
+        
+        connect(&AuthManager::get_instance(), &AuthManager::machine_renamed, this, [mach_save_btn]() {
+            mach_save_btn->setText("Updated!");
+            mach_save_btn->setEnabled(true);
+            QTimer::singleShot(2000, mach_save_btn, [mach_save_btn]() { mach_save_btn->setText("Update Name"); });
+        });
+        
+        mach_form_box->addWidget(mach_name_lbl);
+        mach_form_box->addWidget(mach_name_input);
+        mach_form_box->addWidget(mach_save_btn, 0, Qt::AlignRight);
+        
+        mach_fl->addLayout(mach_form_box);
+        layout->addWidget(mach_frame);
+    }
 
 
     layout->addStretch(); 
