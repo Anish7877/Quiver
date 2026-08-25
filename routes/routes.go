@@ -46,5 +46,6 @@ func SetupRoutes(router *gin.Engine) {
 		// Sync & Dashboard
 		protected.POST("/sync/containers", handlers.SyncContainers)
 		protected.GET("/dashboard", handlers.GetDashboard)
+		protected.PATCH("/machine/rename", handlers.RenameMachine)
 	}
 }

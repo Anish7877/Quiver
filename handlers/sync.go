@@ -149,3 +149,47 @@ func GetDashboard(c *gin.Context) {
 		"dashboard": dashboard,
 	})
 }
+
+// RenameMachine handles PATCH /api/machine/rename
+func RenameMachine(c *gin.Context) {
+	userIDStr, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	userID, err := primitive.ObjectIDFromHex(userIDStr.(string))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		return
+	}
+
+	var req struct {
+		MachineUUID  string `json:"machine_uuid" binding:"required"`
+		FriendlyName string `json:"friendly_name" binding:"required,min=1,max=50"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": formatValidationError(err)})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	machinesCollection := config.GetCollection("machines")
+	res, err := machinesCollection.UpdateOne(
+		ctx,
+		bson.M{"machine_uuid": req.MachineUUID, "user_id": userID},
+		bson.M{"$set": bson.M{"friendly_name": req.FriendlyName, "updated_at": time.Now()}},
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update machine name"})
+		return
+	}
+	if res.MatchedCount == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Machine not found or not owned by you"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Machine renamed successfully"})
+}
