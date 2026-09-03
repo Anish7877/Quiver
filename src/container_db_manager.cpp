@@ -149,27 +149,35 @@ auto ContainerDbManager::get_container(const std::string& key) -> std::optional<
         else {
                 client_fd = accept(socket_fd, nullptr, nullptr);
                 if (client_fd == -1) [[unlikely]] {
+                        close(socket_fd);
+                        unlink(sock_path.c_str());
                         std::cerr << "Error: Failed to connect to job processor\n";
                         return std::nullopt;
                 }
         }
         size_t result_size{};
         if (!Utils::recv_all(client_fd, &result_size, sizeof(result_size))) [[unlikely]] {
-                std::cerr << "Error: Unable to read result bytes\n";
+                close(socket_fd);
                 close(client_fd);
+                unlink(sock_path.c_str());
+                std::cerr << "Error: Unable to read result bytes\n";
                 return std::nullopt;
         }
 
         if (result_size == 0) {
                 close(client_fd);
+                close(socket_fd);
+                unlink(sock_path.c_str());
                 return std::nullopt;
         }
 
         std::string raw_bytes{};
         raw_bytes.resize(result_size);
         if (!Utils::recv_all(client_fd, &raw_bytes[0], result_size)) [[unlikely]] {
-                std::cerr << "Error: Unable to read raw bytes\n";
                 close(client_fd);
+                close(socket_fd);
+                unlink(sock_path.c_str());
+                std::cerr << "Error: Unable to read raw bytes\n";
                 return std::nullopt;
         }
         close(client_fd);
@@ -226,12 +234,17 @@ auto ContainerDbManager::get_all_container() -> std::vector<ContainerDbObject> {
         else {
                 client_fd = accept(socket_fd, nullptr, nullptr);
                 if (client_fd == -1) [[unlikely]] {
+                        close(socket_fd);
+                        unlink(sock_path.c_str());
                         std::cerr << "Error: Failed to connect to job processor\n";
                         return {};
                 }
         }
         size_t n_entries{0};
         if (!Utils::recv_all(client_fd, &n_entries, sizeof(n_entries))) {
+                close(client_fd);
+                close(socket_fd);
+                unlink(sock_path.c_str());
                 std::cerr << "Error: Unable to get number of entries\n";
                 return containers;
         }

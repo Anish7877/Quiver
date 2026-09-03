@@ -1,3 +1,4 @@
+#pragma once
 #include <sys/file.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -7,6 +8,11 @@ namespace fs = std::filesystem;
 
 class ProcessLock {
         public:
+                ProcessLock(const ProcessLock&) = delete;
+                ProcessLock& operator=(const ProcessLock&) = delete;
+                ProcessLock(ProcessLock&&) = delete;
+                ProcessLock& operator=(ProcessLock&&) = delete;
+
                 explicit ProcessLock(const fs::path& lock_path) {
                         fs::create_directories(lock_path.parent_path());
                         m_fd = open(lock_path.c_str(), O_CREAT | O_RDWR, 0666);

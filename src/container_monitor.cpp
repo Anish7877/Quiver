@@ -175,7 +175,6 @@ auto ContainerMonitor::foreground_logging() -> void {
                 if (ret == -1) {
                         if (errno == EINTR)
                                 continue;
-
                         return;
                 }
 
@@ -186,7 +185,7 @@ auto ContainerMonitor::foreground_logging() -> void {
 
                         if (bytes_read > 0) {
                                 if (!Utils::write_all(STDOUT_FILENO, buffer, bytes_read)) {
-                                        return;
+                                        break;
                                 }
                                 std::string log_data{std::format("[{}] [{}] [STDOUT] {}.\n",
                                                 chrono::system_clock::now(), m_container_config.container_id,
@@ -217,7 +216,7 @@ auto ContainerMonitor::foreground_logging() -> void {
 
                         if (bytes_read > 0) {
                                 if (!Utils::write_all(STDERR_FILENO, buffer, bytes_read)) {
-                                        return;
+                                        break;
                                 }
                                 std::string log_data{std::format("[{}] [{}] [STDERR] {}.\n",
                                                 chrono::system_clock::now(), m_container_config.container_id,
@@ -241,6 +240,9 @@ auto ContainerMonitor::foreground_logging() -> void {
                         --open_pipes;
                 }
         }
+
+        if (fds[0].fd != -1) close(fds[0].fd);
+        if (fds[1].fd != -1) close(fds[1].fd);
 }
 
 auto ContainerMonitor::invoke_container() -> void {
@@ -285,6 +287,9 @@ auto ContainerMonitor::invoke_container() -> void {
         }
 
         m_monitor_pid = getpid();
+        if (m_container_config.terminal.value || m_container_config.detach.value) {
+                close(m_cli_sync_pipe[0]);
+        }
 
         if (m_container_config.detach.value) {
                 if (setsid() == -1) [[unlikely]] {
@@ -296,8 +301,15 @@ auto ContainerMonitor::invoke_container() -> void {
                 std::cerr << "Monitor Fatal: Failed to attach stdio.\n";
                 _exit(EXIT_FAILURE);
         }
-        if (pipe(m_container_to_monitor_fd) == -1 || pipe(m_monitor_to_container_fd) == -1) [[unlikely]] {
+        if (pipe2(m_container_to_monitor_fd, O_CLOEXEC) == -1) [[unlikely]] {
                 std::cerr << "Monitor Fatal: pipe creation failed.\n";
+                _exit(EXIT_FAILURE);
+        }
+
+        if (pipe2(m_monitor_to_container_fd, O_CLOEXEC) == -1) [[unlikely]] {
+                std::cerr << "Monitor Fatal: pipe creation failed.\n";
+                close(m_container_to_monitor_fd[0]);
+                close(m_container_to_monitor_fd[1]);
                 _exit(EXIT_FAILURE);
         }
         ScopeGuard fork_guard{[this]() -> void {
@@ -313,10 +325,12 @@ auto ContainerMonitor::invoke_container() -> void {
                 _exit(EXIT_FAILURE);
         }
         if (m_container_pid == 0) {
+                destroy = false;
                 fork_guard.dismiss();
                 run_container_child();
         }
         else {
+                destroy = true;
                 fork_guard.dismiss();
                 m_container_config.pid = m_container_pid;
                 run_monitor_parent();
@@ -568,14 +582,29 @@ auto ContainerMonitor::run_monitor_parent() -> void {
 
         if (m_container_config.terminal.value) {
                 setup_socket_connection();
-                std::jthread([this, master_fd]() {
-                        while (true) {
-                                int client_fd{accept(m_socket_fd, nullptr, nullptr)};
-                                if (client_fd == -1) break;
-                                m_pty_session_manager->send_master_fd(client_fd, master_fd);
-                                close(client_fd);
+                m_accept_thread = std::jthread([this, master_fd](std::stop_token stoken) {
+                        while (!stoken.stop_requested()) {
+                                fd_set readfds{};
+                                FD_ZERO(&readfds);
+                                FD_SET(m_socket_fd, &readfds);
+                                timeval tv{};
+                                tv.tv_sec = 0;
+                                tv.tv_usec = 100000; // 100ms timeout
+                                int ret{select(m_socket_fd + 1, &readfds, nullptr, nullptr, &tv)};
+                                if (ret > 0) {
+                                        int client_fd{accept(m_socket_fd, nullptr, nullptr)};
+                                        if (client_fd != -1) {
+                                                m_pty_session_manager->send_master_fd(client_fd, master_fd);
+                                                close(client_fd);
+                                        }
+                                } else if (ret == -1 && errno != EINTR) {
+                                        break;
+                                }
                         }
-                }).detach();
+                        if (master_fd != -1) {
+                                close(master_fd);
+                        }
+                });
         }
         else if (!m_container_config.detach.value) {
                 foreground_logging();
@@ -619,6 +648,11 @@ auto ContainerMonitor::run_monitor_parent() -> void {
 
         if (m_log_worker.joinable()) {
                 m_log_worker.join();
+        }
+
+        if (m_accept_thread.joinable()) {
+                m_accept_thread.request_stop();
+                m_accept_thread.join();
         }
 
         _exit(final_exit_code);
@@ -755,12 +789,14 @@ auto ContainerMonitor::setup_socket_connection() -> void {
         strncpy(addr.sun_path, m_sock_path.c_str(), sizeof(addr.sun_path)-1);
 
         if (bind(m_socket_fd, (sockaddr*)&addr, sizeof(addr)) == -1) [[unlikely]] {
+                close(m_socket_fd);
                 log_event(std::format("[{}] [{}] Container Runtime Error: bind failed.\n",
                                         chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
                 _exit(EXIT_FAILURE);
         }
 
         if (listen(m_socket_fd, 1) == -1) [[unlikely]] {
+                close(m_socket_fd);
                 log_event(std::format("[{}] [{}] Container Runtime Error: listen failed.\n",
                                         chrono::system_clock::now(), m_container_config.container_id), TargetLog::CONTAINERLOG);
                 _exit(EXIT_FAILURE);
@@ -994,7 +1030,6 @@ auto ContainerMonitor::exec_mapping_tool(const char* binary_path, const std::str
                         throw std::runtime_error(std::format("Container Monitor Error: {} was terminated by signal {}.\n",
                                                 binary_path, WTERMSIG(status)));
                 }
-                destroy = true;
         }
 }
 
@@ -1003,7 +1038,15 @@ auto ContainerMonitor::attach_to_stdio() -> bool {
                 if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, m_control_sock) == -1) [[unlikely]] return false;
         }
         else {
-                if (pipe2(m_std_out_fd, O_CLOEXEC) == -1 || pipe2(m_std_err_fd, O_CLOEXEC) == -1) [[unlikely]]  return false;
+                if (pipe2(m_std_out_fd, O_CLOEXEC) == -1) {
+                        return false;
+                }
+
+                if (pipe2(m_std_err_fd, O_CLOEXEC) == -1) {
+                        close(m_std_out_fd[0]);
+                        close(m_std_out_fd[1]);
+                        return false;
+                }
         }
         return true;
 }

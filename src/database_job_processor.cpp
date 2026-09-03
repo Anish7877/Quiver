@@ -134,8 +134,8 @@ auto DatabaseJobProcessor::process_get_job(const DatabaseJobData& job_data) -> v
                         log_event(std::format("[{}] Database Job Processor Error: Unable to connect: {}\n",
                                                 chrono::system_clock::now(), std::strerror(errno)));
                 }
-
                 close(connection_fd);
+                return;
         }
 
         if (status.IsNotFound() || !status.ok()) [[unlikely]] {
@@ -221,33 +221,42 @@ auto DatabaseJobProcessor::process_get_all_job(const DatabaseJobData& job_data) 
                 }
 
                 close(connection_fd);
+                return;
         }
         if (!Utils::send_all(connection_fd, &count, sizeof(count))) [[unlikely]] {
+                close(connection_fd);
                 log_event(std::format("[{}] Database Job Error: Unable to send number of entries", chrono::system_clock::now()));
                 return;
         }
-        auto it2{(*m_current_db)->NewIterator(rocksdb::ReadOptions())};
+        std::unique_ptr<rocksdb::Iterator> it2{(*m_current_db)->NewIterator(rocksdb::ReadOptions())};
         for (it2->SeekToFirst(); it2->Valid(); it2->Next()) {
                 size_t key_size{it2->key().size()};
                 size_t value_size{it2->value().size()};
-                if (!Utils::send_all(connection_fd, &key_size, sizeof(key_size)))
+                if (!Utils::send_all(connection_fd, &key_size, sizeof(key_size))) [[unlikely]] {
+                        close(connection_fd);
                         return;
+                }
 
-                if (!Utils::send_all(connection_fd, it2->key().data(), key_size))
+                if (!Utils::send_all(connection_fd, it2->key().data(), key_size)) [[unlikely]] {
+                        close(connection_fd);
                         return;
+                }
 
-                if (!Utils::send_all(connection_fd, &value_size, sizeof(value_size)))
+                if (!Utils::send_all(connection_fd, &value_size, sizeof(value_size))) [[unlikely]] {
+                        close(connection_fd);
                         return;
+                }
 
-                if (!Utils::send_all(connection_fd, it2->value().data(), value_size))
+                if (!Utils::send_all(connection_fd, it2->value().data(), value_size)) [[unlikely]] {
+                        close(connection_fd);
                         return;
+                }
         }
         if (!it2->status().ok()) [[unlikely]] {
                 close(connection_fd);
                 log_event(std::format("[{}] Database Job Processor Error: Read Error -> '{}'.",
                                         chrono::system_clock::now(), it2->status().ToString()));
         }
-        delete it2;
         close(connection_fd);
 }
 

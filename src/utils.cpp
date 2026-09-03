@@ -205,8 +205,12 @@ auto Utils::change_owners(const fs::path& path, uid_t uid, gid_t gid) -> void {
 }
 
 auto Utils::get_base_dir() -> fs::path {
-        const char* home{getenv("HOME")};
-        std::string base{home ? std::string(home) : "/tmp"};
+        const char* home_dir{std::getenv("HOME")};
+        if (home_dir == nullptr) {
+                struct passwd* pw = getpwuid(getuid());
+                if (pw) home_dir = pw->pw_dir;
+        }
+        std::string base{home_dir ? std::string(home_dir) : "/tmp"};
         return base + "/.quiver";
 }
 
@@ -357,7 +361,7 @@ auto Utils::spawn_new_consumer() -> pid_t {
                 ssize_t n = read(sync_pipe[0], &consumer_pid, sizeof(consumer_pid));
                 close(sync_pipe[0]);
                 waitpid(intermediate_pid, nullptr, 0);
-                if (n != static_cast<ssize_t>(sizeof(consumer_pid)) || consumer_pid <= 0) {
+                if (n != static_cast<ssize_t>(sizeof(consumer_pid)) || consumer_pid < 0) {
                         return -1;
                 }
                 return consumer_pid;
@@ -394,6 +398,8 @@ auto Utils::spawn_new_consumer() -> pid_t {
         }
 
         if (flock(fd, LOCK_EX | LOCK_NB) == -1) {
+                pid_t already_running{0};
+                if (write(sync_pipe[1], &already_running, sizeof(already_running)) == -1) {}
                 close(fd);
                 close(sync_pipe[1]);
                 _exit(EXIT_SUCCESS);
@@ -418,6 +424,8 @@ auto Utils::spawn_new_consumer() -> pid_t {
         log_job_processor.process_job();
         database_job_processor.process_job();
         if (write(sync_pipe[1], &my_pid, sizeof(my_pid)) != static_cast<ssize_t>(sizeof(my_pid))) {
+                flock(fd, LOCK_UN);
+                close(fd);
                 close(sync_pipe[1]);
                 _exit(EXIT_FAILURE);
         }
@@ -639,7 +647,7 @@ auto Utils::extract_tarball(const std::string& tarball_path, const std::string& 
         std::unique_ptr<struct archive, decltype(&archive_read_free)> a_guard{a, archive_read_free};
         std::unique_ptr<struct archive, decltype(&archive_write_free)> ext_guard{ext, archive_write_free};
 
-        if (archive_read_open_filename(a, tarball_path.c_str(), 10240) != ARCHIVE_OK) [[unlikely]] {
+        if (archive_read_open_filename(a, tarball_path.c_str(), 65536) != ARCHIVE_OK) [[unlikely]] {
                 throw std::runtime_error(std::format("Tar Error: Could not open {} - {}", tarball_path, archive_error_string(a)));
         }
 
@@ -738,7 +746,7 @@ auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string
         std::unique_ptr<struct archive, decltype(&archive_read_free)> a_guard{a, archive_read_free};
         std::unique_ptr<struct archive, decltype(&archive_write_free)> ext_guard{ext, archive_write_free};
 
-        if (archive_read_open_filename(a, tarball_path.c_str(), 10240) != ARCHIVE_OK) [[unlikely]] {
+        if (archive_read_open_filename(a, tarball_path.c_str(), 65536) != ARCHIVE_OK) [[unlikely]] {
                 throw std::runtime_error(std::format("Tar Error: Could not open {} - {}", tarball_path, archive_error_string(a)));
         }
 
@@ -845,21 +853,21 @@ auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string
 }
 
 auto Utils::is_archive(const fs::path& path) -> bool {
-        archive* a{archive_read_new()};
-        if (a == nullptr) {
+        archive* raw_a{archive_read_new()};
+        if (raw_a == nullptr) {
                 throw std::runtime_error("Tar Error: Failed to create archive reader.");
         }
-        archive_read_support_filter_all(a);
-        archive_read_support_format_all(a);
+        std::unique_ptr<struct archive, decltype(&archive_read_free)> a(raw_a, archive_read_free);
+        
+        archive_read_support_filter_all(a.get());
+        archive_read_support_format_all(a.get());
 
-        if (archive_read_open_filename(a, path.c_str(), 10240) != ARCHIVE_OK) {
-                archive_read_free(a);
+        if (archive_read_open_filename(a.get(), path.c_str(), 65536) != ARCHIVE_OK) {
                 return false;
         }
         archive_entry* entry{};
-        bool is_arc{archive_read_next_header(a, &entry) ==  ARCHIVE_OK};
-        archive_read_close(a);
-        archive_read_free(a);
+        bool is_arc{archive_read_next_header(a.get(), &entry) == ARCHIVE_OK};
+        archive_read_close(a.get());
         return is_arc;
 }
 
@@ -1265,9 +1273,11 @@ auto Utils::create_connection(std::string_view path) -> int {
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, path.data(), sizeof(addr.sun_path)-1);
         if (bind(sock_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1) [[unlikely]] {
+                close(sock_fd);
                 return -1;
         }
         if (listen(sock_fd, 1) == -1) [[unlikely]] {
+                close(sock_fd);
                 return -1;
         }
         return sock_fd;

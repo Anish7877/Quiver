@@ -23,6 +23,10 @@ int main(int argc, char* argv[]) {
 
         try {
                 pid_t consumer_pid{Utils::spawn_new_consumer()};
+                if (consumer_pid == -1) {
+                        std::cerr << "Fatal Error: Failed to start or connect to background job processor.\n";
+                        return EXIT_FAILURE;
+                }
                 if (command == "run") {
                         CommandLineHandler::run(args);
                 } else if (command == "ps") {

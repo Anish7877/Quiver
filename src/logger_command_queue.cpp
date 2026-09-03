@@ -59,6 +59,7 @@ auto LoggerCommandQueue::map_buffer(const std::string& buf_name, bool is_consume
         void* virtual_addr{mmap(nullptr, m_buf_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, page_size)};
         if (virtual_addr == MAP_FAILED) [[unlikely]] {
                 close(fd);
+                munmap(header_addr, page_size);
                 m_ok = false;
                 m_error = "Logger Command Queue Error: failed to reserve virtual memory.\n";
                 return;
@@ -147,11 +148,13 @@ auto LoggerCommandQueue::is_empty() const -> bool {
 }
 
 LoggerCommandQueue::~LoggerCommandQueue() {
+        std::uint64_t active_connections{0};
         if(!m_is_consumer && m_header != nullptr) {
                 m_header->connections.fetch_sub(1, std::memory_order_release);
         }
 
         if (m_header != nullptr) {
+                active_connections = m_header->connections.load(std::memory_order_acquire);
                 long page_size{sysconf(_SC_PAGESIZE)};
                 if (munmap(m_header, page_size) == -1) {
                         std::cerr << "Logger Command Queue Error: failed to unmap header.\n";
@@ -166,7 +169,7 @@ LoggerCommandQueue::~LoggerCommandQueue() {
                 m_mapped_address = nullptr;
         }
 
-        if(m_is_consumer && !m_bufname.empty()) {
+        if(active_connections == 0 && m_is_consumer && !m_bufname.empty()) {
                 if(shm_unlink(m_bufname.c_str()) == -1) {
                         std::cerr << "Logger Command Queue Error : shared memory unlink failed.\n";
                 }

@@ -58,6 +58,7 @@ auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_siz
         void* virtual_addr{mmap(nullptr, 2 * m_physical_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)};
         if (virtual_addr == MAP_FAILED) [[unlikely]] {
                 close(fd);
+                munmap(header_addr, page_size);
                 m_ok = false;
                 m_error = "Value Heap Error: failed to reserve virtual memory.\n";
                 return;
@@ -69,6 +70,8 @@ auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_siz
         close(fd);
 
         if (first_half == MAP_FAILED || second_half == MAP_FAILED) [[unlikely]] {
+                munmap(virtual_addr, 2 * m_physical_size);
+                munmap(header_addr, page_size);
                 m_ok = false;
                 m_error = "Value Heap Error: failed to mirror memory mapping.\n";
                 return;

@@ -305,6 +305,11 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
                 struct passwd* pw = getpwuid(getuid());
                 if (pw) home_dir = pw->pw_dir;
         }
+        if (home_dir == nullptr) [[unlikely]] {
+                error = "HOME directory not found and could not be resolved.";
+                secure_zero(token);
+                return {};
+        }
         std::string safe_repo = repo;
         std::replace(safe_repo.begin(), safe_repo.end(), '/', '_');
         std::string safe_tag = tag;
@@ -624,7 +629,7 @@ auto ImageManager::download_layer(const std::string& repo, const std::string& di
                         if (Utils::sha256_file(file_path) == digest) {
                                 succeeded = true;
                                 if (progress) progress->downloaded.store(expected_size);
-                                return digest;
+                                return file_path.string();
                         }
                 }
                 // Invalid or partial file, make writable and remove it
@@ -808,6 +813,10 @@ auto ImageManager::push(const std::string& image_name, std::string& error) -> bo
         if (home_dir == nullptr) {
                 struct passwd* pw = getpwuid(getuid());
                 if (pw) home_dir = pw->pw_dir;
+        }
+        if (home_dir == nullptr) [[unlikely]] {
+                error = "Push Error: HOME directory not found and could not be resolved.";
+                return false;
         }
         std::string safe_repo = repo;
         std::replace(safe_repo.begin(), safe_repo.end(), '/', '_');

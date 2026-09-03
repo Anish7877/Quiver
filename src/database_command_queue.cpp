@@ -58,6 +58,7 @@ auto DatabaseCommandQueue::map_buffer(const std::string& buf_name, bool is_consu
         void* virtual_addr{mmap(nullptr, m_buf_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, page_size)};
         if (virtual_addr == MAP_FAILED) [[unlikely]] {
                 close(fd);
+                munmap(header_addr, page_size);
                 m_ok = false;
                 m_error = "Database Command Queue Error: failed to reserve virtual memory.";
                 return;
@@ -70,7 +71,7 @@ auto DatabaseCommandQueue::map_buffer(const std::string& buf_name, bool is_consu
                 m_header->head.store(0, std::memory_order_relaxed);
                 m_header->tail.store(0, std::memory_order_relaxed);
                 m_header->connections.store(0, std::memory_order_relaxed);
-                for (std::size_t i{0}; i<QUEUE_SIZE; ++i){
+                for (std::size_t i{0}; i<QUEUE_SIZE; ++i) {
                         new (&m_mapped_address[i]) JobSlot{};
                         m_mapped_address[i].state.store(SlotState::EMPTY, std::memory_order_relaxed);
                 }

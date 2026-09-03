@@ -59,6 +59,7 @@ class ContainerMonitor : public Singleton<ContainerMonitor> {
                 ContainerConfig m_container_config{};
                 std::atomic<bool> m_logging_active{false};
                 std::jthread m_log_worker{};
+                std::jthread m_accept_thread{};
                 LogJobData m_log_job_data{};
                 std::string m_sock_path{};
                 std::unique_ptr<ContainerRuntime> m_runtime{nullptr};
