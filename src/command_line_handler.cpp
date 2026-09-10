@@ -389,7 +389,7 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                                         auto& db{ContainerDbManager::get_instance()};
                                         db.init();
                                         auto target_cont = db.get_container(target_cid);
-                                        if (target_cont.has_value() && target_cont->status == "running") {
+                                        if (target_cont.has_value() && target_cont->status == ContainerStatus::RUNNING) {
                                                 bool has_userns = false;
                                                 for (const auto& existing_ns : container_config.namespaces) {
                                                         if (existing_ns.type == "user") has_userns = true;
@@ -752,11 +752,11 @@ auto CommandLineHandler::pause(std::span<std::string> args) -> void {
         }
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(args.front())};
-                if (container && container->status == "running") {
+                if (container && container->status == ContainerStatus::RUNNING) {
                         auto cgroup_manager{CGroupsManagerCreator::create_cgourps_manager(std::to_string(container->pid),
                                         container->config.cgroups_path)};
                         cgroup_manager->set_freeze("1");
-                        container->status = "paused";
+                        container->status = ContainerStatus::PAUSED;
                         container_db_manager.update_container(container->config.container_id, container.value());
                 }
                 else {
@@ -775,11 +775,11 @@ auto CommandLineHandler::unpause(std::span<std::string> args) -> void {
         }
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(args.front())};
-                if (container && container->status == "paused") {
+                if (container && container->status == ContainerStatus::PAUSED) {
                         auto cgroup_manager{CGroupsManagerCreator::create_cgourps_manager(std::to_string(container->pid),
                                         container->config.cgroups_path)};
                         cgroup_manager->set_freeze("0");
-                        container->status = "running";
+                        container->status = ContainerStatus::RUNNING;
                         container_db_manager.update_container(container->config.container_id, container.value());
                 }
                 else {
@@ -869,7 +869,7 @@ auto CommandLineHandler::start(std::span<std::string> args) -> void {
         }
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(arg)};
-                if (container && container->status != "running" && container->status != "paused") {
+                if (container && container->status != ContainerStatus::RUNNING && container->status != ContainerStatus::PAUSED) {
                         if (!fs::exists(Utils::get_image_path(container->image) / "config.json")) [[unlikely]] {
                                 std::cerr << std::format("Image '{}' doesn't exist please pull image first.\n", container->image);
                                 continue;
@@ -930,7 +930,7 @@ auto CommandLineHandler::stop(std::span<std::string> args) -> void {
 
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(arg)};
-                if (container && (container->status == "running" || container->status == "paused")) {
+                if (container && (container->status == ContainerStatus::RUNNING || container->status == ContainerStatus::PAUSED)) {
                         auto cgroup_base_opt{get_cgroup_path(container->pid)};
                         if (cgroup_base_opt) {
                                 fs::path cg_kill_path{cgroup_base_opt.value() / "cgroup.kill"};
@@ -959,10 +959,10 @@ auto CommandLineHandler::stop(std::span<std::string> args) -> void {
                                 }
                                 for (size_t i{0}; i<50; ++i) {
                                         auto check_container{container_db_manager.get_container(arg)};
-                                        if (check_container && check_container->status == "exited") break;
+                                        if (check_container && check_container->status == ContainerStatus::EXITED) break;
                                         std::this_thread::sleep_for(std::chrono::milliseconds(200));
                                 }
-                                container->status = "stopped";
+                                container->status = ContainerStatus::STOPPED;
                                 container_db_manager.update_container(arg, container.value());
                                 std::cout << std::format("Container '{}' stopped successfully.\n", arg);
                         }
@@ -983,7 +983,7 @@ auto CommandLineHandler::prune(std::span<std::string> args) -> void {
         }
         auto containers{container_db_manager.get_all_container()};
         for (const auto& container : containers) {
-                if (container.status != "running" && container.status != "paused") {
+                if (container.status != ContainerStatus::RUNNING && container.status != ContainerStatus::PAUSED) {
                         container_db_manager.remove_container(container.config.container_id);
                         try {
                                 Utils::remove_directory(std::format("{}/filesystems/quiver_{}", Utils::get_base_dir().string(),
@@ -1140,7 +1140,7 @@ auto CommandLineHandler::stats(std::span<std::string> args) -> void {
         std::cout << std::format("{:<70} {:<10} {:<15} {:<10}\n", "CONTAINER ID", "CPU %", "MEM USAGE", "PIDS");
         auto containers{container_db_manager.get_all_container()};
         for (const auto& container : containers) {
-                if (container.status != "running") {
+                if (container.status != ContainerStatus::RUNNING) {
                         continue;
                 }
 
@@ -1298,7 +1298,7 @@ auto CommandLineHandler::top(std::span<std::string> args) -> void {
         };
         auto target_id{args[0]};
         auto container{container_db_manager.get_container(target_id)};
-        if (!container || (container->status != "running" && container->status == "paused")) {
+        if (!container || (container->status != ContainerStatus::RUNNING && container->status == ContainerStatus::PAUSED)) {
                 std::cerr << std::format("Error: Container '{}' not found or is not running or paused.\n", target_id);
                 return;
         }
@@ -1477,7 +1477,7 @@ auto CommandLineHandler::update(std::span<std::string> args) -> void {
                 return;
         }
 
-        if (container->status != "running" || container->status != "paused") {
+        if (container->status != ContainerStatus::RUNNING || container->status != ContainerStatus::PAUSED) {
                 std::cerr << std::format("Error: Cannot update limits. Container '{}' is not running.\n", target_id);
                 return;
         }
@@ -1994,7 +1994,7 @@ auto CommandLineHandler::create(std::span<std::string> args) -> void {
         db_object.config = config;
         db_object.image = image_name;
         db_object.name = std::format("quiver_{}", config.container_id.substr(0, 6));
-        db_object.status = "created";
+        db_object.status = ContainerStatus::CREATED;
         db_object.boot_time = Utils::get_boot_time();
         db_object.created_at = std::format("{}", std::chrono::system_clock::now());
         container_db_manager.add_container(db_object);
@@ -2048,7 +2048,7 @@ auto CommandLineHandler::image(std::span<std::string> args) -> void {
                                 bool image_in_use{false};
                                 std::string image_full_name{std::format("{}:{}", image->name, image->tag)};
                                 for (const auto& container : containers) {
-                                        if (container.status == "running" || container.status == "paused") {
+                                        if (container.status == ContainerStatus::RUNNING || container.status == ContainerStatus::PAUSED) {
                                                 if (container.image == image_full_name ||
                                                     container.image == image->name ||
                                                     container.image == image->id ||
@@ -2323,7 +2323,7 @@ auto CommandLineHandler::restart(std::span<std::string> args) -> void {
         container_db_manager.init();
         auto& container_monitor{ContainerMonitor::get_instance()};
         auto container{container_db_manager.get_container(args[0])};
-        if (container && container->status == "running") {
+        if (container && container->status == ContainerStatus::RUNNING) {
                 auto cgroup_base_opt{get_cgroup_path(container->pid)};
                 if (cgroup_base_opt) {
                         fs::path cg_kill_path = cgroup_base_opt.value() / "cgroup.kill";
@@ -2351,7 +2351,7 @@ auto CommandLineHandler::restart(std::span<std::string> args) -> void {
                         }
                         for (int i{0}; i < 50; ++i) {
                                 auto check_container{container_db_manager.get_container(args[0])};
-                                if (check_container && check_container->status == "exited") {
+                                if (check_container && check_container->status == ContainerStatus::EXITED) {
                                         break;
                                 }
                                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -2434,7 +2434,7 @@ auto CommandLineHandler::mount(std::span<std::string> args) -> void {
                         return;
                 }
 
-                if (container->status == "running" || container->status == "paused") {
+                if (container->status == ContainerStatus::RUNNING || container->status == ContainerStatus::PAUSED) {
                         std::cerr << std::format("Warning: Container '{}' is running or paused. Volume changes will take effect on next restart.\n", target_id);
                 }
 
@@ -2483,7 +2483,7 @@ auto CommandLineHandler::mount(std::span<std::string> args) -> void {
                         std::cerr << std::format("Error: Container '{}' not found.\n", target_id);
                         return;
                 }
-                if (container->status == "running" || container->status == "paused") {
+                if (container->status == ContainerStatus::RUNNING || container->status == ContainerStatus::PAUSED) {
                         std::cerr << std::format("Warning: Container '{}' is running or paused. Volume changes will take effect on next restart.\n", target_id);
                 }
                 bool modified{false};
@@ -2543,7 +2543,7 @@ auto CommandLineHandler::exec(std::span<std::string> args) -> void {
         container_db_manager.init();
         auto container{container_db_manager.get_container(container_id)};
 
-        if (!container || container->status != "running") {
+        if (!container || container->status != ContainerStatus::RUNNING) {
                 std::cerr << "Error: Container not found or not running.\n";
                 return;
         }
@@ -2742,13 +2742,13 @@ auto CommandLineHandler::wait(std::span<std::string> args) -> void {
                                 break;
                         }
 
-                        if (container->status == "exited" || container->status == "stopped") {
+                        if (container->status == ContainerStatus::EXITED || container->status == ContainerStatus::STOPPED) {
                                 break;
                         }
 
-                        if (container->status == "running" && container->config.pid > 0) {
+                        if (container->status == ContainerStatus::RUNNING && container->config.pid > 0) {
                                 if (!Utils::is_process_alive(container->config.pid, container->config.container_id)) {
-                                        container->status = "exited";
+                                        container->status = ContainerStatus::EXITED;
                                         container->exit_code = 137;
                                         container_db_manager.update_container(arg, container.value());
                                         break;
@@ -2829,7 +2829,7 @@ auto CommandLineHandler::kill(std::span<std::string> args) -> void {
                         continue;
                 }
 
-                if (container->status != "running" && container->status != "paused") {
+                if (container->status != ContainerStatus::RUNNING && container->status != ContainerStatus::PAUSED) {
                         std::cerr << std::format("Error: Container '{}' is not running.\n", arg);
                         continue;
                 }
@@ -2837,7 +2837,7 @@ auto CommandLineHandler::kill(std::span<std::string> args) -> void {
                 if (container->config.pid <= 0) [[unlikely]] {
                         std::cerr << std::format("Error: Invalid PID ({}) in database. Marking container '{}' as exited.\n",
                                                  container->config.pid, arg);
-                        container->status = "exited";
+                        container->status = ContainerStatus::EXITED;
                         container_db_manager.update_container(arg, container.value());
                         continue;
                 }

@@ -209,13 +209,24 @@ table IOWeightUpdate {
     weight: uint64;
 }
 
+enum ContainerStatus : uint8 {
+        CREATED = 0,
+        RUNNING = 1,
+        PAUSED = 2,
+        STOPPED = 3,
+        EXITED = 4,
+        INTERRUPTED_BY_REBOOT = 5,
+        KILLED = 6,
+        UNKNOWN = 7
+}
+
 table ContainerMetadata {
         config           : ContainerConfig;
         monitor_pid      : int;
         exit_code        : int;
         name             : string;
         image            : string;
-        status           : string;
+        status           : ContainerStatus;
         created_at       : string;
         final_filesystem : string;
         boot_time        : int32;

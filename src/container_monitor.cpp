@@ -65,7 +65,7 @@ auto ContainerMonitor::init(const ContainerConfig& config, const std::string& im
                 db_object.config = std::move(config);
                 db_object.image = image;
                 db_object.name = container_name.empty() ? std::format("quiver_{}", config.container_id.substr(0, 6)) : container_name;
-                db_object.status = "created";
+                db_object.status = ContainerStatus::CREATED;
                 db_object.boot_time = Utils::get_boot_time();
                 db_object.created_at = std::format("{}", chrono::system_clock::now());
                 db_object.cpu_quota = limits.cpu_quota;
@@ -540,7 +540,7 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                 container->config.final_filesystem = m_container_config.vfs ? Utils::get_vfs_path(m_container_config.container_id).string() :
                         std::format("{}/filesystems/quiver_{}", Utils::get_base_dir().string(), m_container_config.container_id);
                 container->boot_time = Utils::get_boot_time();
-                container->status = "running";
+                container->status = ContainerStatus::RUNNING;
                 m_container_db_manager->update_container(m_container_config.container_id, container.value());
         }
 
@@ -575,7 +575,7 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                 }
                 auto container{m_container_db_manager->get_container(m_container_config.container_id)};
                 if (container) {
-                        container->status = "exited";
+                        container->status = ContainerStatus::EXITED;
                         m_container_db_manager->update_container(m_container_config.container_id, container.value());
                 }
         }};
@@ -613,7 +613,7 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                 start_logging();
         }
 
-        std::string db_status{"exited"};
+        ContainerStatus db_status{ContainerStatus::EXITED};
         int final_exit_code{EXIT_FAILURE};
         int status{};
         while (waitpid(m_container_pid, &status, 0) == -1) {
@@ -641,7 +641,7 @@ auto ContainerMonitor::run_monitor_parent() -> void {
 
         auto end_container{m_container_db_manager->get_container(m_container_config.container_id)};
         if (end_container) {
-                end_container->status = std::move(db_status);
+                end_container->status = db_status;
                 end_container->exit_code = final_exit_code;
                 m_container_db_manager->update_container(m_container_config.container_id, end_container.value());
         }

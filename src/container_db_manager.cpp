@@ -55,7 +55,7 @@ auto ContainerDbManager::remove_container(const std::string& key) -> void {
                 std::cerr << std::format("Error: Container '{}' not found\n", key);
                 return;
         }
-        if (metadata->status == "running") {
+        if (metadata->status == ContainerStatus::RUNNING) {
                 std::cerr << std::format("Error: Cannot remove container '{}' -> status is running\n", key);
                 return;
         }
@@ -110,7 +110,7 @@ auto ContainerDbManager::list_all_running_container() -> void {
                         "NAME", name_width, "STATUS", status_width, "CREATED");
 
         for (const auto& container : containers) {
-                if (container.status != "running") continue;
+                if (container.status != ContainerStatus::RUNNING) continue;
                 std::cout << std::format("{:<{}}  {:<{}}  {:<{}}  {:<{}}  {}\n", container.config.container_id, id_width, container.image, image_width,
                                 container.name, name_width, container.status, status_width, container.created_at);
         }
@@ -189,12 +189,12 @@ auto ContainerDbManager::get_container(const std::string& key) -> std::optional<
                 std::cerr << std::format("Serialization Error: Unable to deserialize the value for key '{}'\n", key);
                 return std::nullopt;
         }
-        if (metadata->status == "running" && !Utils::is_process_alive(metadata->config.pid, metadata->config.container_id)) {
+        if (metadata->status == ContainerStatus::RUNNING && !Utils::is_process_alive(metadata->config.pid, metadata->config.container_id)) {
                 if (metadata->boot_time < boot_time) {
-                        metadata->status = "interrupted by reboot";
+                        metadata->status = ContainerStatus::INTERRUPTED_BY_REBOOT;
                 }
                 else {
-                        metadata->status = "killed";
+                        metadata->status = ContainerStatus::KILLED;
                 }
                 update_container(key, metadata.value());
         }
@@ -276,12 +276,12 @@ auto ContainerDbManager::get_all_container() -> std::vector<ContainerDbObject> {
                 }
                 auto metadata{extract_metadata(value)};
                 if (!metadata) continue;
-                if (metadata->status == "running" && !Utils::is_process_alive(metadata->config.pid, metadata->config.container_id)) {
+                if (metadata->status == ContainerStatus::RUNNING && !Utils::is_process_alive(metadata->config.pid, metadata->config.container_id)) {
                         if (metadata->boot_time < boot_time) {
-                                metadata->status = "interrupted by reboot";
+                                metadata->status = ContainerStatus::INTERRUPTED_BY_REBOOT;
                         }
                         else {
-                                metadata->status = "killed";
+                                metadata->status = ContainerStatus::KILLED;
                         }
                         update_container(key, metadata.value());
                 }
