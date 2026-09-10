@@ -90,8 +90,8 @@ auto ContainerRuntime::run_container(int sync_pipe_fd) -> void {
 
 auto ContainerRuntime::exec_commands() -> void {
         std::vector<char*> c_args{};
-        for (const auto& arg : m_container_config.args.value) {
-                c_args.emplace_back(const_cast<char*>(arg.c_str()));
+        for (auto& arg : m_container_config.args.value) {
+                c_args.emplace_back(arg.data());
         }
         c_args.emplace_back(nullptr);
 
@@ -116,18 +116,34 @@ auto ContainerRuntime::execute_container_init() -> void {
                 }
 
                 if (ioctl(slave_fd, TIOCSCTTY, 0) == -1) {
-                        log_event(std::format(
-                                                "[{}] [{}] Container Runtime Error: TIOCSCTTY failed -> {}.\n",
-                                                chrono::system_clock::now(),
-                                                m_container_config.container_id,
+                        log_event(std::format("[{}] [{}] Container Runtime Error: TIOCSCTTY failed -> {}.\n",
+                                                chrono::system_clock::now(), m_container_config.container_id,
                                                 std::strerror(errno)
                                              ));
                         _exit(EXIT_FAILURE);
                 }
 
-                dup2(slave_fd, STDIN_FILENO);
-                dup2(slave_fd, STDOUT_FILENO);
-                dup2(slave_fd, STDERR_FILENO);
+                if (dup2(slave_fd, STDIN_FILENO) == -1) {
+                        log_event(std::format("[{}] [{}] Container Runtime Error: dup2 failed for STDIN -> '{}'.\n",
+                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                std::strerror(errno)
+                                             ));
+                        _exit(EXIT_FAILURE);
+                }
+                if (dup2(slave_fd, STDOUT_FILENO) == -1) {
+                        log_event(std::format("[{}] [{}] Container Runtime Error: dup2 failed for STDOUT -> '{}'.\n",
+                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                std::strerror(errno)
+                                             ));
+                        _exit(EXIT_FAILURE);
+                }
+                if (dup2(slave_fd, STDERR_FILENO) == -1) {
+                        log_event(std::format("[{}] [{}] Container Runtime Error: dup2 failed for STDERR -> '{}'.\n",
+                                                chrono::system_clock::now(), m_container_config.container_id,
+                                                std::strerror(errno)
+                                             ));
+                        _exit(EXIT_FAILURE);
+                }
 
                 if (slave_fd > STDERR_FILENO) {
                         close(slave_fd);
@@ -201,8 +217,8 @@ auto ContainerRuntime::execute_container_init() -> void {
                 _exit(EXIT_FAILURE);
         }
 
-        if (setuid(m_container_config.user.uid) == -1) [[unlikely]] {
-                log_event(std::format("[{}] [{}] Container Runtime Error: final setuid failed before exec.\n",
+        if (setgroups(m_container_config.user.additional_gids.size(), m_container_config.user.additional_gids.data()) == -1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: final setgroups failed before exec.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
@@ -211,8 +227,8 @@ auto ContainerRuntime::execute_container_init() -> void {
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
-        if (setgroups(m_container_config.user.additional_gids.size(), m_container_config.user.additional_gids.data()) == -1) [[unlikely]] {
-                log_event(std::format("[{}] [{}] Container Runtime Error: final setgroups failed before exec.\n",
+        if (setuid(m_container_config.user.uid) == -1) [[unlikely]] {
+                log_event(std::format("[{}] [{}] Container Runtime Error: final setuid failed before exec.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
@@ -221,19 +237,15 @@ auto ContainerRuntime::execute_container_init() -> void {
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
-        if (umask(m_container_config.user.umask) == -1) [[unlikely]] {
-                log_event(std::format("[{}] [{}] Container Runtime Error: umask failed before exec.\n",
-                                        chrono::system_clock::now(), m_container_config.container_id));
-                _exit(EXIT_FAILURE);
-        }
+        umask(m_container_config.user.umask);
         if (prctl(PR_SET_PDEATHSIG, SIGKILL) == -1) [[unlikely]] {
                 log_event(std::format("[{}] [{}] Container Runtime Error: prctl PR_SET_PDEATHSIG failed.\n",
                                         chrono::system_clock::now(), m_container_config.container_id));
                 _exit(EXIT_FAILURE);
         }
         exec_commands();
-        log_event(std::format("[{}] [{}] Container Runtime Error: exec failed.\n",
-                                chrono::system_clock::now(), m_container_config.container_id));
+        log_event(std::format("[{}] [{}] Container Runtime Error: exec failed. Reason: {}\n",
+                                chrono::system_clock::now(), m_container_config.container_id, strerror(errno)));
         _exit(EXIT_FAILURE);
 }
 
@@ -655,7 +667,8 @@ auto ContainerRuntime::setup_security_paths() -> void {
 }
 
 auto ContainerRuntime::supervise_container(pid_t pid) -> void {
-        static pid_t s_target_child{pid};
+        static pid_t s_target_child{-1};
+        s_target_child = pid;
 
         struct sigaction sa{};
         sa.sa_handler = [](int sig) {

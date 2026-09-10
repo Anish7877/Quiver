@@ -4,6 +4,7 @@
 #include <exception>
 #include <stdexcept>
 #include <string>
+#include <filesystem>
 #include <sdbus-c++/sdbus-c++.h>
 using SystemdProperty = sdbus::Struct<std::string, sdbus::Variant>;
 
@@ -72,6 +73,10 @@ auto SystemdCGroupsManager::set_io_max(std::uint64_t major, std::uint64_t minor,
         update_dbus_property("IOAccounting", sdbus::Variant(true));
         std::string dev_path{std::format("/dev/block/{}:{}", major, minor)};
 
+        if (!std::filesystem::exists(dev_path)) {
+                throw std::invalid_argument(std::format("SystemdCGroupsManager Error: Invalid block device {}", dev_path));
+        }
+
         auto make_io_variant{[&](std::uint64_t limit) {
                 std::vector<sdbus::Struct<std::string, std::uint64_t>> io_array{};
                 io_array.emplace_back(sdbus::make_struct(dev_path, limit));
@@ -101,6 +106,10 @@ auto SystemdCGroupsManager::set_io_weight(std::uint64_t major, std::uint64_t min
         if (weight > 10000) weight = 10000;
 
         std::string dev_path{std::format("/dev/block/{}:{}", major, minor)};
+
+        if (!std::filesystem::exists(dev_path)) {
+                throw std::invalid_argument(std::format("SystemdCGroupsManager Error: Invalid block device {}", dev_path));
+        }
 
         std::vector<sdbus::Struct<std::string, std::uint64_t>> io_weight_array{};
         io_weight_array.emplace_back(sdbus::make_struct(dev_path, weight));

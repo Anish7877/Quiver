@@ -59,6 +59,13 @@ auto PastaNetwork::setup_networking(pid_t container_pid, const OCIRuntime::Netwo
                         dup2(null_fd, STDERR_FILENO);
                         close(null_fd);
                 }
+                
+                long max_fd{sysconf(_SC_OPEN_MAX)};
+                if (max_fd == -1) max_fd = 1024;
+                for (int fd{3}; fd < max_fd; ++fd) {
+                        close(fd);
+                }
+
                 execv(pasta_path.c_str(), c_args.data());
                 std::cerr << std::format("Network Fatal: execv failed for pasta -> '{}'.\n", std::strerror(errno));
                 _exit(EXIT_FAILURE);

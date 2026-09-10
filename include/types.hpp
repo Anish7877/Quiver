@@ -4,6 +4,7 @@
 #include <atomic>
 #include <string>
 #include <new>
+#include <format>
 #include "cgroups_manager_interface.hpp"
 
 enum class JobType : std::uint8_t {
@@ -86,11 +87,42 @@ struct IOWeightUpdate {
         std::uint64_t weight{};
 };
 
+enum class ContainerStatus : std::uint8_t {
+    CREATED = 0,
+    RUNNING = 1,
+    PAUSED = 2,
+    STOPPED = 3,
+    EXITED = 4,
+    INTERRUPTED_BY_REBOOT = 5,
+    KILLED = 6,
+    UNKNOWN = 7
+};
+
+inline std::string to_string(ContainerStatus status) {
+    switch (status) {
+        case ContainerStatus::CREATED: return "created";
+        case ContainerStatus::RUNNING: return "running";
+        case ContainerStatus::PAUSED: return "paused";
+        case ContainerStatus::STOPPED: return "stopped";
+        case ContainerStatus::EXITED: return "exited";
+        case ContainerStatus::INTERRUPTED_BY_REBOOT: return "interrupted by reboot";
+        case ContainerStatus::KILLED: return "killed";
+        default: return "unknown";
+    }
+}
+
+template <>
+struct std::formatter<ContainerStatus> : std::formatter<std::string> {
+    auto format(ContainerStatus status, format_context& ctx) const {
+        return formatter<string>::format(to_string(status), ctx);
+    }
+};
+
 struct ContainerDbObject {
         ContainerConfig config{};
         std::string name{};
         std::string image{};
-        std::string status{};
+        ContainerStatus status{};
         std::string created_at{};
         int exit_code{-1};
         pid_t pid{};

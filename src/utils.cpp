@@ -205,8 +205,12 @@ auto Utils::change_owners(const fs::path& path, uid_t uid, gid_t gid) -> void {
 }
 
 auto Utils::get_base_dir() -> fs::path {
-        const char* home{getenv("HOME")};
-        std::string base{home ? std::string(home) : "/tmp"};
+        const char* home_dir{std::getenv("HOME")};
+        if (home_dir == nullptr) {
+                struct passwd* pw = getpwuid(getuid());
+                if (pw) home_dir = pw->pw_dir;
+        }
+        std::string base{home_dir ? std::string(home_dir) : "/tmp"};
         return base + "/.quiver";
 }
 
@@ -357,7 +361,7 @@ auto Utils::spawn_new_consumer() -> pid_t {
                 ssize_t n = read(sync_pipe[0], &consumer_pid, sizeof(consumer_pid));
                 close(sync_pipe[0]);
                 waitpid(intermediate_pid, nullptr, 0);
-                if (n != static_cast<ssize_t>(sizeof(consumer_pid)) || consumer_pid <= 0) {
+                if (n != static_cast<ssize_t>(sizeof(consumer_pid)) || consumer_pid < 0) {
                         return -1;
                 }
                 return consumer_pid;
@@ -394,6 +398,8 @@ auto Utils::spawn_new_consumer() -> pid_t {
         }
 
         if (flock(fd, LOCK_EX | LOCK_NB) == -1) {
+                pid_t already_running{0};
+                if (write(sync_pipe[1], &already_running, sizeof(already_running)) == -1) {}
                 close(fd);
                 close(sync_pipe[1]);
                 _exit(EXIT_SUCCESS);
@@ -418,6 +424,8 @@ auto Utils::spawn_new_consumer() -> pid_t {
         log_job_processor.process_job();
         database_job_processor.process_job();
         if (write(sync_pipe[1], &my_pid, sizeof(my_pid)) != static_cast<ssize_t>(sizeof(my_pid))) {
+                flock(fd, LOCK_UN);
+                close(fd);
                 close(sync_pipe[1]);
                 _exit(EXIT_FAILURE);
         }
@@ -639,7 +647,7 @@ auto Utils::extract_tarball(const std::string& tarball_path, const std::string& 
         std::unique_ptr<struct archive, decltype(&archive_read_free)> a_guard{a, archive_read_free};
         std::unique_ptr<struct archive, decltype(&archive_write_free)> ext_guard{ext, archive_write_free};
 
-        if (archive_read_open_filename(a, tarball_path.c_str(), 10240) != ARCHIVE_OK) [[unlikely]] {
+        if (archive_read_open_filename(a, tarball_path.c_str(), 65536) != ARCHIVE_OK) [[unlikely]] {
                 throw std::runtime_error(std::format("Tar Error: Could not open {} - {}", tarball_path, archive_error_string(a)));
         }
 
@@ -738,7 +746,7 @@ auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string
         std::unique_ptr<struct archive, decltype(&archive_read_free)> a_guard{a, archive_read_free};
         std::unique_ptr<struct archive, decltype(&archive_write_free)> ext_guard{ext, archive_write_free};
 
-        if (archive_read_open_filename(a, tarball_path.c_str(), 10240) != ARCHIVE_OK) [[unlikely]] {
+        if (archive_read_open_filename(a, tarball_path.c_str(), 65536) != ARCHIVE_OK) [[unlikely]] {
                 throw std::runtime_error(std::format("Tar Error: Could not open {} - {}", tarball_path, archive_error_string(a)));
         }
 
@@ -845,21 +853,21 @@ auto Utils::extract_oci_layer(const std::string& tarball_path, const std::string
 }
 
 auto Utils::is_archive(const fs::path& path) -> bool {
-        archive* a{archive_read_new()};
-        if (a == nullptr) {
+        archive* raw_a{archive_read_new()};
+        if (raw_a == nullptr) {
                 throw std::runtime_error("Tar Error: Failed to create archive reader.");
         }
-        archive_read_support_filter_all(a);
-        archive_read_support_format_all(a);
+        std::unique_ptr<struct archive, decltype(&archive_read_free)> a(raw_a, archive_read_free);
+        
+        archive_read_support_filter_all(a.get());
+        archive_read_support_format_all(a.get());
 
-        if (archive_read_open_filename(a, path.c_str(), 10240) != ARCHIVE_OK) {
-                archive_read_free(a);
+        if (archive_read_open_filename(a.get(), path.c_str(), 65536) != ARCHIVE_OK) {
                 return false;
         }
         archive_entry* entry{};
-        bool is_arc{archive_read_next_header(a, &entry) ==  ARCHIVE_OK};
-        archive_read_close(a);
-        archive_read_free(a);
+        bool is_arc{archive_read_next_header(a.get(), &entry) == ARCHIVE_OK};
+        archive_read_close(a.get());
         return is_arc;
 }
 
@@ -925,86 +933,92 @@ auto Utils::sha256_file(const fs::path& file) -> std::string {
 }
 
 auto Utils::print_usage() -> void { std::cout << "Usage: quiver <command> [options] [arguments]\n\n" << "Commands:\n"
-        << "  run [options] <image> [command] [arg...]  Create and start a new container\n"
-                << "    General Options:\n"
-                << "      -n, --name <name>            Assign a name to the container\n"
-                << "      -d, --detach                 Run container in background and print container ID\n"
-                << "      -i, --interactive            Keep STDIN open even if not attached\n"
-                << "      -t, --tty                    Allocate a pseudo-TTY\n"
-                << "      -u, --user <uid[:gid]>       Username or UID (format: <uid|user>[:<gid|group>])\n"
-                << "      -w, --workdir <dir>          Working directory inside the container\n"
-                << "      -e, --env <key=value>        Set environment variables\n"
-                << "      --env-file <file>            Read in a file of environment variables\n"
-                << "      --hostname <name>            Container host name\n"
-                << "      --domainname <name>          Container NIS domain name\n"
-                << "    Filesystem & Mounts:\n"
-                << "      -v, --volume, --mount <v>    Bind mount a volume (format: host_dir:container_dir[:ro|rw])\n"
-                << "      --tmpfs <dir>                Mount a tmpfs directory\n"
-                << "      --read-only                  Mount the container's root filesystem as read only\n"
-                << "      --read-only-path <path>      Make a specific path read-only\n"
-                << "      --mask <path>                Mask a path inside the container\n"
-                << "      --rootfs-propagation <mode>  Mount propagation mode\n"
-                << "    Network & Ports:\n"
-                << "      -p, --publish <port>         Publish a container's port(s) to the host\n"
-                << "      -P, --publish-all            Publish all exposed ports to random ports\n"
-                << "    Security & Capabilities:\n"
-                << "      --cap-add <cap>              Add Linux capabilities\n"
-                << "      --cap-drop <cap>             Drop Linux capabilities\n"
-                << "      --security-opt <opt>         Security Options (e.g. seccomp=profile.json, no-new-privileges)\n"
-                << "      --device, --cdi <device>     Add a host device to the container\n"
-                << "    Resources & Limits:\n"
-                << "      --ulimit <type=soft:hard>    Ulimit options\n"
-                << "      --oom-score-adj <num>        Tune host's OOM preferences (-1000 to 1000)\n"
-                << "      --cgroup-path <path>         Path to cgroups\n"
-                << "      --cpu-quota <num>            Limit CPU CFS (Completely Fair Scheduler) quota\n"
-                << "      --cpu-period <num>           Limit CPU CFS (Completely Fair Scheduler) period\n"
-                << "      --cpu-weight <num>           CPU weight (relative weight)\n"
-                << "      --memory-max <bytes>         Memory limit\n"
-                << "      --memory-swap <bytes>        Swap limit equal to memory plus swap\n"
-                << "      --pids-limit <num>           Tune container pids limit\n"
-                << "      --cpuset-cpus <cpus>         CPUs in which to allow execution (0-3, 0,1)\n"
-                << "      --set-cpuset-mems <mems>     MEMs in which to allow execution (0-3, 0,1)\n"
-                << "      --set-io-max <limits>        Set IO max limits (MAJOR:MINOR:RBPS:WBPS:RIOPS:WIOPS)\n"
-                << "      --set-io-weight <weight>     Set IO weight (MAJOR:MINOR:WEIGHT)\n"
-                << "    Namespaces & IPC:\n"
-                << "      --pid, --net, --ipc, --uts, --mount-ns, --time, --cgroup <path>\n"
-                << "                                   Join existing namespaces\n"
-                << "      --time-offset <type=secs>    Set time namespace offset\n"
-                << "    Scheduler & Terminal:\n"
-                << "      --cpu-policy <policy>        Set CPU scheduling policy\n"
-                << "      --cpu-priority <num>         Set CPU scheduling priority\n"
-                << "      --cpu-nice <num>             Set CPU nice value\n"
-                << "      --cpu-rt-runtime <num>       Set CPU real-time runtime\n"
-                << "      --cpu-rt-period <num>        Set CPU real-time period\n"
-                << "      --cpu-scheduler-flags <flag> Set CPU scheduler flags\n"
-                << "      --console-width <num>        Set console width\n"
-                << "      --console-height <num>       Set console height\n\n"
-                << "  start <container_id> ...         Start one or more stopped containers\n"
-                << "  stop <container_id> ...          Stop one or more running containers\n"
-                << "  rm <container_id> ...            Remove one or more containers\n"
-                << "  attach <container_id>            Attach local standard input, output, and error to a running container\n\n"
-                << "  ps [-a]                          List containers\n"
-                << "      -a                           Show all containers (default shows just running)\n\n"
-                << "  pull <image_name>                Pull an image from a registry\n\n"
-                << "  image <subcommand>               Manage images\n"
-                << "      ls                           List available images\n"
-                << "      rm <image:tag>               Remove an image\n"
-                << "      cls <image_name>             List containers using a specific image\n\n"
-                << "  volume <subcommand>              Manage volumes\n"
-                << "      ls                           List all volumes\n"
-                << "      rm <volume_id> ...           remove one or more volume links\n\n"
-                << "  network <subcommand>             Manage networks\n"
-                << "      ls                           List all network port mappings\n"
-                << "      rm <network_id> ...          remove one or more network links\n"
-                << "      add <container_id> [args]                                    \n"
-                << "              <host:cont> ...      add a new network link\n\n"
-                << "  create <subcommand>              Create resources\n"
-                << "      volume <container_id> [args]                 \n"
-                << "                  <host:cont> ...  Create a volume link for container\n\n"
-                << "  vfs rm <container_id>            remove vfs for a container\n\n"
-                << "  help                             Show this help message\n"
-                << "  logs <container_id>              Fetch the logs of a container\n"
-                << "  clear-logs                       Clear all cached logs\n";
+        << "  run [options] <image> [command] [arg...]         Create and start a new container\n"
+        << "  create [options] <image> [command] [arg...]      Create a new container without starting it\n"
+        << "    General Options (run & create):\n"
+        << "      -j, --from-json <file>       Create container using a custom JSON config (create only)\n"
+        << "      -n, --name <name>            Assign a name to the container\n"
+        << "      -d, --detach                 Run container in background and print container ID\n"
+        << "      -i, --interactive            Keep STDIN open even if not attached\n"
+        << "      -t, --tty                    Allocate a pseudo-TTY\n"
+        << "      -u, --user <uid[:gid]>       Username or UID (format: <uid|user>[:<gid|group>])\n"
+        << "      -w, --workdir <dir>          Working directory inside the container\n"
+        << "      -e, --env <key=value>        Set environment variables\n"
+        << "      --env-file <file>            Read in a file of environment variables\n"
+        << "      --hostname <name>            Container host name\n"
+        << "      --domainname <name>          Container NIS domain name\n"
+        << "    Filesystem & Mounts:\n"
+        << "      -v, --volume, --mount <v>    Bind mount a volume (format: host_dir:container_dir[:ro|rw])\n"
+        << "      --tmpfs <dir>                Mount a tmpfs directory\n"
+        << "      --read-only                  Mount the container's root filesystem as read only\n"
+        << "      --read-only-path <path>      Make a specific path read-only\n"
+        << "      --mask <path>                Mask a path inside the container\n"
+        << "      --rootfs-propagation <mode>  Mount propagation mode\n"
+        << "    Network & Ports:\n"
+        << "      -p, --publish <port>         Publish a container's port(s) to the host\n"
+        << "      -P, --publish-all            Publish all exposed ports to random ports\n"
+        << "    Security & Capabilities:\n"
+        << "      --cap-add <cap>              Add Linux capabilities\n"
+        << "      --cap-drop <cap>             Drop Linux capabilities\n"
+        << "      --security-opt <opt>         Security Options (e.g. seccomp=profile.json, no-new-privileges)\n"
+        << "      --device, --cdi <device>     Add a host device to the container\n"
+        << "    Resources & Limits:\n"
+        << "      --ulimit <type=soft:hard>    Ulimit options\n"
+        << "      --oom-score-adj <num>        Tune host's OOM preferences (-1000 to 1000)\n"
+        << "      --cgroup-path <path>         Path to cgroups\n"
+        << "      --cpu-quota <num>            Limit CPU CFS (Completely Fair Scheduler) quota\n"
+        << "      --cpu-period <num>           Limit CPU CFS (Completely Fair Scheduler) period\n"
+        << "      --cpu-weight <num>           CPU weight (relative weight)\n"
+        << "      --memory-max <bytes>         Memory limit\n"
+        << "      --memory-swap <bytes>        Swap limit equal to memory plus swap\n"
+        << "      --pids-limit <num>           Tune container pids limit\n"
+        << "      --cpuset-cpus <cpus>         CPUs in which to allow execution (0-3, 0,1)\n"
+        << "      --set-cpuset-mems <mems>     MEMs in which to allow execution (0-3, 0,1)\n"
+        << "      --set-io-max <limits>        Set IO max limits (MAJOR:MINOR:RBPS:WBPS:RIOPS:WIOPS)\n"
+        << "      --set-io-weight <weight>     Set IO weight (MAJOR:MINOR:WEIGHT)\n"
+        << "    Namespaces & IPC:\n"
+        << "      --pid, --net, --ipc, --uts, --mount-ns, --time, --cgroup <path|container:<id>>\n"
+        << "                                   Join existing namespaces\n"
+        << "      --time-offset <type=secs>    Set time namespace offset\n"
+        << "    Scheduler & Terminal:\n"
+        << "      --cpu-policy <policy>        Set CPU scheduling policy\n"
+        << "      --cpu-priority <num>         Set CPU scheduling priority\n"
+        << "      --cpu-nice <num>             Set CPU nice value\n"
+        << "      --cpu-rt-runtime <num>       Set CPU real-time runtime\n"
+        << "      --cpu-rt-period <num>        Set CPU real-time period\n"
+        << "      --cpu-scheduler-flags <flag> Set CPU scheduler flags\n"
+        << "      --console-width <num>        Set console width\n"
+        << "      --console-height <num>       Set console height\n\n"
+        << "  start <container_id> ...         Start one or more stopped containers\n"
+        << "  stop <container_id> ...          Stop one or more running containers\n"
+        << "  restart <container_id> ...       Restart one or more running containers\n"
+        << "  pause <container_id> ...         Pause all processes within one or more containers\n"
+        << "  unpause <container_id> ...       Unpause all processes within one or more containers\n"
+        << "  rm <container_id> ...            Remove one or more containers\n"
+        << "  kill <container_id> ...          Kill one or more running containers\n"
+        << "  wait <container_id>              Block until a container stops, then print its exit code\n"
+        << "  prune                            Remove all stopped containers\n"
+        << "  attach <container_id>            Attach local standard input, output, and error to a running container\n"
+        << "  exec [options] <container_id> <command> [arg...]\n"
+        << "                                   Run a command in a running container\n"
+        << "  cp <container_id>:<path> <host_path>   Copy files/folders between a container and the local filesystem\n"
+        << "  cp <host_path> <container_id>:<path>\n"
+        << "  inspect <container_id>           Return low-level information on Quiver objects\n"
+        << "  stats <container_id> ...         Display a live stream of container(s) resource usage statistics\n"
+        << "  top <container_id>               Display the running processes of a container\n"
+        << "  ports <container_id>             List port mappings or a specific mapping for the container\n"
+        << "  mount <container_id>             Mount a container's root filesystem and print the mount path\n"
+        << "  update <container_id> [options]  Update configuration of one or more containers\n\n"
+        << "  ps [-a]                          List containers\n"
+        << "      -a                           Show all containers (default shows just running)\n\n"
+        << "  image <subcommand>               Manage images\n"
+        << "      ls                           List available images\n"
+        << "      rm <image:tag>               Remove an image\n"
+        << "      prune                        Remove unused images\n\n"
+        << "  build <path>                     Build an image from a Dockerfile\n"
+        << "  generate-systemd <container_id>  Generate systemd unit file for a container\n"
+        << "  help                             Show this help message\n"
+        << std::endl;
 }
 
 
@@ -1259,9 +1273,11 @@ auto Utils::create_connection(std::string_view path) -> int {
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, path.data(), sizeof(addr.sun_path)-1);
         if (bind(sock_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1) [[unlikely]] {
+                close(sock_fd);
                 return -1;
         }
         if (listen(sock_fd, 1) == -1) [[unlikely]] {
+                close(sock_fd);
                 return -1;
         }
         return sock_fd;
@@ -1335,7 +1351,7 @@ auto Utils::load_oci_tar(const fs::path& tar_path, const fs::path& dest_dir) -> 
         }
 
         std::error_code ec{};
-        fs::path temp_layout_dir{std::format("/tmp/quiver_layout_{}", getpid())};
+        fs::path temp_layout_dir = dest_dir.parent_path().parent_path() / "raw_images" / dest_dir.filename();
         fs::create_directories(temp_layout_dir, ec);
 
         std::cout << "Extracting raw OCI layout\n";
@@ -1451,7 +1467,7 @@ auto Utils::load_oci_tar(const fs::path& tar_path, const fs::path& dest_dir) -> 
                 } else if (WIFSIGNALED(status)) {
                         std::cerr << "Error: process killed by signal " << WTERMSIG(status) << "\n";
                 }
-                fs::remove_all(temp_layout_dir);
+                // fs::remove_all(temp_layout_dir); // Kept for pushing
 
                 return success;
         }

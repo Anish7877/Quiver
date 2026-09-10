@@ -173,6 +173,10 @@ auto Mount::_devices(const std::vector<OCIRuntime::Device>& devices, const fs::p
                 fs::path actual_target{container_root / rel_path};
                 try {
                         Utils::ensure_dir(actual_target.parent_path());
+                        if (!fs::is_directory(actual_target.parent_path())) {
+                                std::cerr << std::format("Warn: Cannot create target device file -> '{}' : parent is not a directory.\n", actual_target.string());
+                                continue;
+                        }
                 }
                 catch (const std::exception& e) {
                         std::cerr << e.what() << '\n';

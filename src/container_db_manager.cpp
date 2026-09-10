@@ -55,7 +55,7 @@ auto ContainerDbManager::remove_container(const std::string& key) -> void {
                 std::cerr << std::format("Error: Container '{}' not found\n", key);
                 return;
         }
-        if (metadata->status == "running") {
+        if (metadata->status == ContainerStatus::RUNNING) {
                 std::cerr << std::format("Error: Cannot remove container '{}' -> status is running\n", key);
                 return;
         }
@@ -110,7 +110,7 @@ auto ContainerDbManager::list_all_running_container() -> void {
                         "NAME", name_width, "STATUS", status_width, "CREATED");
 
         for (const auto& container : containers) {
-                if (container.status != "running") continue;
+                if (container.status != ContainerStatus::RUNNING) continue;
                 std::cout << std::format("{:<{}}  {:<{}}  {:<{}}  {:<{}}  {}\n", container.config.container_id, id_width, container.image, image_width,
                                 container.name, name_width, container.status, status_width, container.created_at);
         }
@@ -149,27 +149,35 @@ auto ContainerDbManager::get_container(const std::string& key) -> std::optional<
         else {
                 client_fd = accept(socket_fd, nullptr, nullptr);
                 if (client_fd == -1) [[unlikely]] {
+                        close(socket_fd);
+                        unlink(sock_path.c_str());
                         std::cerr << "Error: Failed to connect to job processor\n";
                         return std::nullopt;
                 }
         }
         size_t result_size{};
         if (!Utils::recv_all(client_fd, &result_size, sizeof(result_size))) [[unlikely]] {
-                std::cerr << "Error: Unable to read result bytes\n";
+                close(socket_fd);
                 close(client_fd);
+                unlink(sock_path.c_str());
+                std::cerr << "Error: Unable to read result bytes\n";
                 return std::nullopt;
         }
 
         if (result_size == 0) {
                 close(client_fd);
+                close(socket_fd);
+                unlink(sock_path.c_str());
                 return std::nullopt;
         }
 
         std::string raw_bytes{};
         raw_bytes.resize(result_size);
         if (!Utils::recv_all(client_fd, &raw_bytes[0], result_size)) [[unlikely]] {
-                std::cerr << "Error: Unable to read raw bytes\n";
                 close(client_fd);
+                close(socket_fd);
+                unlink(sock_path.c_str());
+                std::cerr << "Error: Unable to read raw bytes\n";
                 return std::nullopt;
         }
         close(client_fd);
@@ -181,12 +189,12 @@ auto ContainerDbManager::get_container(const std::string& key) -> std::optional<
                 std::cerr << std::format("Serialization Error: Unable to deserialize the value for key '{}'\n", key);
                 return std::nullopt;
         }
-        if (metadata->status == "running" && !Utils::is_process_alive(metadata->config.pid, metadata->config.container_id)) {
+        if (metadata->status == ContainerStatus::RUNNING && !Utils::is_process_alive(metadata->config.pid, metadata->config.container_id)) {
                 if (metadata->boot_time < boot_time) {
-                        metadata->status = "interrupted by reboot";
+                        metadata->status = ContainerStatus::INTERRUPTED_BY_REBOOT;
                 }
                 else {
-                        metadata->status = "killed";
+                        metadata->status = ContainerStatus::KILLED;
                 }
                 update_container(key, metadata.value());
         }
@@ -226,12 +234,17 @@ auto ContainerDbManager::get_all_container() -> std::vector<ContainerDbObject> {
         else {
                 client_fd = accept(socket_fd, nullptr, nullptr);
                 if (client_fd == -1) [[unlikely]] {
+                        close(socket_fd);
+                        unlink(sock_path.c_str());
                         std::cerr << "Error: Failed to connect to job processor\n";
                         return {};
                 }
         }
         size_t n_entries{0};
         if (!Utils::recv_all(client_fd, &n_entries, sizeof(n_entries))) {
+                close(client_fd);
+                close(socket_fd);
+                unlink(sock_path.c_str());
                 std::cerr << "Error: Unable to get number of entries\n";
                 return containers;
         }
@@ -263,12 +276,12 @@ auto ContainerDbManager::get_all_container() -> std::vector<ContainerDbObject> {
                 }
                 auto metadata{extract_metadata(value)};
                 if (!metadata) continue;
-                if (metadata->status == "running" && !Utils::is_process_alive(metadata->config.pid, metadata->config.container_id)) {
+                if (metadata->status == ContainerStatus::RUNNING && !Utils::is_process_alive(metadata->config.pid, metadata->config.container_id)) {
                         if (metadata->boot_time < boot_time) {
-                                metadata->status = "interrupted by reboot";
+                                metadata->status = ContainerStatus::INTERRUPTED_BY_REBOOT;
                         }
                         else {
-                                metadata->status = "killed";
+                                metadata->status = ContainerStatus::KILLED;
                         }
                         update_container(key, metadata.value());
                 }

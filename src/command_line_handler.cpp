@@ -206,9 +206,16 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
 
                 try {
                         auto dir_opts = fs::directory_options::skip_permission_denied;
+                        std::set<std::pair<dev_t, ino_t>> seen_inodes{};
+
                         for (const auto& entry : fs::recursive_directory_iterator(outpath, dir_opts)) {
                                 if (entry.is_regular_file() && !entry.is_symlink()) {
-                                        image_metadata.size_bytes += entry.file_size();
+                                        struct stat st{};
+                                        if (stat(entry.path().c_str(), &st) == 0) {
+                                                if (seen_inodes.insert({st.st_dev, st.st_ino}).second) {
+                                                        image_metadata.size_bytes += st.st_size;
+                                                }
+                                        }
                                 }
                         }
                 } catch (const std::exception& e) {
@@ -367,8 +374,46 @@ auto CommandLineHandler::run(std::span<std::string> args) -> void {
                                 arg == "--mount-ns" || arg == "--time" || arg == "--cgroup") {
                         if (++i < positional_start) {
                                 OCIRuntime::Namespace ns;
-                                ns.type = arg.substr(2);
-                                ns.path = args[i];
+                                std::string arg_type = arg.substr(2);
+                                if (arg_type == "net") {
+                                        ns.type = "network";
+                                } else if (arg_type == "mount-ns") {
+                                        ns.type = "mount";
+                                } else {
+                                        ns.type = arg_type;
+                                }
+
+                                std::string val = args[i];
+                                if (val.starts_with("container:")) {
+                                        std::string target_cid = val.substr(10);
+                                        auto& db{ContainerDbManager::get_instance()};
+                                        db.init();
+                                        auto target_cont = db.get_container(target_cid);
+                                        if (target_cont.has_value() && target_cont->status == ContainerStatus::RUNNING) {
+                                                bool has_userns = false;
+                                                for (const auto& existing_ns : container_config.namespaces) {
+                                                        if (existing_ns.type == "user") has_userns = true;
+                                                }
+                                                if (!has_userns) {
+                                                        OCIRuntime::Namespace userns;
+                                                        userns.type = "user";
+                                                        userns.path = std::format("/proc/{}/ns/user", target_cont->pid);
+                                                        container_config.namespaces.push_back(userns);
+                                                }
+
+                                                std::string linux_ns = arg_type;
+                                                if (arg_type == "mount-ns") linux_ns = "mnt";
+                                                ns.path = std::format("/proc/{}/ns/{}", target_cont->pid, linux_ns);
+                                        } else {
+                                                std::cerr << "Error: Target container '" << target_cid << "' is not running or does not exist.\n";
+                                                _exit(EXIT_FAILURE);
+                                        }
+                                } else {
+                                        ns.path = val;
+                                }
+                                std::erase_if(container_config.namespaces, [&](const OCIRuntime::Namespace& existing) {
+                                        return existing.type == ns.type;
+                                });
                                 container_config.namespaces.push_back(ns);
                         }
                 } else if (arg == "--time-offset") {
@@ -707,11 +752,11 @@ auto CommandLineHandler::pause(std::span<std::string> args) -> void {
         }
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(args.front())};
-                if (container && container->status == "running") {
+                if (container && container->status == ContainerStatus::RUNNING) {
                         auto cgroup_manager{CGroupsManagerCreator::create_cgourps_manager(std::to_string(container->pid),
                                         container->config.cgroups_path)};
                         cgroup_manager->set_freeze("1");
-                        container->status = "paused";
+                        container->status = ContainerStatus::PAUSED;
                         container_db_manager.update_container(container->config.container_id, container.value());
                 }
                 else {
@@ -730,11 +775,11 @@ auto CommandLineHandler::unpause(std::span<std::string> args) -> void {
         }
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(args.front())};
-                if (container && container->status == "paused") {
+                if (container && container->status == ContainerStatus::PAUSED) {
                         auto cgroup_manager{CGroupsManagerCreator::create_cgourps_manager(std::to_string(container->pid),
                                         container->config.cgroups_path)};
                         cgroup_manager->set_freeze("0");
-                        container->status = "running";
+                        container->status = ContainerStatus::RUNNING;
                         container_db_manager.update_container(container->config.container_id, container.value());
                 }
                 else {
@@ -824,7 +869,7 @@ auto CommandLineHandler::start(std::span<std::string> args) -> void {
         }
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(arg)};
-                if (container && container->status != "running" && container->status != "paused") {
+                if (container && container->status != ContainerStatus::RUNNING && container->status != ContainerStatus::PAUSED) {
                         if (!fs::exists(Utils::get_image_path(container->image) / "config.json")) [[unlikely]] {
                                 std::cerr << std::format("Image '{}' doesn't exist please pull image first.\n", container->image);
                                 continue;
@@ -842,6 +887,10 @@ auto CommandLineHandler::start(std::span<std::string> args) -> void {
                         limits.io_weight_updates = container->io_weight_updates;
                         container_monitor.init(container->config, container->image, container->name, limits, false);
                         container_monitor.invoke_container();
+                        if (container->config.terminal.value && !container->config.detach.value) {
+                                container_monitor.attach_to_container(container->config.container_id);
+                        }
+
                 }
                 else {
                         std::cerr << std::format("Error: Container '{}' not found or Container already running or paused\n", arg);
@@ -881,7 +930,7 @@ auto CommandLineHandler::stop(std::span<std::string> args) -> void {
 
         for (const auto& arg : args) {
                 auto container{container_db_manager.get_container(arg)};
-                if (container && (container->status == "running" || container->status == "paused")) {
+                if (container && (container->status == ContainerStatus::RUNNING || container->status == ContainerStatus::PAUSED)) {
                         auto cgroup_base_opt{get_cgroup_path(container->pid)};
                         if (cgroup_base_opt) {
                                 fs::path cg_kill_path{cgroup_base_opt.value() / "cgroup.kill"};
@@ -910,10 +959,10 @@ auto CommandLineHandler::stop(std::span<std::string> args) -> void {
                                 }
                                 for (size_t i{0}; i<50; ++i) {
                                         auto check_container{container_db_manager.get_container(arg)};
-                                        if (check_container && check_container->status == "exited") break;
+                                        if (check_container && check_container->status == ContainerStatus::EXITED) break;
                                         std::this_thread::sleep_for(std::chrono::milliseconds(200));
                                 }
-                                container->status = "stopped";
+                                container->status = ContainerStatus::STOPPED;
                                 container_db_manager.update_container(arg, container.value());
                                 std::cout << std::format("Container '{}' stopped successfully.\n", arg);
                         }
@@ -934,7 +983,7 @@ auto CommandLineHandler::prune(std::span<std::string> args) -> void {
         }
         auto containers{container_db_manager.get_all_container()};
         for (const auto& container : containers) {
-                if (container.status != "running" && container.status != "paused") {
+                if (container.status != ContainerStatus::RUNNING && container.status != ContainerStatus::PAUSED) {
                         container_db_manager.remove_container(container.config.container_id);
                         try {
                                 Utils::remove_directory(std::format("{}/filesystems/quiver_{}", Utils::get_base_dir().string(),
@@ -1091,7 +1140,7 @@ auto CommandLineHandler::stats(std::span<std::string> args) -> void {
         std::cout << std::format("{:<70} {:<10} {:<15} {:<10}\n", "CONTAINER ID", "CPU %", "MEM USAGE", "PIDS");
         auto containers{container_db_manager.get_all_container()};
         for (const auto& container : containers) {
-                if (container.status != "running") {
+                if (container.status != ContainerStatus::RUNNING) {
                         continue;
                 }
 
@@ -1249,7 +1298,7 @@ auto CommandLineHandler::top(std::span<std::string> args) -> void {
         };
         auto target_id{args[0]};
         auto container{container_db_manager.get_container(target_id)};
-        if (!container || (container->status != "running" && container->status == "paused")) {
+        if (!container || (container->status != ContainerStatus::RUNNING && container->status == ContainerStatus::PAUSED)) {
                 std::cerr << std::format("Error: Container '{}' not found or is not running or paused.\n", target_id);
                 return;
         }
@@ -1428,7 +1477,7 @@ auto CommandLineHandler::update(std::span<std::string> args) -> void {
                 return;
         }
 
-        if (container->status != "running" || container->status != "paused") {
+        if (container->status != ContainerStatus::RUNNING || container->status != ContainerStatus::PAUSED) {
                 std::cerr << std::format("Error: Cannot update limits. Container '{}' is not running.\n", target_id);
                 return;
         }
@@ -1602,21 +1651,16 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                 }
 
                 std::string primary_tag{tags[0]};
-                bool image_tag_found{false};
-                size_t idx{0};
                 for (char& c : primary_tag) {
-                        if (c == ':') {
+                        if (c == ':' || c == '/') {
                                 c = '_';
-                                image_tag_found = true;
-                                idx++;
-                                break;
                         }
                 }
-                if (image_tag_found && idx == primary_tag.size()-1) {
+                if (tags[0].find(':') == tags[0].size() -1 ) {
                         primary_tag += "latest";
                         tags[0] += "latest";
                 }
-                else if (!image_tag_found) {
+                else if (!tags[0].find(':')) {
                         primary_tag += "_latest";
                         tags[0] += ":latest";
                 }
@@ -1632,6 +1676,16 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                 exec_args.push_back("--output");
                 exec_args.push_back("type=local,dest=" + final_dest_dir.string());
 
+
+                std::string raw_images_dir = (fs::path(home_dir) / ".quiver" / "raw_images").string();
+                std::string safe_tag_name = tags[0];
+                std::replace(safe_tag_name.begin(), safe_tag_name.end(), '/', '_');
+                std::replace(safe_tag_name.begin(), safe_tag_name.end(), ':', '_');
+                if (safe_tag_name.find('_') == std::string::npos) {
+                        safe_tag_name += "_latest";
+                }
+
+                temp_oci_dir = (fs::path(raw_images_dir) / safe_tag_name).string();
 
                 exec_args.push_back("--output");
                 exec_args.push_back("type=oci,dest=" + temp_oci_dir + ",tar=false");
@@ -1737,10 +1791,7 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                         std::cerr << std::format("Error: Build failed with exit code {}\n", WEXITSTATUS(status));
                 }
 
-                std::error_code ec{};
-                if (!temp_oci_dir.empty() && fs::exists(temp_oci_dir)) {
-                        fs::remove_all(temp_oci_dir, ec);
-                }
+                // OCI layout left in raw_images for pushing later
         }
 }
 
@@ -1776,12 +1827,140 @@ auto CommandLineHandler::create(std::span<std::string> args) -> void {
                 }
         }
 
-        std::string container_id = std::format("qvr-{:x}", std::time(nullptr));
+        std::string container_id = Utils::generate_id();
+
+        std::string target_rootfs{};
+        if (!image_name.empty()) {
+                target_rootfs = Utils::get_image_path(image_name);
+        } else if (!json_path.empty()) {
+                try {
+                        std::ifstream file(fs::absolute(json_path));
+                        nlohmann::json j;
+                        file >> j;
+                        if (j.contains("rootfs") && j["rootfs"].contains("path")) {
+                                target_rootfs = j["rootfs"]["path"].get<std::string>();
+                        }
+                } catch (...) {}
+        }
+
+        if (target_rootfs.empty() || !fs::exists(target_rootfs) || !fs::is_directory(target_rootfs)) {
+                std::cerr << "Error: A valid rootfs path must be provided either via IMAGE:TAG or inside the JSON configuration.\n";
+                return;
+        }
 
         ContainerConfig config{};
+        try {
+                config = SpecGenerator::generate_default_rootless_spec(container_id, target_rootfs);
+        } catch (const std::exception& e) {
+                std::cerr << "Error generating default spec: " << e.what() << "\n";
+                return;
+        }
+
+        fs::path config_path{fs::path(target_rootfs) / "config.json"};
+        if (!Utils::file_exists(config_path)) {
+                config_path = fs::path(target_rootfs) / "image_config.json";
+        }
+
+        if (Utils::file_exists(config_path)) {
+                try {
+                        std::ifstream config_file(config_path);
+                        nlohmann::json img_config;
+                        config_file >> img_config;
+
+                        if (img_config.contains("process")) {
+                                auto& process_cfg = img_config["process"];
+
+                                if (process_cfg.contains("terminal") && process_cfg["terminal"].is_boolean()) {
+                                        if (!config.terminal.value && !config.detach.value) {
+                                                config.terminal.value = process_cfg["terminal"].get<bool>();
+                                        }
+                                }
+
+                                if (process_cfg.contains("user")) {
+                                        auto& user_cfg = process_cfg["user"];
+                                        if (user_cfg.contains("uid") && user_cfg["uid"].is_number()) {
+                                                config.user.uid = user_cfg["uid"].get<uid_t>();
+                                        }
+                                        if (user_cfg.contains("gid") && user_cfg["gid"].is_number()) {
+                                                config.user.gid = user_cfg["gid"].get<gid_t>();
+                                        }
+                                        if (user_cfg.contains("additionalGids") && user_cfg["additionalGids"].is_array()) {
+                                                for (const auto& gid : user_cfg["additionalGids"]) {
+                                                        config.user.additional_gids.push_back(gid.get<gid_t>());
+                                                }
+                                        }
+                                }
+
+                                if (custom_cmds.empty() && process_cfg.contains("args") && process_cfg["args"].is_array()) {
+                                        for (const auto& item : process_cfg["args"]) {
+                                                custom_cmds.push_back(item.get<std::string>());
+                                        }
+                                }
+
+                                if (process_cfg.contains("env") && process_cfg["env"].is_array()) {
+                                        for (const auto& item : process_cfg["env"]) {
+                                                config.env.value.push_back(item.get<std::string>());
+                                        }
+                                }
+
+                                if (process_cfg.contains("cwd") && process_cfg["cwd"].is_string()) {
+                                        if (config.cwd.value == "/") {
+                                                config.cwd.value = process_cfg["cwd"].get<std::string>();
+                                        }
+                                }
+
+                                if (process_cfg.contains("capabilities")) {
+                                        auto& caps = process_cfg["capabilities"];
+                                        auto append_caps = [](const nlohmann::json& j, const std::string& key, std::vector<std::string>& out) {
+                                                if (j.contains(key) && j[key].is_array()) {
+                                                        for (const auto& item : j[key]) {
+                                                                std::string cap = item.get<std::string>();
+                                                                if (std::find(out.begin(), out.end(), cap) == out.end()) {
+                                                                        out.push_back(cap);
+                                                                }
+                                                        }
+                                                }
+                                        };
+                                        append_caps(caps, "bounding", config.capabilities.bounding);
+                                        append_caps(caps, "effective", config.capabilities.effective);
+                                        append_caps(caps, "inheritable", config.capabilities.inheritable);
+                                        append_caps(caps, "permitted", config.capabilities.permitted);
+                                        append_caps(caps, "ambient", config.capabilities.ambient);
+                                }
+
+                                if (process_cfg.contains("rlimits") && process_cfg["rlimits"].is_array()) {
+                                        for (const auto& rl : process_cfg["rlimits"]) {
+                                                OCIRuntime::RLimit rlimit{};
+                                                if (rl.contains("type") && rl["type"].is_string()) {
+                                                        std::string r_type = rl["type"].get<std::string>();
+                                                        if (r_type.starts_with("RLIMIT_")) r_type = r_type.substr(7);
+                                                        rlimit.name = r_type;
+                                                }
+                                                if (rl.contains("hard") && rl["hard"].is_number()) rlimit.hard_limit = rl["hard"].get<uint64_t>();
+                                                if (rl.contains("soft") && rl["soft"].is_number()) rlimit.soft_limit = rl["soft"].get<uint64_t>();
+                                                config.rlimits.push_back(rlimit);
+                                        }
+                                }
+
+                                if (process_cfg.contains("noNewPrivileges") && process_cfg["noNewPrivileges"].is_boolean()) {
+                                        config.no_new_privileges.value = process_cfg["noNewPrivileges"].get<bool>();
+                                }
+                                if (process_cfg.contains("oomScoreAdj") && process_cfg["oomScoreAdj"].is_number()) {
+                                        config.oom_score.value = process_cfg["oomScoreAdj"].get<int>();
+                                }
+                        }
+                } catch (const std::exception& e) {
+                        std::cerr << "Warning: Failed to parse image config.json: " << e.what() << "\n";
+                }
+        }
+
         if (!json_path.empty()) {
                 try {
-                        config = ConfigParser::parse_file(fs::absolute(json_path));
+                        std::ifstream file(fs::absolute(json_path));
+                        nlohmann::json j;
+                        file >> j;
+                        j.get_to(config);
+
                         if (config.container_id.empty()) {
                                 config.container_id = container_id;
                         } else {
@@ -1789,7 +1968,7 @@ auto CommandLineHandler::create(std::span<std::string> args) -> void {
                         }
 
                         if (!image_name.empty()) {
-                                config.rootfs.path = Utils::get_image_path(image_name);
+                                config.rootfs.path = Utils::get_image_path(image_name).string() + "/rootfs/";
                                 config.rootfs.read_only = false;
                         }
                 } catch (const std::exception& e) {
@@ -1802,18 +1981,20 @@ auto CommandLineHandler::create(std::span<std::string> args) -> void {
                         std::cerr << "Usage: quiver create [OPTIONS] IMAGE:TAG [COMMANDS...]\n";
                         return;
                 }
-                config = SpecGenerator::generate_default_rootless_spec(container_id, Utils::get_image_path(image_name));
+                config.rootfs.path = Utils::get_image_path(image_name).string() + "/rootfs/";
+                config.rootfs.read_only = false;
         }
 
         if (!custom_cmds.empty()) {
                 config.args.value = custom_cmds;
         }
         auto& container_db_manager{ContainerDbManager::get_instance()};
+        container_db_manager.init();
         ContainerDbObject db_object{};
         db_object.config = config;
         db_object.image = image_name;
         db_object.name = std::format("quiver_{}", config.container_id.substr(0, 6));
-        db_object.status = "created";
+        db_object.status = ContainerStatus::CREATED;
         db_object.boot_time = Utils::get_boot_time();
         db_object.created_at = std::format("{}", std::chrono::system_clock::now());
         container_db_manager.add_container(db_object);
@@ -1853,13 +2034,21 @@ auto CommandLineHandler::image(std::span<std::string> args) -> void {
                         auto image{image_db_manager.get_image(target)};
 
                         if (image) {
+                                auto get_raw_image_path = [](const std::string& name, const std::string& tag) {
+                                        std::string safe_repo = name;
+                                        if (safe_repo.find('/') == std::string::npos) safe_repo = "library/" + safe_repo;
+                                        std::replace(safe_repo.begin(), safe_repo.end(), '/', '_');
+                                        std::string safe_tag = tag;
+                                        std::replace(safe_tag.begin(), safe_tag.end(), ':', '_');
+                                        return fs::path(Utils::get_base_dir()) / "raw_images" / std::format("{}_{}", safe_repo, safe_tag);
+                                };
                                 auto& container_db_manager{ContainerDbManager::get_instance()};
                                 container_db_manager.init();
                                 auto containers{container_db_manager.get_all_container()};
                                 bool image_in_use{false};
                                 std::string image_full_name{std::format("{}:{}", image->name, image->tag)};
                                 for (const auto& container : containers) {
-                                        if (container.status == "running" || container.status == "paused") {
+                                        if (container.status == ContainerStatus::RUNNING || container.status == ContainerStatus::PAUSED) {
                                                 if (container.image == image_full_name ||
                                                     container.image == image->name ||
                                                     container.image == image->id ||
@@ -1876,9 +2065,13 @@ auto CommandLineHandler::image(std::span<std::string> args) -> void {
                                 }
 
                                 fs::path dir{Utils::get_image_path(std::format("{}_{}", image->name, image->tag))};
+                                fs::path raw_dir{get_raw_image_path(image->name, image->tag)};
                                 try {
                                         if (fs::exists(dir)) {
-                                                Utils::remove_directory(dir);
+                                                Utils::remove_directory(dir.string());
+                                        }
+                                        if (fs::exists(raw_dir)) {
+                                                Utils::remove_directory(raw_dir.string());
                                         }
                                         image_db_manager.remove_image(target);
                                         std::cout << "Deleted: " << target << '\n';
@@ -1890,6 +2083,54 @@ auto CommandLineHandler::image(std::span<std::string> args) -> void {
                                 std::cerr << std::format("Error: No such image: {}\n", target);
                         }
                 }
+        }
+        else if (args.front() == "prune") {
+                auto images = image_db_manager.get_all_images();
+                auto& container_db_manager{ContainerDbManager::get_instance()};
+                container_db_manager.init();
+                auto containers = container_db_manager.get_all_container();
+
+                auto get_raw_image_path = [](const std::string& name, const std::string& tag) {
+                        std::string safe_repo = name;
+                        if (safe_repo.find('/') == std::string::npos) safe_repo = "library/" + safe_repo;
+                        std::replace(safe_repo.begin(), safe_repo.end(), '/', '_');
+                        std::string safe_tag = tag;
+                        std::replace(safe_tag.begin(), safe_tag.end(), ':', '_');
+                        return fs::path(Utils::get_base_dir()) / "raw_images" / std::format("{}_{}", safe_repo, safe_tag);
+                };
+
+                int deleted_count = 0;
+                for (const auto& image : images) {
+                        bool image_in_use = false;
+                        std::string image_full_name = std::format("{}:{}", image.name, image.tag);
+                        for (const auto& container : containers) {
+                                if (container.image == image_full_name ||
+                                    container.image == image.name ||
+                                    container.image == image.id) {
+                                        image_in_use = true;
+                                        break;
+                                }
+                        }
+
+                        if (!image_in_use) {
+                                fs::path dir{Utils::get_image_path(std::format("{}_{}", image.name, image.tag))};
+                                fs::path raw_dir{get_raw_image_path(image.name, image.tag)};
+                                try {
+                                        if (fs::exists(dir)) {
+                                                Utils::remove_directory(dir.string());
+                                        }
+                                        if (fs::exists(raw_dir)) {
+                                                Utils::remove_directory(raw_dir.string());
+                                        }
+                                        image_db_manager.remove_image(image.id);
+                                        std::cout << "Deleted: " << image_full_name << '\n';
+                                        deleted_count++;
+                                } catch (const std::exception& e) {
+                                        std::cerr << std::format("Error: Failed to remove image '{}': {}\n", image_full_name, e.what());
+                                }
+                        }
+                }
+                std::cout << std::format("Total reclaimed space: {} image(s) deleted.\n", deleted_count);
         }
         else if (args.front() == "load") {
                 if (args.size() != 3) {
@@ -1946,7 +2187,7 @@ auto CommandLineHandler::image(std::span<std::string> args) -> void {
 
                 image_metadata.source = tar_path.filename().string();
                 image_db_manager.add_image(image_metadata);
-                double size_mb = static_cast<double>(image_metadata.size_bytes) / (1024.0 * 1024.0);
+                double size_mb{static_cast<double>(image_metadata.size_bytes) / (1024.0 * 1024.0)};
                 std::cout << std::format("Successfully loaded image {}:{} ({:.2f} MB)\n",
                                          image_metadata.name, image_metadata.tag, size_mb);
         }
@@ -2010,6 +2251,23 @@ auto CommandLineHandler::image(std::span<std::string> args) -> void {
                         std::cout << std::format("Successfully pulled Image '{}'\n", args[i]);
                 }
         }
+        else if (args.front() == "push") {
+                if (args.size() < 2) {
+                        std::cerr << "Error: No image specified.\n";
+                        Utils::print_usage();
+                        return;
+                }
+                auto& image_manager{ImageManager::get_instance()};
+                image_manager.init();
+                for (size_t i{1}; i < args.size(); ++i) {
+                        std::string error{};
+                        if (image_manager.push(args[i], error)) {
+                                std::cout << std::format("Successfully pushed Image '{}'\n", args[i]);
+                        } else {
+                                std::cerr << error << '\n';
+                        }
+                }
+        }
         else {
                 if (args.size() != 1) {
                         std::cerr << "Error: No or more than one image id specified.\n";
@@ -2065,7 +2323,7 @@ auto CommandLineHandler::restart(std::span<std::string> args) -> void {
         container_db_manager.init();
         auto& container_monitor{ContainerMonitor::get_instance()};
         auto container{container_db_manager.get_container(args[0])};
-        if (container && container->status == "running") {
+        if (container && container->status == ContainerStatus::RUNNING) {
                 auto cgroup_base_opt{get_cgroup_path(container->pid)};
                 if (cgroup_base_opt) {
                         fs::path cg_kill_path = cgroup_base_opt.value() / "cgroup.kill";
@@ -2093,7 +2351,7 @@ auto CommandLineHandler::restart(std::span<std::string> args) -> void {
                         }
                         for (int i{0}; i < 50; ++i) {
                                 auto check_container{container_db_manager.get_container(args[0])};
-                                if (check_container && check_container->status == "exited") {
+                                if (check_container && check_container->status == ContainerStatus::EXITED) {
                                         break;
                                 }
                                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -2176,7 +2434,7 @@ auto CommandLineHandler::mount(std::span<std::string> args) -> void {
                         return;
                 }
 
-                if (container->status == "running" || container->status == "paused") {
+                if (container->status == ContainerStatus::RUNNING || container->status == ContainerStatus::PAUSED) {
                         std::cerr << std::format("Warning: Container '{}' is running or paused. Volume changes will take effect on next restart.\n", target_id);
                 }
 
@@ -2225,7 +2483,7 @@ auto CommandLineHandler::mount(std::span<std::string> args) -> void {
                         std::cerr << std::format("Error: Container '{}' not found.\n", target_id);
                         return;
                 }
-                if (container->status == "running" || container->status == "paused") {
+                if (container->status == ContainerStatus::RUNNING || container->status == ContainerStatus::PAUSED) {
                         std::cerr << std::format("Warning: Container '{}' is running or paused. Volume changes will take effect on next restart.\n", target_id);
                 }
                 bool modified{false};
@@ -2285,7 +2543,7 @@ auto CommandLineHandler::exec(std::span<std::string> args) -> void {
         container_db_manager.init();
         auto container{container_db_manager.get_container(container_id)};
 
-        if (!container || container->status != "running") {
+        if (!container || container->status != ContainerStatus::RUNNING) {
                 std::cerr << "Error: Container not found or not running.\n";
                 return;
         }
@@ -2484,13 +2742,13 @@ auto CommandLineHandler::wait(std::span<std::string> args) -> void {
                                 break;
                         }
 
-                        if (container->status == "exited" || container->status == "stopped") {
+                        if (container->status == ContainerStatus::EXITED || container->status == ContainerStatus::STOPPED) {
                                 break;
                         }
 
-                        if (container->status == "running" && container->config.pid > 0) {
+                        if (container->status == ContainerStatus::RUNNING && container->config.pid > 0) {
                                 if (!Utils::is_process_alive(container->config.pid, container->config.container_id)) {
-                                        container->status = "exited";
+                                        container->status = ContainerStatus::EXITED;
                                         container->exit_code = 137;
                                         container_db_manager.update_container(arg, container.value());
                                         break;
@@ -2571,7 +2829,7 @@ auto CommandLineHandler::kill(std::span<std::string> args) -> void {
                         continue;
                 }
 
-                if (container->status != "running" && container->status != "paused") {
+                if (container->status != ContainerStatus::RUNNING && container->status != ContainerStatus::PAUSED) {
                         std::cerr << std::format("Error: Container '{}' is not running.\n", arg);
                         continue;
                 }
@@ -2579,7 +2837,7 @@ auto CommandLineHandler::kill(std::span<std::string> args) -> void {
                 if (container->config.pid <= 0) [[unlikely]] {
                         std::cerr << std::format("Error: Invalid PID ({}) in database. Marking container '{}' as exited.\n",
                                                  container->config.pid, arg);
-                        container->status = "exited";
+                        container->status = ContainerStatus::EXITED;
                         container_db_manager.update_container(arg, container.value());
                         continue;
                 }

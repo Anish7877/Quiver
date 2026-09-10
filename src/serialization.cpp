@@ -178,7 +178,6 @@ auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const Con
         auto io_weight_off{builder.CreateVector(io_weight_vec)};
         auto name_off{builder.CreateString(obj.name)};
         auto image_off{builder.CreateString(obj.image)};
-        auto status_off{builder.CreateString(obj.status)};
         auto created_at_off {builder.CreateString(obj.created_at)};
         auto final_filesystem_off{builder.CreateString(obj.config.final_filesystem)};
         auto cpusets_off{builder.CreateString(obj.cpuset_cpus)};
@@ -188,7 +187,7 @@ auto Serialization::serialize(flatbuffers::FlatBufferBuilder& builder, const Con
         meta_builder.add_config(config_off);
         meta_builder.add_name(name_off);
         meta_builder.add_image(image_off);
-        meta_builder.add_status(status_off);
+        meta_builder.add_status(static_cast<FB::ContainerStatus>(obj.status));
         meta_builder.add_exit_code(obj.exit_code);
         meta_builder.add_created_at(created_at_off);
         meta_builder.add_final_filesystem(final_filesystem_off);
@@ -211,7 +210,7 @@ auto Serialization::deserialize(const FB::ContainerMetadata* fb) -> ContainerDbO
         if (fb->name()) obj.name = fb->name()->str();
         if (fb->image()) obj.image = fb->image()->str();
         if (fb->monitor_pid()) obj.pid = fb->monitor_pid();
-        if (fb->status()) obj.status = fb->status()->str();
+        obj.status = static_cast<ContainerStatus>(fb->status());
         if (fb->boot_time()) obj.boot_time = fb->boot_time();
         if (fb->created_at()) obj.created_at = fb->created_at()->str();
         if (fb->cpu_quota()) obj.cpu_quota = fb->cpu_quota();
