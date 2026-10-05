@@ -165,8 +165,6 @@ touch ~/.config/systemd/user.conf
 sudo mkdir -p /etc/systemd/system/user@.service.d/
 echo -e "[Service]\nDelegate=cpu cpuset io memory pids" | sudo tee /etc/systemd/system/user@.service.d/delegate.conf > /dev/null
 
-sudo systemctl daemon-reload
-sudo systemctl restart user@$(id -u).service
 
 
 mkdir -p ~/.config/environment.d

@@ -206,10 +206,16 @@ auto Utils::change_owners(const fs::path& path, uid_t uid, gid_t gid) -> void {
 
 auto Utils::get_base_dir() -> fs::path {
         const char* home_dir{std::getenv("HOME")};
-        if (home_dir == nullptr) {
-                struct passwd* pw = getpwuid(getuid());
-                if (pw) home_dir = pw->pw_dir;
+        struct passwd* pw = getpwuid(getuid());
+
+        if (home_dir != nullptr && pw != nullptr) {
+                if (access(home_dir, W_OK) != 0) {
+                        home_dir = pw->pw_dir;
+                }
+        } else if (home_dir == nullptr && pw != nullptr) {
+                home_dir = pw->pw_dir;
         }
+
         std::string base{home_dir ? std::string(home_dir) : "/tmp"};
         return base + "/.quiver";
 }
@@ -257,15 +263,15 @@ auto Utils::get_log_path(std::string_view name) -> fs::path {
 }
 
 auto Utils::get_logger_command_queue_buf_name() -> std::string {
-        return "/log_command_queue";
+        return "/log_command_queue_" + get_username();
 }
 
 auto Utils::get_database_command_queue_buf_name() -> std::string {
-        return "/db_command_queue";
+        return "/db_command_queue_" + get_username();
 }
 
 auto Utils::get_value_heap_buf_name() -> std::string {
-        return "/value_heap";
+        return "/value_heap_" + get_username();
 }
 
 auto Utils::get_device_gid(const fs::path& device) -> gid_t {
@@ -391,7 +397,8 @@ auto Utils::spawn_new_consumer() -> pid_t {
                 close(null_fd);
         }
 
-        int fd{open("/tmp/quiver_job_processor.lock", O_CREAT | O_RDWR, 0644)};
+        fs::path lock_path = get_base_dir() / "quiver_job_processor.lock";
+        int fd{open(lock_path.c_str(), O_CREAT | O_RDWR, 0644)};
         if (fd == -1) {
                 close(sync_pipe[1]);
                 _exit(EXIT_FAILURE);

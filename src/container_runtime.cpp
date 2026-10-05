@@ -45,8 +45,8 @@ ContainerRuntime::ContainerRuntime(const ContainerConfig& config) : m_container_
         m_pty_session_manager = &PtySessionManager::get_instance();
         m_value_heap->map_buffer(Utils::get_value_heap_buf_name(), ValueHeap::VALUE_HEAP_SIZE, false);
         if (!m_value_heap->ok()) [[unlikely]] {
-                throw std::runtime_error(std::format("[{}] Container Runtime Error: failed to map value heap.\n",
-                                        m_container_config.container_id));
+                throw std::runtime_error(std::format("[{}] Container Runtime Error: failed to map value heap - {}\n",
+                                        m_container_config.container_id, m_value_heap->get_error()));
         }
         m_log_cmd_queue->map_buffer(Utils::get_logger_command_queue_buf_name(), false);
         if (!m_log_cmd_queue->ok()) [[unlikely]] {

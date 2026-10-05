@@ -11,6 +11,7 @@
 #include <immintrin.h>
 
 auto LoggerCommandQueue::map_buffer(const std::string& buf_name, bool is_consumer) -> void {
+        if (m_header != nullptr) return;
         int fd{-1};
         m_is_consumer = is_consumer;
         m_bufname = buf_name;

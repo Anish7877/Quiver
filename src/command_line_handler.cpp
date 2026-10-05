@@ -1644,12 +1644,6 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
 
 
         if (!tags.empty()) {
-                const char* home_dir{std::getenv("HOME")};
-                if (home_dir == nullptr) {
-                        struct passwd* pw = getpwuid(getuid());
-                        if (pw) home_dir = pw->pw_dir;
-                }
-
                 std::string primary_tag{tags[0]};
                 for (char& c : primary_tag) {
                         if (c == ':' || c == '/') {
@@ -1665,7 +1659,7 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                         tags[0] += ":latest";
                 }
 
-                final_dest_dir = fs::path(home_dir) / ".quiver" / "images" / primary_tag / "rootfs";
+                final_dest_dir = Utils::get_base_dir() / "images" / primary_tag / "rootfs";
                 if (fs::exists(final_dest_dir.parent_path() / "config.json")) {
                         std::cerr << std::format("Error: Image already exist with '{}'\n", tags[0]);
                         return;
@@ -1677,7 +1671,7 @@ auto CommandLineHandler::build(std::span<std::string> args) -> void {
                 exec_args.push_back("type=local,dest=" + final_dest_dir.string());
 
 
-                std::string raw_images_dir = (fs::path(home_dir) / ".quiver" / "raw_images").string();
+                std::string raw_images_dir = (Utils::get_base_dir() / "raw_images").string();
                 std::string safe_tag_name = tags[0];
                 std::replace(safe_tag_name.begin(), safe_tag_name.end(), '/', '_');
                 std::replace(safe_tag_name.begin(), safe_tag_name.end(), ':', '_');

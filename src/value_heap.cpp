@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_size, bool is_consumer) -> void {
+        if (m_header != nullptr) return;
         int fd{-1};
         m_is_consumer = is_consumer;
         m_buf_name = buf_name;
@@ -27,7 +28,7 @@ auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_siz
                 fd = shm_open(m_buf_name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0660);
                 if (fd == -1) [[unlikely]] {
                         m_ok = false;
-                        m_error = "Value Heap Error: failed to create shared memory.\n";
+                        m_error = std::format("Value Heap Error: failed to create shared memory - {}\n", std::strerror(errno));
                         return;
                 }
 
@@ -42,7 +43,7 @@ auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_siz
                 fd = shm_open(m_buf_name.c_str(), O_RDWR, 0660);
                 if (fd == -1) [[unlikely]] {
                         m_ok = false;
-                        m_error = "Value Heap Error: Worker failed to connect.\n";
+                        m_error = std::format("Value Heap Error: Worker failed to connect - {}\n", std::strerror(errno));
                         return;
                 }
         }
@@ -51,7 +52,7 @@ auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_siz
         if (header_addr == MAP_FAILED) [[unlikely]] {
                 close(fd);
                 m_ok = false;
-                m_error = "Value Heap Error: failed to map header memory.\n";
+                m_error = std::format("Value Heap Error: failed to map header memory - {}\n", std::strerror(errno));
                 return;
         }
 
@@ -60,7 +61,7 @@ auto ValueHeap::map_buffer(const std::string& buf_name, std::size_t physical_siz
                 close(fd);
                 munmap(header_addr, page_size);
                 m_ok = false;
-                m_error = "Value Heap Error: failed to reserve virtual memory.\n";
+                m_error = std::format("Value Heap Error: failed to reserve virtual memory - {}\n", std::strerror(errno));
                 return;
         }
 

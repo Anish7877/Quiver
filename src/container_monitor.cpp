@@ -29,6 +29,7 @@
 #include <sched.h>
 #include <stdexcept>
 #include <string>
+#include <sstream>
 #include <sys/ioctl.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
@@ -477,10 +478,10 @@ auto ContainerMonitor::run_monitor_parent() -> void {
         }
         if (network_required) {
                 m_container_config.net_pid = PastaNetwork::setup_networking(m_container_pid, m_container_config.networks);
-                bool network_ready{wait_for_network()};
-
-                if (!network_ready) [[unlikely]] {
-                        std::cerr << "\n[Monitor Error] Pasta failed to configure network within 1 second.\n";
+                if (m_container_config.net_pid <= 0 || !wait_for_network()) [[unlikely]] {
+                        std::cerr << "\n[Monitor Error] Pasta failed to configure network.\n";
+                        if (m_container_config.net_pid > 0)
+                                kill(m_container_config.net_pid, SIGTERM);
                         close(m_monitor_to_container_fd[1]);
                         _exit(EXIT_FAILURE);
                 }
@@ -568,6 +569,10 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                 m_cgroups_manager->stop();
                 if (m_container_config.net_pid > 0) {
                         kill(m_container_config.net_pid, SIGTERM);
+                        auto pid_path{std::format("/tmp/pasta-{}.pid", m_container_pid)};
+                        auto log_path{std::format("/tmp/pasta-{}.log", m_container_pid)};
+                        unlink(pid_path.c_str());
+                        unlink(log_path.c_str());
                 }
                 container_running.store(false, std::memory_order_release);
                 if (watchdog_thread.joinable()) {
@@ -589,7 +594,7 @@ auto ContainerMonitor::run_monitor_parent() -> void {
                                 FD_SET(m_socket_fd, &readfds);
                                 timeval tv{};
                                 tv.tv_sec = 0;
-                                tv.tv_usec = 100000; // 100ms timeout
+                                tv.tv_usec = 100000;
                                 int ret{select(m_socket_fd + 1, &readfds, nullptr, nullptr, &tv)};
                                 if (ret > 0) {
                                         int client_fd{accept(m_socket_fd, nullptr, nullptr)};
@@ -632,6 +637,10 @@ auto ContainerMonitor::run_monitor_parent() -> void {
         m_cgroups_manager->stop();
         if (m_container_config.net_pid > 0) {
                 kill(m_container_config.net_pid, SIGTERM);
+                auto pid_path{std::format("/tmp/pasta-{}.pid", m_container_pid)};
+                auto log_path{std::format("/tmp/pasta-{}.log", m_container_pid)};
+                unlink(pid_path.c_str());
+                unlink(log_path.c_str());
         }
 
         container_running.store(false, std::memory_order_release);
@@ -716,39 +725,80 @@ auto ContainerMonitor::resolve_namespaces() -> int {
 }
 
 auto ContainerMonitor::wait_for_network() -> bool {
-        bool network_ready{false};
-        int max_retries{200};
-        while (max_retries > 0) {
-                std::ifstream net_dev(std::format("/proc/{}/net/dev", m_container_pid));
-                if (net_dev.is_open()) {
-                        std::string line;
-                        std::getline(net_dev, line);
-                        std::getline(net_dev, line);
+        using clock = std::chrono::steady_clock;
+        auto deadline{clock::now() + std::chrono::seconds(5)};
+        auto backoff{std::chrono::milliseconds(1)};
+        constexpr auto max_backoff{std::chrono::milliseconds(50)};
 
-                        while (std::getline(net_dev, line)) {
-                                if (line.find("lo:") == std::string::npos &&
-                                                line.find("sit0:") == std::string::npos &&
-                                                line.find("tunl0:") == std::string::npos &&
-                                                line.find(":") != std::string::npos) {
-                                        network_ready = true;
-                                        break;
+        while (clock::now() < deadline) {
+                /* IPv4: /proc/<pid>/net/route has a header line, then data lines.
+                 * First whitespace-delimited token is the interface name. */
+                {
+                        std::ifstream route{std::format("/proc/{}/net/route", m_container_pid)};
+                        if (route.is_open()) {
+                                std::string line;
+                                std::getline(route, line); /* skip header */
+                                while (std::getline(route, line)) {
+                                        std::string iface;
+                                        std::istringstream iss{line};
+                                        if (iss >> iface) {
+                                                if (iface != "lo" && iface != "sit0" && iface != "tunl0") {
+                                                        return true;
+                                                }
+                                        }
                                 }
                         }
                 }
 
-                if (network_ready) {
-                        break;
+                /* IPv6: /proc/<pid>/net/ipv6_route has no header.  The interface
+                 * name is the last (10th) whitespace-delimited column.  Skip lo
+                 * entries and link-local (fe80::) routes (prefix in column 1). */
+                {
+                        std::ifstream route6{std::format("/proc/{}/net/ipv6_route", m_container_pid)};
+                        if (route6.is_open()) {
+                                std::string line;
+                                while (std::getline(route6, line)) {
+                                        std::istringstream iss{line};
+                                        std::string token;
+                                        std::string prefix;
+                                        std::string iface;
+                                        int col{0};
+                                        while (iss >> token) {
+                                                if (col == 0) prefix = token;
+                                                iface = token; /* last token seen */
+                                                ++col;
+                                        }
+                                        if (col < 10) continue;
+                                        if (iface == "lo") continue;
+                                        /* Skip link-local fe80:: routes. */
+                                        if (prefix.size() >= 4 &&
+                                                        (prefix[0] == 'f' || prefix[0] == 'F') &&
+                                                        (prefix[1] == 'e' || prefix[1] == 'E') &&
+                                                        prefix[2] == '8' && prefix[3] == '0') {
+                                                continue;
+                                        }
+                                        return true;
+                                }
+                        }
                 }
 
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                max_retries--;
+                std::this_thread::sleep_for(backoff);
+                backoff = std::min(backoff * 2, max_backoff);
         }
-        return network_ready;
+        return false;
 }
 
 auto ContainerMonitor::setup_uid_map() -> void {
         std::string username{Utils::get_username()};
         uid_t host_uid{getuid()};
+        if (host_uid == 0) {
+                std::ofstream uid_map(std::format("/proc/{}/uid_map", m_container_pid));
+                if (!uid_map) throw std::runtime_error("Failed to open uid_map");
+                uid_map << "0 0 4294967295\n";
+                uid_map.close();
+                return;
+        }
+
         auto ranges{Utils::parse_subuid(username)};
 
         if (ranges.empty()) {
@@ -767,6 +817,15 @@ auto ContainerMonitor::setup_uid_map() -> void {
 }
 
 auto ContainerMonitor::setup_gid_map() -> void {
+        uid_t host_gid{getgid()};
+        if (host_gid == 0) {
+                std::ofstream gid_map(std::format("/proc/{}/gid_map", m_container_pid));
+                if (!gid_map) throw std::runtime_error("Failed to open gid_map");
+                gid_map << "0 0 4294967295\n";
+                gid_map.close();
+                return;
+        }
+
         const char* newgidmap_path{"/usr/bin/newgidmap"};
         std::string payload{Utils::build_gid_map_payload(m_container_pid)};
         payload += Utils::get_gid_map_payload(m_container_config.devices);

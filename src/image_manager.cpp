@@ -230,15 +230,8 @@ static auto render_progress(const std::vector<std::string>& order, std::size_t p
 auto ImageManager::init() -> void {
         m_images_root = Utils::get_base_dir();
         Utils::ensure_dir(m_images_root);
-        const char* home_dir{std::getenv("HOME")};
-        if (home_dir == nullptr) {
-                struct passwd* pw = getpwuid(getuid());
-                if (pw) home_dir = pw->pw_dir;
-        }
-        if (home_dir) {
-                fs::path raw_images = fs::path(home_dir) / ".quiver" / "raw_images";
-                Utils::ensure_dir(raw_images);
-        }
+        fs::path raw_images = m_images_root / "raw_images";
+        Utils::ensure_dir(raw_images);
 }
 
 auto ImageManager::pull(const std::string& image_name, std::string& out_path, std::string& error) -> json {
@@ -300,21 +293,11 @@ auto ImageManager::pull(const std::string& image_name, std::string& out_path, st
                 return {};
         }
 
-        const char* home_dir{std::getenv("HOME")};
-        if (home_dir == nullptr) {
-                struct passwd* pw = getpwuid(getuid());
-                if (pw) home_dir = pw->pw_dir;
-        }
-        if (home_dir == nullptr) [[unlikely]] {
-                error = "HOME directory not found and could not be resolved.";
-                secure_zero(token);
-                return {};
-        }
         std::string safe_repo = repo;
         std::replace(safe_repo.begin(), safe_repo.end(), '/', '_');
         std::string safe_tag = tag;
         std::replace(safe_tag.begin(), safe_tag.end(), ':', '_');
-        fs::path temp_layout_dir = fs::path(home_dir) / ".quiver" / "raw_images" / std::format("{}_{}", safe_repo, safe_tag);
+        fs::path temp_layout_dir = Utils::get_base_dir() / "raw_images" / std::format("{}_{}", safe_repo, safe_tag);
 
         std::error_code ec{};
         fs::create_directories(temp_layout_dir / "blobs" / "sha256", ec);
@@ -809,20 +792,11 @@ auto ImageManager::push(const std::string& image_name, std::string& error) -> bo
                 return false;
         }
 
-        const char* home_dir{std::getenv("HOME")};
-        if (home_dir == nullptr) {
-                struct passwd* pw = getpwuid(getuid());
-                if (pw) home_dir = pw->pw_dir;
-        }
-        if (home_dir == nullptr) [[unlikely]] {
-                error = "Push Error: HOME directory not found and could not be resolved.";
-                return false;
-        }
         std::string safe_repo = repo;
         std::replace(safe_repo.begin(), safe_repo.end(), '/', '_');
         std::string safe_tag = tag;
         std::replace(safe_tag.begin(), safe_tag.end(), ':', '_');
-        fs::path layout_dir = fs::path(home_dir) / ".quiver" / "raw_images" / std::format("{}_{}", safe_repo, safe_tag);
+        fs::path layout_dir = Utils::get_base_dir() / "raw_images" / std::format("{}_{}", safe_repo, safe_tag);
 
         if (!fs::exists(layout_dir / "index.json")) {
                 error = std::format("Push Error: OCI layout for {} does not exist. Did you pull or build it first?", image_name);
