@@ -452,23 +452,6 @@ auto ContainerDetailsPage::refresh() -> void {
                     "QTableWidget::item:selected {"
                     "    background-color: #27272a;"
                     "}"
-                    "QScrollBar:vertical {"
-                    "    border: none;"
-                    "    background: transparent;"
-                    "    width: 6px;"
-                    "    margin: 0px;"
-                    "}"
-                    "QScrollBar::handle:vertical {"
-                    "    background: #3f3f46;"
-                    "    min-height: 20px;"
-                    "    border-radius: 3px;"
-                    "}"
-                    "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
-                    "    height: 0px;"
-                    "}"
-                    "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {"
-                    "    background: none;"
-                    "}"
                 );
 
                 QStringList headers = {"UID", "PID", "STAT", "CMD"};

@@ -278,7 +278,7 @@ auto MainWindow::setup_sidebar() -> void {
     auto* cli_status_btn { new QPushButton("  CLI: Offline") };
     cli_status_btn->setObjectName("CliStatusBtn");
     cli_status_btn->setProperty("expanded", true);
-    cli_status_btn->setStyleSheet("text-align: left; padding: 5px; color: #a1a1aa; background: transparent; border: none; font-size: 13px; font-weight: bold;");
+    cli_status_btn->setStyleSheet("text-align: left; padding: 10px 15px; margin: 2px 5px; color: #a1a1aa; background: transparent; border: none; font-size: 13px; font-weight: bold;");
     
     QString cli_path = resolve_path("Quiver/Quiver/build/release/quiver");
     if (QFile::exists(cli_path)) {
@@ -366,7 +366,7 @@ auto MainWindow::setup_sidebar() -> void {
 
     
     profile_btn->setIcon(get_circular_icon(current_avatar, 64));
-    profile_btn->setIconSize(QSize(26, 26)); 
+    profile_btn->setIconSize(QSize(20, 20)); 
     pimpl_->sidebar_layout_->addWidget(profile_btn);
 
 
@@ -386,6 +386,16 @@ auto MainWindow::setup_sidebar() -> void {
             profile_btn->setText("  " + new_name);
         }
     });
+
+    pimpl_->settings_btn_ = new QPushButton("  Settings");
+    pimpl_->settings_btn_->setObjectName("NavButton");
+    pimpl_->settings_btn_->setProperty("iconPath", ":/assets/icons/settings.svg");
+    pimpl_->settings_btn_->setProperty("navText", "  Settings");
+    pimpl_->settings_btn_->setProperty("expanded", true);
+    pimpl_->settings_btn_->setCursor(Qt::PointingHandCursor);
+    pimpl_->settings_btn_->setCheckable(true);
+    
+    pimpl_->sidebar_layout_->addWidget(pimpl_->settings_btn_);
 
 
     auto* auth_btn { new QPushButton("  Logout") };
@@ -434,17 +444,11 @@ auto MainWindow::setup_content() -> void {
     search_input->setObjectName("SearchBox");
     search_input->addAction(QIcon(":/assets/icons/gemini-svg.svg"), QLineEdit::LeadingPosition); 
 
-    pimpl_->settings_btn_ = new QPushButton("Settings");
-    pimpl_->settings_btn_->setObjectName("SettingsBtn");
-    pimpl_->settings_btn_->setCursor(Qt::PointingHandCursor);
-    pimpl_->settings_btn_->setFixedHeight(36);
-    pimpl_->settings_btn_->setCheckable(true); 
-
     top_layout->addWidget(search_input);
     top_layout->addStretch(); 
-    top_layout->addWidget(pimpl_->settings_btn_);
 
     main_v_layout->addWidget(pimpl_->top_bar_);
+    pimpl_->top_bar_->hide();
 
     
     auto* content_wrapper { new QWidget };

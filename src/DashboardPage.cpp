@@ -412,7 +412,7 @@ DashboardPage::DashboardPage(QWidget* parent)
     
     pimpl_->log_viewer_ = new QPlainTextEdit;
     pimpl_->log_viewer_->setReadOnly(true);
-    pimpl_->log_viewer_->setStyleSheet("QPlainTextEdit { background-color: #0d1117; color: #c9d1d9; font-family: monospace; border: 1px solid #30363d; border-radius: 4px; padding: 10px; }");
+    pimpl_->log_viewer_->setObjectName("LogViewer");
     right_layout->addWidget(pimpl_->log_viewer_);
 
     split_layout->addWidget(left_pane, 5);  
@@ -430,8 +430,9 @@ DashboardPage::DashboardPage(QWidget* parent)
     QDir().mkpath(QDir::homePath() + "/.quiver/logs");
     QFile dummy(log_path);
     if (!dummy.exists()) {
-        dummy.open(QIODevice::WriteOnly);
-        dummy.close();
+        if (dummy.open(QIODevice::WriteOnly)) {
+            dummy.close();
+        }
     }
     
     pimpl_->log_watcher_->addPath(log_path);
@@ -642,22 +643,18 @@ void DashboardPage::on_configs_loaded(const QJsonArray& configs) {
         auto* btn = new QPushButton;
         btn->setFixedSize(220, 90);
         btn->setCursor(Qt::PointingHandCursor);
-        btn->setStyleSheet(
-            "QPushButton { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #18181B, stop:1 #27272A); "
-            "border: 1px solid #3F3F46; border-radius: 12px; text-align: left; }"
-            "QPushButton:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #27272A, stop:1 #3F3F46); border-color: #F97316; }"
-        );
+        btn->setObjectName("QuickLaunchCard");
         
         auto* layout = new QVBoxLayout(btn);
         layout->setContentsMargins(15, 15, 15, 15);
         layout->setSpacing(6);
         
         auto* lbl_type = new QLabel("CONTAINER");
-        lbl_type->setStyleSheet("color: #F97316; font-size: 11px; font-weight: 800; letter-spacing: 1px;");
+        lbl_type->setObjectName("QLType");
         lbl_type->setAttribute(Qt::WA_TransparentForMouseEvents);
         
         auto* lbl_img = new QLabel(image);
-        lbl_img->setStyleSheet("color: #FAFAFA; font-size: 14px; font-weight: bold;");
+        lbl_img->setObjectName("QLImage");
         lbl_img->setAttribute(Qt::WA_TransparentForMouseEvents);
 
         QString created_str = config["created_at"].toString();
@@ -665,7 +662,7 @@ void DashboardPage::on_configs_loaded(const QJsonArray& configs) {
         QString formatted_date = dt.isValid() ? dt.toLocalTime().toString("MMM d, yyyy - h:mm AP") : "Unknown Date";
         
         auto* lbl_date = new QLabel(formatted_date);
-        lbl_date->setStyleSheet("color: #A1A1AA; font-size: 10px;");
+        lbl_date->setObjectName("QLDate");
         lbl_date->setAttribute(Qt::WA_TransparentForMouseEvents);
         
         layout->addWidget(lbl_type);

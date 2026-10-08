@@ -1005,6 +1005,19 @@ ImagesPage::ImagesPage(QWidget* parent)
     push_btn->setFixedSize(120, 36);
     push_btn->setCursor(Qt::PointingHandCursor);
     connect(push_btn, &QPushButton::clicked, this, [this]() {
+        if (AuthManager::get_instance().get_hub_username().isEmpty() || AuthManager::get_instance().get_hub_token().isEmpty()) {
+            CustomAlert alert(CustomAlert::Warning, "Hub Credentials Missing", "Please set up the Hub Credentials and update them in the Settings properly.", this);
+            if (alert.exec() == QDialog::Accepted) {
+                auto btns = this->window()->findChildren<QPushButton*>();
+                for (auto* btn : btns) {
+                    if (btn->property("navText").toString().contains("Settings")) {
+                        btn->click();
+                        break;
+                    }
+                }
+            }
+            return;
+        }
         PushImageDialog dialog(this);
         dialog.exec();
     });
@@ -1849,12 +1862,14 @@ SettingsPage::SettingsPage(QWidget* parent)
         auto* hub_user_lbl = new QLabel("Hub Username"); 
         hub_user_lbl->setObjectName("SettingsLabel");
         auto* hub_user_input = new QLineEdit;
+        hub_user_input->setPlaceholderText("Set a username");
         hub_user_input->setText(AuthManager::get_instance().get_hub_username());
         hub_user_input->setFixedHeight(36);
         
         auto* hub_token_lbl = new QLabel("Hub Token / Password"); 
         hub_token_lbl->setObjectName("SettingsLabel");
         auto* hub_token_input = new QLineEdit;
+        hub_token_input->setPlaceholderText("Set Token");
         hub_token_input->setText(AuthManager::get_instance().get_hub_token());
         hub_token_input->setEchoMode(QLineEdit::Password);
         hub_token_input->setFixedHeight(36);
@@ -2062,11 +2077,7 @@ connect(&AuthManager::get_instance(), &AuthManager::profile_updated, this, [save
         layout->addWidget(frame);
     };
 
-    make_group("RUNTIME", {
-                           { "Docker socket", "/var/run/docker.sock" },
-                           { "API version",   "v1.45"                },
-                           { "Runtime",       "runc"                 },
-                           });
+
     make_group("APPLICATION", {
                                { "Version",    "1.0.0"            },
                                { "Build",      "quiver-gui / C++" },

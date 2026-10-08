@@ -89,7 +89,12 @@ auto ToggleSwitch::paintEvent(QPaintEvent*) -> void {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     bool on { isChecked() };
-    QColor bg { on ? QColor{"#F97316"} : QColor{"#3F3F46"} };
+    
+    // Reliably determine light/dark mode by checking the global stylesheet
+    bool is_light = qApp->styleSheet().contains("(LIGHT MODE)");
+    QColor inactive_bg = is_light ? QColor{"#D4D4D8"} : QColor{"#3F3F46"};
+    
+    QColor bg { on ? QColor{"#F97316"} : inactive_bg };
     p.setPen(Qt::NoPen);
     p.setBrush(bg);
     p.drawRoundedRect(0, 0, width(), height(), 13, 13);
@@ -481,12 +486,7 @@ PullImageDialog::PullImageDialog(QWidget* parent)
     setFixedSize(450, 320); // slightly taller to accommodate tabs and load fields
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
 
-    setStyleSheet(
-        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
-        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
-        "QLineEdit:focus { border: 1px solid #f97316; }"
-        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
-    );
+
 
     
     auto* main_layout = new QVBoxLayout(this);
@@ -509,19 +509,13 @@ PullImageDialog::PullImageDialog(QWidget* parent)
     pimpl_->pull_btn_->setFixedHeight(32);
     pimpl_->pull_btn_->setCheckable(true);
     pimpl_->pull_btn_->setChecked(true);
-    pimpl_->pull_btn_->setStyleSheet(
-        "QPushButton { background: transparent; color: #a1a1aa; border: none; font-weight: bold; border-bottom: 2px solid transparent; }"
-        "QPushButton:checked { color: #f97316; border-bottom: 2px solid #f97316; }"
-    );
+    pimpl_->pull_btn_->setObjectName("UnderlineTabBtn");
     
     pimpl_->load_btn_ = new QPushButton("Load Image");
     pimpl_->load_btn_->setCursor(Qt::PointingHandCursor);
     pimpl_->load_btn_->setFixedHeight(32);
     pimpl_->load_btn_->setCheckable(true);
-    pimpl_->load_btn_->setStyleSheet(
-        "QPushButton { background: transparent; color: #a1a1aa; border: none; font-weight: bold; border-bottom: 2px solid transparent; }"
-        "QPushButton:checked { color: #f97316; border-bottom: 2px solid #f97316; }"
-    );
+    pimpl_->load_btn_->setObjectName("UnderlineTabBtn");
     
     tabs_layout->addWidget(pimpl_->pull_btn_);
     tabs_layout->addWidget(pimpl_->load_btn_);
@@ -783,12 +777,7 @@ BuildImageDialog::BuildImageDialog(QWidget* parent)
     setFixedSize(600, 750);
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
 
-    setStyleSheet(
-        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
-        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
-        "QLineEdit:focus { border: 1px solid #f97316; }"
-        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
-    );
+
 
 
     auto* main { new QVBoxLayout(this) };
@@ -823,7 +812,7 @@ BuildImageDialog::BuildImageDialog(QWidget* parent)
     pimpl_->scroll_area_->setWidgetResizable(true);
     pimpl_->scroll_area_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     pimpl_->scroll_area_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    pimpl_->scroll_area_->setStyleSheet("QScrollArea { border: none; background: transparent; } QScrollBar:vertical { background: transparent; width: 8px; border-radius: 4px; margin: 0px; } QScrollBar::handle:vertical { background: #52525B; border-radius: 4px; } QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }");
+    pimpl_->scroll_area_->setStyleSheet("QScrollArea { border: none; background: transparent; }");
     
     pimpl_->scroll_content_ = new QWidget;
     pimpl_->scroll_content_->setStyleSheet("background: transparent;");
@@ -1132,15 +1121,8 @@ CreateDialog::CreateDialog(QWidget* parent)
     setFixedSize(600, 820);
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
 
-    setStyleSheet(
-        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
-        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
-        "QLineEdit:focus { border: 1px solid #f97316; }"
-        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
-    );
-
-
     auto* main { new QVBoxLayout(this) };
+
     main->setContentsMargins(30, 30, 30, 30);
     main->setSpacing(15);
 
@@ -1202,7 +1184,7 @@ CreateDialog::CreateDialog(QWidget* parent)
     pimpl_->scroll_area_->setWidgetResizable(true);
     pimpl_->scroll_area_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     pimpl_->scroll_area_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    pimpl_->scroll_area_->setStyleSheet("QScrollArea { border: none; background: transparent; } QScrollBar:vertical { background: transparent; width: 8px; border-radius: 4px; margin: 0px; } QScrollBar::handle:vertical { background: #52525B; border-radius: 4px; } QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }");
+    pimpl_->scroll_area_->setStyleSheet("QScrollArea { border: none; background: transparent; }");
     
     pimpl_->scroll_content_ = new QWidget;
     pimpl_->scroll_content_->setStyleSheet("background: transparent;");
@@ -1251,13 +1233,6 @@ CreateDialog::CreateDialog(QWidget* parent)
     pimpl_->fs_combo_ = new QComboBox;
     pimpl_->fs_combo_->addItems({"OverlayFS", "Btrfs", "VFS"});
     pimpl_->fs_combo_->setFixedHeight(36);
-    pimpl_->fs_combo_->setStyleSheet(
-        "QComboBox { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
-        "QComboBox:focus { border: 1px solid #f97316; }"
-        "QComboBox::drop-down { border: none; width: 30px; }"
-        "QComboBox::down-arrow { image: none; }"
-        "QComboBox QAbstractItemView { background: #18181b; border: 1px solid #27272a; color: #fafafa; selection-background-color: #f97316; selection-color: white; outline: none; }"
-    );
     v1->addWidget(pimpl_->fs_combo_);
     auto* v2 { new QVBoxLayout };
     auto* persist_lbl { new QLabel("Interactions") };
@@ -1655,33 +1630,45 @@ auto CreateDialog::show_json()   -> void { pimpl_->stack_->setCurrentIndex(1); }
 
 auto CreateDialog::on_add_device() -> void {
     QDialog d(this);
-    d.setWindowTitle("Select Devices");
     d.setFixedSize(320, 380);
     d.setObjectName("SubDialog");
-    auto* l { new QVBoxLayout(&d) };
-    l->addWidget(new QLabel("Select multiple devices:"));
+    d.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+    d.setAttribute(Qt::WA_TranslucentBackground);
+    
+    auto* base_l { new QVBoxLayout(&d) };
+    base_l->setContentsMargins(10, 10, 10, 10);
+    auto* bg_frame { new QFrame(&d) };
+    bg_frame->setObjectName("PopupFrame");
+    base_l->addWidget(bg_frame);
+    
+    auto* l { new QVBoxLayout(bg_frame) };
+    l->setContentsMargins(20, 20, 20, 20);
+    l->setSpacing(15);
+    
+    auto* title_lbl { new QLabel("Select Devices") };
+    title_lbl->setObjectName("PageTitle");
+    title_lbl->setAlignment(Qt::AlignCenter);
+    l->addWidget(title_lbl);
+
     auto* list { new QListWidget(&d) };
+    list->setObjectName("PopupList");
     list->setSelectionMode(QAbstractItemView::MultiSelection);
     list->addItems({"/dev/ttyUSB0 (Serial)", "/dev/video0 (Camera)",
                     "/dev/dri/card0 (GPU)",  "/dev/snd (Audio)",
                     "/dev/sda1 (Drive)"});
     l->addWidget(list);
-    // auto* box { new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d) };
-    // connect(box, &QDialogButtonBox::accepted, &d, &QDialog::accept);
-    // connect(box, &QDialogButtonBox::rejected, &d, &QDialog::reject);
-    // l->addWidget(box);
 
     auto* btns { new QHBoxLayout };
     auto* cancel_btn { new QPushButton("Cancel") };
     cancel_btn->setObjectName("SecondaryBtn");
     cancel_btn->setCursor(Qt::PointingHandCursor);
-    cancel_btn->setFixedSize(110, 34); // Nice and wide!
+    cancel_btn->setFixedSize(110, 34); 
     connect(cancel_btn, &QPushButton::clicked, &d, &QDialog::reject);
 
     auto* ok_btn { new QPushButton("OK") };
     ok_btn->setObjectName("PrimaryButton");
     ok_btn->setCursor(Qt::PointingHandCursor);
-    ok_btn->setFixedSize(110, 34); // Nice and wide!
+    ok_btn->setFixedSize(110, 34); 
     connect(ok_btn, &QPushButton::clicked, &d, &QDialog::accept);
 
     btns->addStretch();
@@ -1702,15 +1689,7 @@ auto CreateDialog::on_add_volume() -> void {
     d.setFixedSize(400, 300);
     d.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
 
-    d.setStyleSheet(
-        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
-        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
-        "QLineEdit:focus { border: 1px solid #f97316; }"
-        "QPushButton#SecondaryBtn { background: transparent; color: #fafafa; border: 1px solid #3f3f46; border-radius: 6px; font-weight: bold; }"
-        "QPushButton#SecondaryBtn:hover { background: #27272a; }"
-        "QPushButton#PrimaryButton { background: #ea580c; color: #fafafa; border: none; border-radius: 6px; font-weight: bold; }"
-        "QPushButton#PrimaryButton:hover { background: #f97316; }"
-    );
+    d.setObjectName("SubDialog");
     d.setAttribute(Qt::WA_TranslucentBackground);
     
     auto* base_l { new QVBoxLayout(&d) };
@@ -1723,11 +1702,11 @@ auto CreateDialog::on_add_volume() -> void {
     l->setSpacing(15);
     
     auto* title_lbl { new QLabel("Add Volume") };
-    title_lbl->setStyleSheet("color: #fafafa; font-size: 16px; font-weight: bold;");
+    title_lbl->setObjectName("PageTitle");
     l->addWidget(title_lbl);
     
     auto* host_lbl { new QLabel("Host Path:") };
-    host_lbl->setStyleSheet("color: #a1a1aa; font-size: 13px;");
+    host_lbl->setObjectName("SettingsLabel");
     l->addWidget(host_lbl);
     
     auto* host_row { new QHBoxLayout };
@@ -1747,7 +1726,7 @@ auto CreateDialog::on_add_volume() -> void {
     l->addLayout(host_row);
     
     auto* cont_lbl { new QLabel("Container Path:") };
-    cont_lbl->setStyleSheet("color: #a1a1aa; font-size: 13px;");
+    cont_lbl->setObjectName("SettingsLabel");
     l->addWidget(cont_lbl);
     
     auto* cont_input { new QLineEdit };
@@ -1787,12 +1766,7 @@ auto CreateDialog::on_add_port() -> void {
     d.setFixedSize(360, 240);
     d.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
 
-    d.setStyleSheet(
-        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
-        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
-        "QLineEdit:focus { border: 1px solid #f97316; }"
-        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
-    );
+    d.setObjectName("SubDialog");
 
     d.setAttribute(Qt::WA_TranslucentBackground);
     auto* base_l { new QVBoxLayout(&d) };
@@ -1808,7 +1782,7 @@ auto CreateDialog::on_add_port() -> void {
     title_lbl->setObjectName("PageTitle");
     l->addWidget(title_lbl);
     auto* label { new QLabel("Enter mapping (HostPort:ContainerPort)") };
-    label->setStyleSheet("color: #a1a1aa; font-size: 13px;");
+    label->setObjectName("SettingsLabel");
     l->addWidget(label);
     auto* port_input { new QLineEdit(bg_frame) };
     port_input->setPlaceholderText("e.g. 8080:80");
@@ -1861,12 +1835,7 @@ CustomAlert::CustomAlert(Type type, const QString& title, const QString& message
 {
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
 
-    setStyleSheet(
-        "QDialog { background: #18181b; border: 1px solid #27272a; border-radius: 8px; }"
-        "QLineEdit { background: #09090b; border: 1px solid #27272a; border-radius: 6px; color: #fafafa; padding: 0 10px; font-size: 13px; }"
-        "QLineEdit:focus { border: 1px solid #f97316; }"
-        "QLineEdit:read-only { background: #1f1f22; color: #a1a1aa; }"
-    );
+
 
     setFixedSize(400, 200);
     setObjectName("CreateDialog");
@@ -1880,7 +1849,7 @@ CustomAlert::CustomAlert(Type type, const QString& title, const QString& message
     layout->addWidget(pimpl_->title_lbl_);
 
     pimpl_->msg_lbl_ = new QLabel(message);
-    pimpl_->msg_lbl_->setStyleSheet("color: #a1a1aa; font-size: 14px;");
+    pimpl_->msg_lbl_->setObjectName("SettingsLabel");
     pimpl_->msg_lbl_->setWordWrap(true);
     layout->addWidget(pimpl_->msg_lbl_);
     layout->addStretch();
@@ -2043,7 +2012,7 @@ UpdateDialog::UpdateDialog(const Quiver::Container& c, QWidget* parent)
     scroll_area->setWidgetResizable(true);
     scroll_area->setObjectName("DialogScroll");
     scroll_area->setFrameShape(QFrame::NoFrame);
-    scroll_area->setStyleSheet("QScrollArea { border: none; background: transparent; } QScrollBar:vertical { background: transparent; width: 8px; border-radius: 4px; margin: 0px; } QScrollBar::handle:vertical { background: #52525B; border-radius: 4px; } QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }");
+    scroll_area->setStyleSheet("QScrollArea { border: none; background: transparent; }");
     
     auto* scroll_content = new QWidget;
     scroll_content->setObjectName("DialogScrollContent");
