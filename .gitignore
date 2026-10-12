@@ -3,6 +3,7 @@
 /test_out/*
 /gen_schemas/*
 /third_party/*
+/dockerd_crash_logs/*
 *.txt
 *.sh
 Quiverfile
@@ -10,6 +11,7 @@ Quiverfile
 !setup.sh
 !third_party/CLI11.hpp
 Dockerfile
+run.log
 
 .vscode/**
 *.code-workspace

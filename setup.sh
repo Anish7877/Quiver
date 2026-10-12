@@ -21,7 +21,7 @@ LOCAL_INSTALL="$BUILD_ROOT/third_party/install"
 CONAN_VENV="$BUILD_ROOT/.conan_venv"
 
 echo "=== Step 1: Checking Host Build Tools ==="
-REQUIRED_TOOLS="autoconf automake libtool cmake python3 git newuidmap newgidmap fuse-overlayfs passt pkg-config"
+REQUIRED_TOOLS="autoconf automake libtool cmake python3 git newuidmap newgidmap fuse-overlayfs pkg-config curl make tar"
 
 for tool in $REQUIRED_TOOLS; do
         if ! command -v $tool >/dev/null 2>&1; then
@@ -48,6 +48,20 @@ for tool in $REQUIRED_TOOLS; do
         fi
         fi
 done
+
+if ! pkg-config --exists libsystemd; then
+        echo "Warning: 'libsystemd-dev' is not installed. Attempting to install automatically..."
+        if command -v apt-get >/dev/null 2>&1; then
+                sudo apt-get update && sudo apt-get install -y libsystemd-dev
+        elif command -v dnf >/dev/null 2>&1; then
+                sudo dnf install -y systemd-devel
+        elif command -v pacman >/dev/null 2>&1; then
+                sudo pacman -S --noconfirm systemd-libs
+        else
+                echo "Error: libsystemd development files (libsystemd-dev / systemd-devel) are not installed and package manager is not supported."
+                exit 1
+        fi
+fi
 
 echo "=== Step 2: Setting up Conan Environment ==="
 if [ ! -d "$CONAN_VENV" ]; then
@@ -148,16 +162,202 @@ else
         sudo make install
 fi
 
-echo "=== Step 5: Syncing Pkg-Config for Makefile ==="
+echo "=== Step 5: Installing pasta from Git ==="
+if command -v pasta >/dev/null 2>&1; then
+        echo "--- pasta is already installed. Skipping. ---"
+else
+        echo "--- Building and installing pasta ---"
+        mkdir -p "$BUILD_ROOT/third_party/src"
+        if [ ! -d "$BUILD_ROOT/third_party/src/passt" ]; then
+                git clone https://passt.top/passt "$BUILD_ROOT/third_party/src/passt"
+        fi
+        cd "$BUILD_ROOT/third_party/src/passt"
+        make -j$(nproc)
+        sudo make install
+        cd "$BUILD_ROOT"
+fi
+
+if ! command -v pasta >/dev/null 2>&1; then
+        echo "Error: pasta installation failed."
+        exit 1
+fi
+
+echo "=== Step 6: Installing umoci ==="
+if command -v umoci >/dev/null 2>&1; then
+        echo "--- umoci is already installed. Skipping. ---"
+else
+        echo "--- Installing umoci ---"
+        INSTALLED=false
+
+        if command -v apt-get >/dev/null 2>&1; then
+                echo "Attempting to install umoci via apt-get..."
+                if sudo apt-get update && sudo apt-get install -y umoci; then
+                        INSTALLED=true
+                fi
+        elif command -v pacman >/dev/null 2>&1; then
+                echo "Attempting to install umoci via pacman..."
+                if sudo pacman -S --noconfirm umoci; then
+                        INSTALLED=true
+                fi
+        elif command -v dnf >/dev/null 2>&1; then
+                echo "Attempting to install umoci via dnf..."
+                if sudo dnf install -y umoci; then
+                        INSTALLED=true
+                fi
+        fi
+
+        if [ "$INSTALLED" = false ] || ! command -v umoci >/dev/null 2>&1; then
+                echo "Installing umoci standalone binary from GitHub releases..."
+                ARCH="$(uname -m)"
+                case "$ARCH" in
+                        x86_64)        UMOCI_ARCH="amd64" ;;
+                        aarch64|arm64) UMOCI_ARCH="arm64" ;;
+                        *)             echo "Error: Unsupported architecture for umoci: $ARCH"; exit 1 ;;
+                esac
+                sudo curl -fsSL -o /usr/local/bin/umoci "https://github.com/opencontainers/umoci/releases/download/v0.6.0/umoci.linux.${UMOCI_ARCH}"
+                sudo chmod +x /usr/local/bin/umoci
+        fi
+fi
+
+if ! command -v umoci >/dev/null 2>&1; then
+        echo "Error: umoci installation failed."
+        exit 1
+fi
+
+echo "=== Step 7: Installing crun ==="
+if command -v crun >/dev/null 2>&1; then
+        echo "--- crun is already installed. Skipping. ---"
+else
+        echo "--- Installing crun ---"
+        INSTALLED=false
+
+        if command -v apt-get >/dev/null 2>&1; then
+                echo "Attempting to install crun via apt-get..."
+                if sudo apt-get update && sudo apt-get install -y crun; then
+                        INSTALLED=true
+                fi
+        elif command -v pacman >/dev/null 2>&1; then
+                echo "Attempting to install crun via pacman..."
+                if sudo pacman -S --noconfirm crun; then
+                        INSTALLED=true
+                fi
+        elif command -v dnf >/dev/null 2>&1; then
+                echo "Attempting to install crun via dnf..."
+                if sudo dnf install -y crun; then
+                        INSTALLED=true
+                fi
+        fi
+
+        if [ "$INSTALLED" = false ] || ! command -v crun >/dev/null 2>&1; then
+                echo "Installing crun standalone binary from GitHub releases..."
+                ARCH="$(uname -m)"
+                case "$ARCH" in
+                        x86_64)        CRUN_ARCH="linux-amd64" ;;
+                        aarch64|arm64) CRUN_ARCH="linux-arm64" ;;
+                        *)             echo "Error: Unsupported architecture for crun: $ARCH"; exit 1 ;;
+                esac
+                sudo curl -fsSL -o /usr/local/bin/crun "https://github.com/containers/crun/releases/download/1.20/crun-1.20-${CRUN_ARCH}"
+                sudo chmod +x /usr/local/bin/crun
+        fi
+fi
+
+if ! command -v crun >/dev/null 2>&1; then
+        echo "Error: crun installation failed."
+        exit 1
+fi
+
+echo "=== Step 8: Installing rootlesskit ==="
+if command -v rootlesskit >/dev/null 2>&1; then
+        echo "--- rootlesskit is already installed. Skipping. ---"
+else
+        echo "--- Installing rootlesskit ---"
+        INSTALLED=false
+
+        if command -v apt-get >/dev/null 2>&1; then
+                echo "Attempting to install rootlesskit via apt-get..."
+                if sudo apt-get update && sudo apt-get install -y rootlesskit; then
+                        INSTALLED=true
+                fi
+        elif command -v pacman >/dev/null 2>&1; then
+                echo "Attempting to install rootlesskit via pacman..."
+                if sudo pacman -S --noconfirm rootlesskit; then
+                        INSTALLED=true
+                fi
+        elif command -v dnf >/dev/null 2>&1; then
+                echo "Attempting to install rootlesskit via dnf..."
+                if sudo dnf install -y rootlesskit; then
+                        INSTALLED=true
+                fi
+        fi
+
+        if [ "$INSTALLED" = false ] || ! command -v rootlesskit >/dev/null 2>&1; then
+                echo "Installing rootlesskit from GitHub releases..."
+                ARCH="$(uname -m)"
+                case "$ARCH" in
+                        x86_64)        RLK_ARCH="x86_64" ;;
+                        aarch64|arm64) RLK_ARCH="aarch64" ;;
+                        *)             echo "Error: Unsupported architecture for rootlesskit: $ARCH"; exit 1 ;;
+                esac
+                sudo curl -fsSL "https://github.com/rootless-containers/rootlesskit/releases/download/v2.3.2/rootlesskit-${RLK_ARCH}.tar.gz" | sudo tar -C /usr/local/bin -xz
+        fi
+fi
+
+if ! command -v rootlesskit >/dev/null 2>&1; then
+        echo "Error: rootlesskit installation failed."
+        exit 1
+fi
+
+echo "=== Step 9: Installing buildkit ==="
+if command -v buildkitd >/dev/null 2>&1 && command -v buildctl >/dev/null 2>&1; then
+        echo "--- buildkit (buildkitd and buildctl) is already installed. Skipping. ---"
+else
+        echo "--- Installing buildkit ---"
+        INSTALLED=false
+
+        if command -v pacman >/dev/null 2>&1; then
+                echo "Attempting to install buildkit via pacman..."
+                if sudo pacman -S --noconfirm buildkit; then
+                        INSTALLED=true
+                fi
+        elif command -v apt-get >/dev/null 2>&1; then
+                echo "Attempting to install buildkit via apt-get..."
+                if sudo apt-get update && sudo apt-get install -y buildkit; then
+                        INSTALLED=true
+                fi
+        elif command -v dnf >/dev/null 2>&1; then
+                echo "Attempting to install buildkit via dnf..."
+                if sudo dnf install -y buildkit; then
+                        INSTALLED=true
+                fi
+        fi
+
+        if [ "$INSTALLED" = false ] || ! command -v buildkitd >/dev/null 2>&1 || ! command -v buildctl >/dev/null 2>&1; then
+                echo "Installing buildkit from GitHub releases..."
+                ARCH="$(uname -m)"
+                case "$ARCH" in
+                        x86_64)        BK_ARCH="linux-amd64" ;;
+                        aarch64|arm64) BK_ARCH="linux-arm64" ;;
+                        *)             echo "Error: Unsupported architecture for buildkit: $ARCH"; exit 1 ;;
+                esac
+                sudo curl -fsSL "https://github.com/moby/buildkit/releases/download/v0.20.0/buildkit-v0.20.0.${BK_ARCH}.tar.gz" | sudo tar -C /usr/local -xz
+        fi
+fi
+
+if ! command -v buildkitd >/dev/null 2>&1 || ! command -v buildctl >/dev/null 2>&1; then
+        echo "Error: buildkit installation failed."
+        exit 1
+fi
+
+echo "=== Step 10: Syncing Pkg-Config for Makefile ==="
 find "$LOCAL_INSTALL" -name "*.pc" -exec cp {} "$BUILD_DIR/" \;
 
 if [ "$HAS_SPACES" = true ]; then
-        echo "=== Step 6: Cleaning up symlink and patching configurations ==="
+        echo "=== Step 11: Cleaning up symlink and patching configurations ==="
         find "$ROOT_DIR" -type f \( -name "*.pc" -o -name "*.la" -o -name "*.cmake" \) -exec sed -i "s|$BUILD_ROOT|$ROOT_DIR|g" {} +
         rm -f "$SAFE_LINK"
 fi
 
-echo "=== Step 6: Setting up Rootless Cgroups (Universal Shell) ==="
+echo "=== Step 12: Setting up Rootless Cgroups (Universal Shell) ==="
 
 mkdir -p ~/.config/systemd
 touch ~/.config/systemd/user.conf
